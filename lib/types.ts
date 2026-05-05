@@ -78,4 +78,10 @@ export interface Project {
   lifts: LiftsConfig;
   notes: string;
   parcel?: ParcelInfo;
+  /** Optional plot geometry for 3D massing. If unset, falls back to a square derived from plotArea. */
+  plotFrontage?: number;
+  plotDepth?: number;
+  setbackFront?: number;
+  setbackRear?: number;
+  setbackSide?: number;
 }

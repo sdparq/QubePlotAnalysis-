@@ -11,9 +11,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@react-three/drei": "9.114.0",
+    "@react-three/fiber": "8.17.10",
     "next": "14.2.18",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "three": "0.169.0",
     "exceljs": "4.4.0",
     "pdfjs-dist": "4.7.76",
     "zustand": "4.5.5"
@@ -22,6 +25,7 @@
     "@types/node": "20.14.10",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
+    "@types/three": "0.169.0",
     "autoprefixer": "10.4.19",
     "postcss": "8.4.39",
     "tailwindcss": "3.4.4",
