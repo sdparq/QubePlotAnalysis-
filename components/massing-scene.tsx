@@ -2,61 +2,61 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, Edges, Line } from "@react-three/drei";
 import { useMemo } from "react";
+import * as THREE from "three";
+import type { Point } from "@/lib/geom";
+import { polygonBBox, polygonCentroid } from "@/lib/geom";
 
 export interface SceneProps {
-  /** Plot dimensions in metres */
-  frontage: number;
-  depth: number;
-  /** Setbacks in metres */
-  setbackFront: number;
-  setbackRear: number;
-  setbackSide: number;
-  /** Building dimensions */
-  buildingWidth: number;
-  buildingDepth: number;
+  plot: Point[];           // Plot polygon in plot-local metres
+  buildable: Point[];      // Buildable polygon (after setbacks)
+  building: Point[];       // Building footprint polygon
   buildingHeight: number;
-  /** Number of floors (for floor-line markers) */
   numFloors: number;
   floorHeight: number;
+  showFrontMarker?: boolean;
 }
 
 export default function MassingScene(props: SceneProps) {
-  const {
-    frontage, depth,
-    setbackFront, setbackRear, setbackSide,
-    buildingWidth, buildingDepth, buildingHeight,
-    numFloors, floorHeight,
-  } = props;
+  const { plot, buildable, building, buildingHeight, numFloors, floorHeight, showFrontMarker } = props;
 
-  const buildableW = Math.max(0, frontage - 2 * setbackSide);
-  const buildableD = Math.max(0, depth - setbackFront - setbackRear);
-  // Front of plot is at +Z, rear at -Z. Buildable area shifts toward rear if front setback is bigger.
-  const buildableCenterZ = (setbackRear - setbackFront) / 2;
+  const bbox = useMemo(() => polygonBBox(plot), [plot]);
+  const centroid = useMemo(() => polygonCentroid(plot), [plot]);
 
-  // Building centred within the buildable area
-  const buildingX = 0;
-  const buildingZ = buildableCenterZ;
-
-  const maxDim = Math.max(frontage, depth, buildingHeight, 30);
+  // Camera framing
+  const maxDim = Math.max(bbox.w, bbox.h, buildingHeight, 30);
   const camDist = maxDim * 1.4;
 
-  // Floor lines as horizontal lines at each floor level
+  // Floor lines around the building, drawn as polylines tracing the footprint
   const floorLines = useMemo(() => {
-    const lines: number[] = [];
-    for (let i = 1; i < numFloors; i++) lines.push(i * floorHeight);
-    return lines;
-  }, [numFloors, floorHeight]);
+    if (building.length < 3) return [];
+    const out: number[] = [];
+    for (let i = 1; i < numFloors; i++) out.push(i * floorHeight);
+    return out;
+  }, [numFloors, floorHeight, building.length]);
+
+  // Three.js Shape from polygon (in 2D)
+  const plotShape = useMemo(() => polyToShape(plot), [plot]);
+  const buildableShape = useMemo(() => (buildable.length >= 3 ? polyToShape(buildable) : null), [buildable]);
+  const buildingShape = useMemo(() => (building.length >= 3 ? polyToShape(building) : null), [building]);
+
+  // Outlines as Line points
+  const plotOutline = useMemo(() => closedPoints(plot, 0.02), [plot]);
 
   return (
     <Canvas
       shadows
-      camera={{ position: [camDist * 0.85, camDist * 0.7, camDist], fov: 40, near: 0.5, far: maxDim * 10 }}
+      camera={{
+        position: [centroid.x + camDist * 0.85, camDist * 0.7, -centroid.y + camDist],
+        fov: 40,
+        near: 0.5,
+        far: maxDim * 10,
+      }}
       style={{ background: "#f6f4ee" }}
       dpr={[1, 2]}
     >
       <ambientLight intensity={0.55} />
       <directionalLight
-        position={[maxDim * 0.6, maxDim * 1.4, maxDim * 0.4]}
+        position={[centroid.x + maxDim * 0.6, maxDim * 1.4, -centroid.y + maxDim * 0.4]}
         intensity={1.1}
         castShadow
         shadow-mapSize={[2048, 2048]}
@@ -66,7 +66,6 @@ export default function MassingScene(props: SceneProps) {
         shadow-camera-bottom={-maxDim}
       />
 
-      {/* Infinite ground grid */}
       <Grid
         args={[maxDim * 4, maxDim * 4]}
         cellSize={1}
@@ -77,60 +76,57 @@ export default function MassingScene(props: SceneProps) {
         sectionColor="#b8b5ad"
         fadeDistance={maxDim * 3}
         fadeStrength={1.4}
-        position={[0, -0.001, 0]}
+        position={[centroid.x, -0.001, -centroid.y]}
         infiniteGrid
       />
 
-      {/* Plot footprint (full parcel) */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
-        <planeGeometry args={[frontage, depth]} />
-        <meshStandardMaterial color="#ede9df" />
-      </mesh>
+      {/* Plot footprint */}
+      {plotShape && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
+          <shapeGeometry args={[plotShape]} />
+          <meshStandardMaterial color="#ede9df" />
+        </mesh>
+      )}
 
-      {/* Buildable area (within setbacks) */}
-      {buildableW > 0 && buildableD > 0 && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, buildableCenterZ]} receiveShadow>
-          <planeGeometry args={[buildableW, buildableD]} />
+      {/* Buildable area */}
+      {buildableShape && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
+          <shapeGeometry args={[buildableShape]} />
           <meshStandardMaterial color="#bccab0" opacity={0.9} transparent />
         </mesh>
       )}
 
       {/* Plot outline */}
-      <PlotOutline frontage={frontage} depth={depth} />
+      <Line points={plotOutline} color="#3f5135" lineWidth={1.6} />
 
-      {/* Building mass */}
-      {buildingWidth > 0 && buildingDepth > 0 && buildingHeight > 0 && (
-        <mesh
-          position={[buildingX, buildingHeight / 2, buildingZ]}
-          castShadow
-          receiveShadow
-        >
-          <boxGeometry args={[buildingWidth, buildingHeight, buildingDepth]} />
+      {/* Building extruded mass */}
+      {buildingShape && buildingHeight > 0 && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} castShadow receiveShadow>
+          <extrudeGeometry args={[buildingShape, { depth: buildingHeight, bevelEnabled: false }]} />
           <meshStandardMaterial color="#647d57" roughness={0.6} metalness={0.1} />
           <Edges color="#33422e" threshold={1} />
         </mesh>
       )}
 
-      {/* Floor lines as faint stripes around the building */}
+      {/* Floor-level wireframe rings */}
       {floorLines.map((y, i) => (
-        <FloorLine
+        <Line
           key={i}
-          y={y}
-          width={buildingWidth}
-          depth={buildingDepth}
-          x={buildingX}
-          z={buildingZ}
+          points={closedPoints(building, 0).map(([x, _, z]) => [x, y, z] as [number, number, number])}
+          color="#33422e"
+          lineWidth={0.8}
+          transparent
+          opacity={0.45}
         />
       ))}
 
-      {/* Compass marker — small triangle on the front edge */}
-      <FrontMarker frontage={frontage} depth={depth} />
+      {showFrontMarker && <FrontMarker plot={plot} />}
 
       <OrbitControls
         enablePan
         enableZoom
         enableRotate
-        target={[0, buildingHeight / 3, 0]}
+        target={[centroid.x, buildingHeight / 3, -centroid.y]}
         maxPolarAngle={Math.PI / 2 - 0.03}
         minDistance={5}
         maxDistance={maxDim * 5}
@@ -139,39 +135,34 @@ export default function MassingScene(props: SceneProps) {
   );
 }
 
-function PlotOutline({ frontage, depth }: { frontage: number; depth: number }) {
-  const hw = frontage / 2;
-  const hd = depth / 2;
-  const points: [number, number, number][] = [
-    [-hw, 0.02, -hd],
-    [hw, 0.02, -hd],
-    [hw, 0.02, hd],
-    [-hw, 0.02, hd],
-    [-hw, 0.02, -hd],
-  ];
-  return <Line points={points} color="#3f5135" lineWidth={1.6} />;
+/** Convert 2D polygon (Point[]) into a THREE.Shape */
+function polyToShape(points: Point[]): THREE.Shape | null {
+  if (points.length < 3) return null;
+  const s = new THREE.Shape();
+  s.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) s.lineTo(points[i].x, points[i].y);
+  s.closePath();
+  return s;
 }
 
-function FloorLine({
-  y, width, depth, x, z,
-}: { y: number; width: number; depth: number; x: number; z: number }) {
-  const hw = width / 2;
-  const hd = depth / 2;
-  const points: [number, number, number][] = [
-    [x - hw, y, z - hd],
-    [x + hw, y, z - hd],
-    [x + hw, y, z + hd],
-    [x - hw, y, z + hd],
-    [x - hw, y, z - hd],
-  ];
-  return <Line points={points} color="#33422e" lineWidth={0.8} transparent opacity={0.45} />;
+/** 2D polygon -> closed 3D points on the ground plane (y = elevation, world coords).
+ *  Uses the standard scene rotation: 2D (x,y) -> world (x, elev, -y).
+ */
+function closedPoints(points: Point[], elev: number): [number, number, number][] {
+  if (points.length === 0) return [];
+  const result: [number, number, number][] = points.map((p) => [p.x, elev, -p.y]);
+  result.push([points[0].x, elev, -points[0].y]);
+  return result;
 }
 
-function FrontMarker({ frontage, depth }: { frontage: number; depth: number }) {
-  // Triangle pointing into the plot from the front (positive Z) edge
-  const size = Math.min(frontage, depth) * 0.04;
+function FrontMarker({ plot }: { plot: Point[] }) {
+  // Front edge of the plot is at minimum 2D y. Marker sits beyond it (-y direction = +Z world).
+  const bbox = polygonBBox(plot);
+  const cx = (bbox.minX + bbox.maxX) / 2;
+  const size = Math.max(0.4, Math.min(bbox.w, bbox.h) * 0.04);
+  const z = -(bbox.minY - size); // 2D y = bbox.minY -> world Z = -minY (positive)
   return (
-    <mesh position={[0, 0.05, depth / 2 + size]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh position={[cx, 0.05, z]} rotation={[-Math.PI / 2, 0, 0]}>
       <coneGeometry args={[size, size * 1.6, 3]} />
       <meshBasicMaterial color="#647d57" />
     </mesh>

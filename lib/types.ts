@@ -79,9 +79,14 @@ export interface Project {
   notes: string;
   parcel?: ParcelInfo;
   /** Optional plot geometry for 3D massing. If unset, falls back to a square derived from plotArea. */
+  plotMode?: "rectangular" | "polygon";
   plotFrontage?: number;
   plotDepth?: number;
   setbackFront?: number;
   setbackRear?: number;
   setbackSide?: number;
+  /** Polygon vertices in plot-local metres. Used when plotMode === "polygon". */
+  plotPolygon?: { x: number; y: number }[];
+  /** Uniform setback applied to every polygon edge (m). */
+  setbackUniform?: number;
 }
