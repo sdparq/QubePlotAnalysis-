@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
 import { fmt2, fmtPct } from "@/lib/format";
+import PlanTrace from "./plan-trace";
 import {
   type Point,
   edgeLengths,
@@ -221,6 +222,31 @@ export default function MassingTab() {
           </div>
         </div>
       </div>
+
+      {project.parcel && (
+        <div className="card">
+          <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="section-title">Reference plan</h2>
+              <p className="section-sub">
+                Source drawing and traced polygon used to build the 3D massing.
+                {!project.parcel.calibration && " Calibrate the scale in the Plot tab to lock the geometry in metres."}
+              </p>
+            </div>
+            {project.parcel.calibration && (
+              <span className="tag-ok">Calibrated · {project.parcel.calibration.metres.toFixed(2)} m ref</span>
+            )}
+          </div>
+          <div className="border border-ink-200 bg-bone-50 overflow-hidden max-w-3xl mx-auto">
+            <PlanTrace
+              parcel={project.parcel}
+              mode="idle"
+              tracePolygonPx={project.parcel.tracePolygonPx}
+              calibration={project.parcel.calibration}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

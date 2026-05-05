@@ -56,6 +56,16 @@ export interface ParcelInfo {
   fileType: string;
   imageDataUrl: string;
   uploadedAt: number;
+  imageNaturalWidth?: number;
+  imageNaturalHeight?: number;
+  /** Plot polygon vertices traced on top of the drawing, in image-pixel coords. */
+  tracePolygonPx?: { x: number; y: number }[];
+  /** Calibration: two points in pixel coords plus their real-world distance (m). */
+  calibration?: {
+    p1: { x: number; y: number };
+    p2: { x: number; y: number };
+    metres: number;
+  };
 }
 
 export interface Project {
