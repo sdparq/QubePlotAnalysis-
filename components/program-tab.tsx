@@ -11,6 +11,14 @@ export default function ProgramTab() {
   const cellValue = (floor: number, typologyId: string) =>
     project.program.find((c) => c.floor === floor && c.typologyId === typologyId)?.count ?? 0;
 
+  const shortName = (n: string) =>
+    n
+      .replace(/\bType\s+/i, "")
+      .replace(/\bStudio\b/i, "Std")
+      .replace(/\bPenthouse\b/i, "PH")
+      .replace(/\s+/g, " ")
+      .trim();
+
   if (project.typologies.length === 0) {
     return (
       <div className="card text-center text-ink-500 italic py-10">
@@ -40,7 +48,7 @@ export default function ProgramTab() {
                 <th className="!py-3">Floor</th>
                 {project.typologies.map((t) => (
                   <th key={t.id} className="text-right !px-1 align-bottom" title={t.name}>
-                    <span className="block break-words leading-tight">{t.name}</span>
+                    <span className="block leading-tight whitespace-nowrap">{shortName(t.name)}</span>
                   </th>
                 ))}
                 <th className="text-right !px-1">Units</th>
