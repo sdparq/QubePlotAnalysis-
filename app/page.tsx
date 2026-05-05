@@ -11,13 +11,13 @@ import ResultsTab from "@/components/results-tab";
 import HeaderBar from "@/components/header-bar";
 
 const TABS = [
-  { id: "setup", label: "1. Setup" },
-  { id: "typologies", label: "2. Typologies" },
-  { id: "program", label: "3. Program" },
-  { id: "common", label: "4. Common Areas" },
-  { id: "parking", label: "5. Parking" },
-  { id: "lifts", label: "6. Lifts" },
-  { id: "results", label: "Results & Export" },
+  { id: "setup", num: "01", label: "Setup" },
+  { id: "typologies", num: "02", label: "Typologies" },
+  { id: "program", num: "03", label: "Program" },
+  { id: "common", num: "04", label: "Common Areas" },
+  { id: "parking", num: "05", label: "Parking" },
+  { id: "lifts", num: "06", label: "Lifts" },
+  { id: "results", num: "—", label: "Results" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -33,24 +33,29 @@ export default function Page() {
   return (
     <div className="min-h-screen flex flex-col">
       <HeaderBar />
-      <nav className="border-b border-slate-200 bg-white">
-        <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`whitespace-nowrap px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === t.id
-                  ? "border-brand-600 text-brand-700"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+      <nav className="border-b border-ink-200 bg-bone-50">
+        <div className="max-w-7xl mx-auto px-6 flex gap-0 overflow-x-auto">
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`whitespace-nowrap px-5 py-4 text-[12px] font-medium border-b-2 transition-colors flex items-baseline gap-2 ${
+                  active
+                    ? "border-qube-500 text-ink-900"
+                    : "border-transparent text-ink-500 hover:text-ink-900"
+                }`}
+                style={{ letterSpacing: "0.10em", textTransform: "uppercase" }}
+              >
+                <span className={`text-[10px] ${active ? "text-qube-600" : "text-ink-400"}`}>{t.num}</span>
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
         </div>
       </nav>
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
         {tab === "setup" && <SetupTab />}
         {tab === "typologies" && <TypologiesTab />}
         {tab === "program" && <ProgramTab />}
@@ -59,8 +64,11 @@ export default function Page() {
         {tab === "lifts" && <LiftsTab />}
         {tab === "results" && <ResultsTab />}
       </main>
-      <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500">
-        Qube Plot Analysis · {project.name} · Auto-saved locally
+      <footer className="border-t border-ink-200 bg-bone-50 py-4">
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between text-[10.5px] uppercase tracking-[0.18em] text-ink-500">
+          <span>QUBE · Plot Feasibility</span>
+          <span>{project.name} · Auto-saved locally</span>
+        </div>
       </footer>
     </div>
   );

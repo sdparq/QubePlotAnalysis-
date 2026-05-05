@@ -9,9 +9,11 @@ export default function SetupTab() {
   return (
     <div className="grid gap-6">
       <div className="card">
-        <h2 className="section-title">Project</h2>
-        <p className="section-sub mb-4">Identification and plot data.</p>
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="mb-5">
+          <h2 className="section-title">Project</h2>
+          <p className="section-sub">Identification and plot data.</p>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <Field label="Project name">
             <input className="cell-input" value={project.name} onChange={(e) => patch({ name: e.target.value })} />
           </Field>
@@ -39,10 +41,12 @@ export default function SetupTab() {
       </div>
 
       <div className="card">
-        <h2 className="section-title">Notes</h2>
-        <p className="section-sub mb-4">Free-form observations, issues, conclusions.</p>
+        <div className="mb-5">
+          <h2 className="section-title">Notes</h2>
+          <p className="section-sub">Free-form observations, issues, conclusions.</p>
+        </div>
         <textarea
-          className="cell-input min-h-[120px]"
+          className="cell-input min-h-[140px] leading-relaxed"
           rows={6}
           value={project.notes}
           onChange={(e) => patch({ notes: e.target.value })}
@@ -55,8 +59,8 @@ export default function SetupTab() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1">
-      <span className="text-xs font-medium text-slate-600">{label}</span>
+    <label className="grid gap-2">
+      <span className="eyebrow">{label}</span>
       {children}
     </label>
   );
@@ -68,11 +72,11 @@ function NumInput({ value, onChange, step = 1, suffix }: { value: number; onChan
       <input
         type="number"
         step={step}
-        className="cell-input pr-8"
+        className="cell-input pr-9"
         value={Number.isFinite(value) ? value : 0}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
       />
-      {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">{suffix}</span>}
+      {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-400">{suffix}</span>}
     </div>
   );
 }
