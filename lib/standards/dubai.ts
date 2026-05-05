@@ -1,0 +1,56 @@
+export const DUBAI_STANDARDS = {
+  parking: {
+    ratiosByCategory: {
+      Studio: 1,
+      "1BR": 1,
+      "2BR": 1,
+      "3BR": 2,
+      "4BR": 2,
+      Penthouse: 2,
+    },
+    prmPercent: 0.02,
+    visitorsPercent: 0,
+  },
+  waste: {
+    generationKgPer100sqmPerDay: 12,
+    storageDays: 2,
+    densityKgPerM3: 150,
+    container: { capacityM3: 2.5, widthM: 1.37, lengthM: 2.04 },
+    separationM: 0.15,
+    frontClearanceM: 0.6,
+  },
+  lifts: {
+    handlingPctStandard: 0.05,
+    handlingPctPremium: 0.07,
+    unitsPerLiftRule: 75,
+    dcdMinLifts: 3,
+    dcdMinUnitsThreshold: 100,
+    weightPerPerson: 75,
+    capacityFactor: 0.8,
+    secondsPerStop: 8,
+    handlingWindowSec: 300,
+  },
+  fire: {
+    maxTravelDistanceM: 61,
+  },
+} as const;
+
+export const DUBAI_ZONES = [
+  "Downtown Dubai",
+  "Dubai Marina",
+  "Business Bay",
+  "Jumeirah Village Circle (JVC)",
+  "Jumeirah Village Triangle (JVT)",
+  "Production City (IMPZ)",
+  "Dubai Hills Estate",
+  "Al Furjan",
+  "Discovery Gardens",
+  "Town Square",
+  "Dubailand",
+  "Meydan",
+  "Bur Dubai",
+  "Deira",
+  "Al Barsha",
+  "JLT",
+  "Other",
+];
