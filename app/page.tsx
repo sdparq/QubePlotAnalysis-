@@ -17,7 +17,7 @@ const TABS = [
   { id: "common", num: "04", label: "Common Areas" },
   { id: "parking", num: "05", label: "Parking" },
   { id: "lifts", num: "06", label: "Lifts" },
-  { id: "results", num: "—", label: "Results" },
+  { id: "results", num: "07", label: "Results" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -31,43 +31,46 @@ export default function Page() {
   if (!hydrated) return null;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col overflow-x-hidden">
       <HeaderBar />
-      <nav className="border-b border-ink-200 bg-bone-50">
-        <div className="max-w-7xl mx-auto px-6 flex gap-0 overflow-x-auto">
-          {TABS.map((t) => {
-            const active = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`whitespace-nowrap px-5 py-4 text-[12px] font-medium border-b-2 transition-colors flex items-baseline gap-2 ${
-                  active
-                    ? "border-qube-500 text-ink-900"
-                    : "border-transparent text-ink-500 hover:text-ink-900"
-                }`}
-                style={{ letterSpacing: "0.10em", textTransform: "uppercase" }}
-              >
-                <span className={`text-[10px] ${active ? "text-qube-600" : "text-ink-400"}`}>{t.num}</span>
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
+      <nav className="border-b border-ink-200 bg-white sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex flex-wrap gap-x-1 gap-y-0">
+            {TABS.map((t) => {
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`relative px-4 py-4 text-[13px] font-semibold transition-colors flex items-baseline gap-2 ${
+                    active ? "text-ink-900" : "text-ink-500 hover:text-ink-900"
+                  }`}
+                  style={{ letterSpacing: "0.06em" }}
+                >
+                  <span className={`text-[10px] font-medium ${active ? "text-qube-600" : "text-ink-400"}`}>{t.num}</span>
+                  <span className="uppercase">{t.label}</span>
+                  {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-qube-500" />}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </nav>
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
-        {tab === "setup" && <SetupTab />}
-        {tab === "typologies" && <TypologiesTab />}
-        {tab === "program" && <ProgramTab />}
-        {tab === "common" && <CommonAreasTab />}
-        {tab === "parking" && <ParkingTab />}
-        {tab === "lifts" && <LiftsTab />}
-        {tab === "results" && <ResultsTab />}
+      <main className="flex-1 w-full">
+        <div className="max-w-7xl mx-auto px-6 py-8 min-w-0">
+          {tab === "setup" && <SetupTab />}
+          {tab === "typologies" && <TypologiesTab />}
+          {tab === "program" && <ProgramTab />}
+          {tab === "common" && <CommonAreasTab />}
+          {tab === "parking" && <ParkingTab />}
+          {tab === "lifts" && <LiftsTab />}
+          {tab === "results" && <ResultsTab />}
+        </div>
       </main>
       <footer className="border-t border-ink-200 bg-bone-50 py-4">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between text-[10.5px] uppercase tracking-[0.18em] text-ink-500">
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between gap-4 text-[10.5px] uppercase tracking-[0.18em] text-ink-500">
           <span>QUBE · Plot Feasibility</span>
-          <span>{project.name} · Auto-saved locally</span>
+          <span className="truncate">{project.name} · Auto-saved locally</span>
         </div>
       </footer>
     </div>

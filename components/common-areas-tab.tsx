@@ -34,16 +34,16 @@ export default function CommonAreasTab() {
           </div>
           <button className="btn btn-primary" onClick={addNew}>+ Add element</button>
         </div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
-              <col style={{ width: "26%" }} />
-              <col style={{ width: 130 }} />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 130 }} />
+              <col style={{ width: "22%" }} />
               <col style={{ width: 100 }} />
+              <col style={{ width: 70 }} />
+              <col style={{ width: 100 }} />
+              <col style={{ width: 60 }} />
               <col />
-              <col style={{ width: 100 }} />
+              <col style={{ width: 80 }} />
             </colgroup>
             <thead>
               <tr>

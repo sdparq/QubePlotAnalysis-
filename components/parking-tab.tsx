@@ -22,21 +22,21 @@ export default function ParkingTab() {
           </div>
           <button className="btn btn-primary" onClick={() => upsertP({ id: `pk-${Date.now()}`, name: "New level", standard: 0, prm: 0 })}>+ Add level</button>
         </div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
-              <col style={{ width: "26%" }} />
-              <col style={{ width: 130 }} />
-              <col style={{ width: 160 }} />
-              <col style={{ width: 110 }} />
-              <col />
+              <col style={{ width: "22%" }} />
               <col style={{ width: 100 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 80 }} />
+              <col />
+              <col style={{ width: 80 }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Level</th>
                 <th className="text-right">Standard</th>
-                <th className="text-right">PRM / accessible</th>
+                <th className="text-right">PRM</th>
                 <th className="text-right">Total</th>
                 <th>Notes</th>
                 <th></th>
@@ -73,14 +73,14 @@ export default function ParkingTab() {
           </div>
           <button className="btn btn-secondary btn-xs" onClick={() => upsertU({ id: `ou-${Date.now()}`, name: "New use", netArea: 0, spacesPer100sqm: 0 })}>+ Add other use</button>
         </div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
-              <col style={{ width: "32%" }} />
-              <col style={{ width: 160 }} />
-              <col style={{ width: 180 }} />
+              <col />
               <col style={{ width: 130 }} />
-              <col style={{ width: 100 }} />
+              <col style={{ width: 150 }} />
+              <col style={{ width: 110 }} />
+              <col style={{ width: 80 }} />
             </colgroup>
             <thead>
               <tr>
@@ -113,13 +113,13 @@ export default function ParkingTab() {
         <div className="mb-5">
           <h2 className="section-title">Required vs available</h2>
         </div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
               <col />
-              <col style={{ width: 130 }} />
-              <col style={{ width: 160 }} />
-              <col style={{ width: 130 }} />
+              <col style={{ width: 110 }} />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 110 }} />
             </colgroup>
             <thead>
               <tr>

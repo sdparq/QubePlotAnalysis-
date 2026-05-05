@@ -45,17 +45,17 @@ export default function TypologiesTab() {
         {project.typologies.length === 0 ? (
           <div className="text-sm text-ink-500 italic py-10 text-center">No typologies yet — add one to start.</div>
         ) : (
-          <div className="overflow-x-auto -mx-6 px-6">
-            <table className="tbl">
+          <div>
+            <table className="tbl w-full table-fixed">
               <colgroup>
-                <col style={{ width: "22%" }} />
-                <col style={{ width: 130 }} />
-                <col style={{ width: 130 }} />
-                <col style={{ width: 130 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 120 }} />
                 <col />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 80 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 80 }} />
               </colgroup>
               <thead>
                 <tr>

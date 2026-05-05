@@ -44,8 +44,8 @@ export default function LiftsTab() {
 
       <div className="card">
         <div className="mb-5"><h2 className="section-title">Population by floor</h2></div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
               <col />
               <col style={{ width: 130 }} />
@@ -78,8 +78,8 @@ export default function LiftsTab() {
 
       <div className="card">
         <div className="mb-5"><h2 className="section-title">Lifts required</h2></div>
-        <div className="overflow-x-auto -mx-6 px-6">
-          <table className="tbl">
+        <div>
+          <table className="tbl w-full table-fixed">
             <colgroup>
               <col />
               <col style={{ width: 130 }} />
