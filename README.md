@@ -54,6 +54,19 @@ lib/
 
 State auto-saves to localStorage. Use *Export JSON* / *Import JSON* to share analyses between users.
 
+## Deploy to Netlify
+
+The app is configured as a fully static export — works on any static host, no server needed.
+
+1. In Netlify: **Add new site → Import from Git** → pick this repo and the `claude/site-analysis-web-app-pGKod` branch (or `main` once merged).
+2. Netlify reads `netlify.toml` automatically:
+   - Build command: `npm run build`
+   - Publish directory: `out`
+   - Node 20
+3. Click *Deploy*.
+
+That's it — no plugin needed, no env vars.
+
 ## Adding new normatives
 
 Standards live in `lib/standards/dubai.ts`. Add new emirates as separate files (e.g. `sharjah.ts`) and inject via the active project — no further changes needed in calc modules if rules follow the same shape.
