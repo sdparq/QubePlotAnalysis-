@@ -19,9 +19,6 @@ export default function ProgramTab() {
     );
   }
 
-  // Use a compact matrix layout: typology headers rotated -45° so many fit
-  const compact = project.typologies.length > 6;
-
   return (
     <div className="grid gap-6">
       <div className="card">
@@ -42,20 +39,8 @@ export default function ProgramTab() {
               <tr>
                 <th className="!py-3">Floor</th>
                 {project.typologies.map((t) => (
-                  <th key={t.id} className={`text-right !px-1 ${compact ? "!py-3 align-bottom" : ""}`}>
-                    {compact ? (
-                      <div className="flex justify-end">
-                        <span
-                          className="inline-block whitespace-nowrap origin-bottom-right"
-                          style={{ transform: "rotate(-45deg) translate(0.4em, 0)", transformOrigin: "right bottom" }}
-                          title={t.name}
-                        >
-                          {t.name}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="block break-words">{t.name}</span>
-                    )}
+                  <th key={t.id} className="text-right !px-1 align-bottom" title={t.name}>
+                    <span className="block break-words leading-tight">{t.name}</span>
                   </th>
                 ))}
                 <th className="text-right !px-1">Units</th>
