@@ -1,9 +1,9 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
 
 export default function SetupTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const patch = useStore((s) => s.patch);
 
   return (

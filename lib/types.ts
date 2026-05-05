@@ -52,6 +52,9 @@ export interface LiftsConfig {
 }
 
 export interface Project {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
   name: string;
   zone: string;
   use: "RESIDENTIAL";

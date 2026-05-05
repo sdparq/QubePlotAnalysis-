@@ -1,11 +1,11 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { computeParking } from "@/lib/calc/parking";
 import { fmt0 } from "@/lib/format";
 import type { OtherUse } from "@/lib/types";
 
 export default function ParkingTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const upsertP = useStore((s) => s.upsertParking);
   const removeP = useStore((s) => s.removeParking);
   const upsertU = useStore((s) => s.upsertOtherUse);

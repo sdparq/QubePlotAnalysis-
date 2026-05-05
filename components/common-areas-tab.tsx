@@ -1,10 +1,10 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { fmt2 } from "@/lib/format";
 import type { CommonArea } from "@/lib/types";
 
 export default function CommonAreasTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const upsert = useStore((s) => s.upsertCommonArea);
   const remove = useStore((s) => s.removeCommonArea);
 

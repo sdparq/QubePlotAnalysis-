@@ -1,11 +1,11 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { exportToExcel } from "@/lib/export-xlsx";
+import ProjectSwitcher from "./project-switcher";
 
 export default function HeaderBar() {
-  const project = useStore((s) => s.project);
-  const loadSample = useStore((s) => s.loadSample);
-  const reset = useStore((s) => s.reset);
+  const project = useProject();
+  const importProject = useStore((s) => s.importProject);
 
   function handleExportJSON() {
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
@@ -23,7 +23,7 @@ export default function HeaderBar() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        useStore.getState().setProject(JSON.parse(reader.result as string));
+        importProject(JSON.parse(reader.result as string));
       } catch {
         alert("Invalid JSON");
       }
@@ -32,11 +32,10 @@ export default function HeaderBar() {
     e.target.value = "";
   }
 
-  const linkBtn = "px-3 py-2 text-[11px] font-medium uppercase tracking-[0.10em] text-bone-100/85 hover:text-qube-300 transition-colors";
   const ghostBtn = "px-3 py-2 text-[11px] font-medium uppercase tracking-[0.10em] border border-bone-100/25 text-bone-100 hover:border-bone-100/60 hover:bg-ink-800 transition-colors";
 
   return (
-    <header className="bg-ink-900 text-bone-100">
+    <header className="bg-ink-900 text-bone-100 relative z-30">
       <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap min-w-0">
         <div className="flex items-center gap-5 min-w-0">
           <div className="flex items-center gap-3">
@@ -49,20 +48,18 @@ export default function HeaderBar() {
             </div>
           </div>
           <div className="hidden sm:block w-px h-10 bg-bone-100/20" />
-          <div className="leading-tight min-w-0">
-            <div className="eyebrow text-bone-200/60">Plot Feasibility</div>
-            <div className="text-base font-medium text-bone-100 truncate max-w-[280px] sm:max-w-[400px]">{project.name || "Untitled Project"}</div>
-          </div>
+          <ProjectSwitcher />
         </div>
         <div className="flex items-center gap-1 flex-wrap">
-          <button className={linkBtn} onClick={loadSample}>Load sample</button>
-          <button className={linkBtn} onClick={() => { if (confirm("Discard current analysis and start blank?")) reset(); }}>New blank</button>
           <label className={`${ghostBtn} cursor-pointer`}>
             Import
             <input type="file" accept="application/json" className="hidden" onChange={handleImportJSON} />
           </label>
           <button className={ghostBtn} onClick={handleExportJSON}>Export JSON</button>
-          <button className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 transition-colors" onClick={() => exportToExcel(project)}>Export Excel</button>
+          <button
+            className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
+            onClick={() => exportToExcel(project)}
+          >Export Excel</button>
         </div>
       </div>
     </header>

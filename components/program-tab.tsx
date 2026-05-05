@@ -1,10 +1,10 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
 import { fmt0, fmt2 } from "@/lib/format";
 
 export default function ProgramTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const setCell = useStore((s) => s.setProgramCell);
   const program = computeProgram(project);
 

@@ -1,5 +1,5 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import type { Typology, UnitCategory } from "@/lib/types";
 
 const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penthouse"];
@@ -12,7 +12,7 @@ const DEFAULT_OCCUPANCY: Record<UnitCategory, number> = {
 };
 
 export default function TypologiesTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const upsert = useStore((s) => s.upsertTypology);
   const remove = useStore((s) => s.removeTypology);
 

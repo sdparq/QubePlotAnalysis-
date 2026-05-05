@@ -1,10 +1,10 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { computeLifts } from "@/lib/calc/lifts";
 import { fmt0, fmt2 } from "@/lib/format";
 
 export default function LiftsTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const patch = useStore((s) => s.patch);
   const r = computeLifts(project);
   const cfg = project.lifts;

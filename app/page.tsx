@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useStore } from "@/lib/store";
+import { useProject } from "@/lib/store";
 import SetupTab from "@/components/setup-tab";
 import TypologiesTab from "@/components/typologies-tab";
 import ProgramTab from "@/components/program-tab";
@@ -25,7 +25,7 @@ type TabId = (typeof TABS)[number]["id"];
 export default function Page() {
   const [tab, setTab] = useState<TabId>("setup");
   const [hydrated, setHydrated] = useState(false);
-  const project = useStore((s) => s.project);
+  const project = useProject();
 
   useEffect(() => setHydrated(true), []);
   if (!hydrated) return null;

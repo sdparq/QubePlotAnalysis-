@@ -68,6 +68,9 @@ const COMMON_AREAS: CommonArea[] = [
 ];
 
 export const PRODUCTION_CITY_SAMPLE: Project = {
+  id: "production-city-sample",
+  createdAt: 0,
+  updatedAt: 0,
   name: "Production City — Sample",
   zone: "Production City (IMPZ)",
   use: "RESIDENTIAL",
@@ -97,8 +100,16 @@ export const PRODUCTION_CITY_SAMPLE: Project = {
   notes: "",
 };
 
+export function newId(prefix = "p"): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 export function emptyProject(name = "New Project"): Project {
+  const now = Date.now();
   return {
+    id: newId(),
+    createdAt: now,
+    updatedAt: now,
     name,
     zone: "Other",
     use: "RESIDENTIAL",

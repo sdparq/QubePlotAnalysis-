@@ -1,10 +1,10 @@
 "use client";
-import { useStore } from "@/lib/store";
+import { useStore, useProject } from "@/lib/store";
 import { analyze } from "@/lib/calc";
 import { fmt0, fmt2, fmtPct } from "@/lib/format";
 
 export default function ResultsTab() {
-  const project = useStore((s) => s.project);
+  const project = useProject();
   const r = analyze(project);
   const p = r.program, k = r.parking, l = r.lifts, g = r.garbage;
 
