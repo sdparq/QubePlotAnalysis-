@@ -51,6 +51,28 @@ export interface LiftsConfig {
   dcdMinUnitsThreshold: number;
 }
 
+export interface ParcelInfo {
+  fileName: string;
+  fileType: string;
+  imageDataUrl: string;
+  ocrText: string;
+  summary: ParcelSummary;
+  extractedAt: number;
+}
+
+export interface ParcelSummary {
+  plotNumber?: string;
+  community?: string;
+  sector?: string;
+  plotAreaM2?: number;
+  far?: number;
+  heightM?: number;
+  setbackFrontM?: number;
+  setbackSideM?: number;
+  setbackRearM?: number;
+  permittedUse?: string;
+}
+
 export interface Project {
   id: string;
   createdAt: number;
@@ -70,4 +92,5 @@ export interface Project {
   otherUses: OtherUse[];
   lifts: LiftsConfig;
   notes: string;
+  parcel?: ParcelInfo;
 }

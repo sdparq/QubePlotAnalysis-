@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useProject } from "@/lib/store";
+import PlotTab from "@/components/plot-tab";
 import SetupTab from "@/components/setup-tab";
 import TypologiesTab from "@/components/typologies-tab";
 import ProgramTab from "@/components/program-tab";
@@ -11,6 +12,7 @@ import ResultsTab from "@/components/results-tab";
 import HeaderBar from "@/components/header-bar";
 
 const TABS = [
+  { id: "plot", num: "00", label: "Plot" },
   { id: "setup", num: "01", label: "Setup" },
   { id: "typologies", num: "02", label: "Typologies" },
   { id: "program", num: "03", label: "Program" },
@@ -58,6 +60,7 @@ export default function Page() {
       </nav>
       <main className="flex-1 w-full">
         <div className="max-w-7xl mx-auto px-6 py-8 min-w-0">
+          {tab === "plot" && <PlotTab />}
           {tab === "setup" && <SetupTab />}
           {tab === "typologies" && <TypologiesTab />}
           {tab === "program" && <ProgramTab />}
