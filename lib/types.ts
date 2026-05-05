@@ -55,22 +55,7 @@ export interface ParcelInfo {
   fileName: string;
   fileType: string;
   imageDataUrl: string;
-  ocrText: string;
-  summary: ParcelSummary;
-  extractedAt: number;
-}
-
-export interface ParcelSummary {
-  plotNumber?: string;
-  community?: string;
-  sector?: string;
-  plotAreaM2?: number;
-  far?: number;
-  heightM?: number;
-  setbackFrontM?: number;
-  setbackSideM?: number;
-  setbackRearM?: number;
-  permittedUse?: string;
+  uploadedAt: number;
 }
 
 export interface Project {
