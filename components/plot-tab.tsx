@@ -2,8 +2,8 @@
 import { useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { ParcelInfo } from "@/lib/types";
-import { fileToImage } from "@/lib/parcel-extract";
-import { polygonArea, polygonCentroid } from "@/lib/geom";
+import { processParcel } from "@/lib/parcel-extract";
+import { polygonArea, polygonCentroid, type Point } from "@/lib/geom";
 import { fmt2 } from "@/lib/format";
 import PlanTrace, { type TraceMode } from "./plan-trace";
 
@@ -24,24 +24,30 @@ export default function PlotTab() {
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [calibInput, setCalibInput] = useState<string>("");
 
+  // Vector candidates detected from PDF on upload (not persisted)
+  const [candidates, setCandidates] = useState<Point[][]>([]);
+
   async function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
     setError(null);
     try {
       setPhase("rendering");
-      const imageDataUrl = await fileToImage(file);
-      // Quickly read natural dims
-      const dims = await readImageDims(imageDataUrl);
+      const result = await processParcel(file);
       const next: ParcelInfo = {
         fileName: file.name,
         fileType: file.type || "image/jpeg",
-        imageDataUrl,
+        imageDataUrl: result.imageDataUrl,
         uploadedAt: Date.now(),
-        imageNaturalWidth: dims.w,
-        imageNaturalHeight: dims.h,
+        imageNaturalWidth: result.imageNaturalWidth,
+        imageNaturalHeight: result.imageNaturalHeight,
       };
       patch({ parcel: next });
+      setCandidates(result.candidatePolygons);
+      // Auto-enter selecting mode if we found candidates
+      if (result.candidatePolygons.length > 0) {
+        setTraceMode("selecting");
+      }
       setPhase("done");
     } catch (e) {
       console.error(e);
@@ -56,6 +62,16 @@ export default function PlotTab() {
     setPhase("idle");
     setTraceMode("idle");
     setLivePoints([]);
+    setCandidates([]);
+  }
+
+  function selectCandidate(idx: number) {
+    if (!parcel) return;
+    const poly = candidates[idx];
+    if (!poly || poly.length < 3) return;
+    patch({ parcel: { ...parcel, tracePolygonPx: poly, calibration: undefined } });
+    setTraceMode("idle");
+    setCandidates([]);
   }
 
   /* ---------- Trace flow ---------- */
@@ -210,10 +226,16 @@ export default function PlotTab() {
                 <PlanTrace
                   parcel={parcel}
                   mode={traceMode}
-                  tracePolygonPx={traceMode === "idle" || traceMode === "calibrating" ? parcel.tracePolygonPx : undefined}
+                  tracePolygonPx={
+                    traceMode === "idle" || traceMode === "calibrating"
+                      ? parcel.tracePolygonPx
+                      : undefined
+                  }
                   calibration={traceMode === "idle" ? parcel.calibration : undefined}
-                  livePoints={traceMode === "idle" ? undefined : livePoints}
+                  livePoints={traceMode === "tracing" || traceMode === "calibrating" ? livePoints : undefined}
                   hoverPoint={hoverPoint}
+                  candidates={traceMode === "selecting" ? candidates : undefined}
+                  onSelectCandidate={selectCandidate}
                   onPick={(p) => {
                     if (traceMode === "tracing") onTraceClick(p);
                     else if (traceMode === "calibrating") onCalibClick(p);
@@ -245,11 +267,26 @@ export default function PlotTab() {
             <div className="grid gap-4 content-start">
               <StepBlock
                 step="1"
-                title="Trace the parcel"
+                title="Capture the parcel"
                 done={hasTrace}
-                description="Click each corner of the plot. Click on the first vertex (or press Done) to close."
+                description={
+                  candidates.length > 0
+                    ? "Click on the polygon that represents the parcel — geometry is read straight from the vector PDF."
+                    : "Click each corner of the plot. Click the first vertex (or press Done) to close."
+                }
               >
-                {traceMode === "tracing" ? (
+                {traceMode === "selecting" ? (
+                  <div className="grid gap-2">
+                    <div className="text-[11px] text-ink-700">
+                      {candidates.length} candidate polygon{candidates.length === 1 ? "" : "s"} detected · click one
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="btn btn-secondary btn-xs" onClick={() => { setTraceMode("idle"); setCandidates([]); }}>
+                        Trace manually instead
+                      </button>
+                    </div>
+                  </div>
+                ) : traceMode === "tracing" ? (
                   <div className="grid gap-2">
                     <div className="text-[11px] text-ink-700">{livePoints.length} point{livePoints.length === 1 ? "" : "s"} so far</div>
                     <div className="flex gap-2">
@@ -258,9 +295,14 @@ export default function PlotTab() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <button className="btn btn-primary btn-xs" onClick={startTrace}>
-                      {hasTrace ? "Re-trace" : "Trace polygon"}
+                  <div className="flex gap-2 flex-wrap">
+                    {candidates.length > 0 && (
+                      <button className="btn btn-primary btn-xs" onClick={() => setTraceMode("selecting")}>
+                        Pick from PDF ({candidates.length})
+                      </button>
+                    )}
+                    <button className={`btn btn-xs ${candidates.length > 0 ? "btn-secondary" : "btn-primary"}`} onClick={startTrace}>
+                      {hasTrace ? "Re-trace" : "Trace manually"}
                     </button>
                     {hasTrace && (
                       <button className="btn btn-secondary btn-xs" onClick={clearTrace}>Clear</button>
@@ -269,7 +311,7 @@ export default function PlotTab() {
                 )}
                 {hasTrace && (
                   <div className="mt-2 text-[11px] text-ink-500">
-                    {parcel.tracePolygonPx!.length} vertices traced{isCalibrated ? "" : " · awaiting calibration"}
+                    {parcel.tracePolygonPx!.length} vertices captured{isCalibrated ? "" : " · awaiting calibration"}
                   </div>
                 )}
               </StepBlock>
@@ -401,11 +443,3 @@ function Dropzone({
   );
 }
 
-function readImageDims(dataUrl: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => resolve({ w: 0, h: 0 });
-    img.src = dataUrl;
-  });
-}

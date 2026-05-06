@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ParcelInfo } from "@/lib/types";
 
-export type TraceMode = "idle" | "tracing" | "calibrating";
+export type TraceMode = "idle" | "tracing" | "calibrating" | "selecting";
 
 export interface PlanTraceProps {
   parcel: ParcelInfo;
@@ -21,6 +21,9 @@ export interface PlanTraceProps {
   /** Visual variant */
   showOverlay?: boolean;
   className?: string;
+  /** Candidate polygons (selecting mode): user picks one by clicking it */
+  candidates?: { x: number; y: number }[][];
+  onSelectCandidate?: (index: number) => void;
 }
 
 export default function PlanTrace({
@@ -34,7 +37,10 @@ export default function PlanTrace({
   hoverPoint,
   showOverlay = true,
   className = "",
+  candidates,
+  onSelectCandidate,
 }: PlanTraceProps) {
+  const [hoveredCandidate, setHoveredCandidate] = useState<number | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(
@@ -148,6 +154,27 @@ export default function PlanTrace({
           {mode === "calibrating" && livePoints && livePoints.length > 0 && (
             <CalibrationLive points={livePoints} hover={hoverPoint ?? null} W={W} />
           )}
+
+          {/* Candidates from auto-detect — clickable */}
+          {mode === "selecting" && candidates?.map((c, i) => {
+            const hovered = hoveredCandidate === i;
+            return (
+              <polygon
+                key={`cand-${i}`}
+                points={c.map((p) => `${p.x},${p.y}`).join(" ")}
+                fill={hovered ? "rgba(100,125,87,0.35)" : "rgba(100,125,87,0.10)"}
+                stroke={hovered ? "#3f5135" : "#647d57"}
+                strokeWidth={Math.max(1.2, W * 0.0018)}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectCandidate?.(i);
+                }}
+                onMouseEnter={() => setHoveredCandidate(i)}
+                onMouseLeave={() => setHoveredCandidate((v) => (v === i ? null : v))}
+              />
+            );
+          })}
         </svg>
       )}
     </div>
