@@ -1,5 +1,6 @@
 import {
   type Point,
+  clipPolygonToConvex,
   polygonArea,
   polygonBBox,
   scalePolygon,
@@ -66,10 +67,11 @@ export function buildMassing(i: MassingInputs): MassingResult {
   if (i.shape === "block") {
     const area = Math.min(Math.max(0, i.effFloorArea), buildableArea);
     if (area < 1) return empty;
-    const poly = scalePolygonToArea(i.buildable, area);
+    const poly = clipToBuildable(scalePolygonToArea(i.buildable, area), i.buildable);
+    if (poly.length < 3) return empty;
     return {
       volumes: [{ polygon: poly, fromY: 0, toY: totalH }],
-      totalGFA: area * i.effFloors,
+      totalGFA: polygonArea(poly) * i.effFloors,
       topY: totalH,
       primaryFootprint: poly,
     };
@@ -82,9 +84,10 @@ export function buildMassing(i: MassingInputs): MassingResult {
     const podArea = Math.min(buildableArea * clamp01(i.podiumCoverage), buildableArea);
     const towerArea = Math.min(buildableArea * clamp01(i.towerCoverage), buildableArea);
 
-    const podiumPoly = podArea > 1 ? scalePolygonToArea(i.buildable, podArea) : [];
+    const podiumPoly = podArea > 1 ? clipToBuildable(scalePolygonToArea(i.buildable, podArea), i.buildable) : [];
     const towerCentered = towerArea > 1 ? scalePolygonToArea(i.buildable, towerArea) : [];
-    const towerPoly = towerCentered.length >= 3 ? placeInsideBuildable(towerCentered, i.buildable, i.towerPosition) : [];
+    const towerOffset = towerCentered.length >= 3 ? placeInsideBuildable(towerCentered, i.buildable, i.towerPosition) : [];
+    const towerPoly = clipToBuildable(towerOffset, i.buildable);
 
     const podH = podFloors * i.floorHeight;
     const volumes: Volume[] = [];
@@ -94,9 +97,11 @@ export function buildMassing(i: MassingInputs): MassingResult {
     if (towerFloors > 0 && towerPoly.length >= 3) {
       volumes.push({ polygon: towerPoly, fromY: podH, toY: totalH });
     }
+    const podiumGFA = polygonArea(podiumPoly) * podFloors;
+    const towerGFA = polygonArea(towerPoly) * towerFloors;
     return {
       volumes,
-      totalGFA: podFloors * podArea + towerFloors * towerArea,
+      totalGFA: podiumGFA + towerGFA,
       topY: totalH,
       primaryFootprint: towerPoly.length >= 3 ? towerPoly : podiumPoly,
     };
@@ -109,9 +114,10 @@ export function buildMassing(i: MassingInputs): MassingResult {
     let outerArea = i.effFloorArea / Math.max(0.4, 1 - ratio);
     outerArea = Math.min(outerArea, buildableArea);
     if (outerArea < 1) return empty;
-    const outer = scalePolygonToArea(i.buildable, outerArea);
+    const outer = clipToBuildable(scalePolygonToArea(i.buildable, outerArea), i.buildable);
+    if (outer.length < 3) return empty;
     const hole = ratio > 0.005 ? scalePolygon(outer, Math.sqrt(ratio)) : undefined;
-    const netArea = outerArea - (hole ? polygonArea(hole) : 0);
+    const netArea = polygonArea(outer) - (hole ? polygonArea(hole) : 0);
     return {
       volumes: [{ polygon: outer, hole, fromY: 0, toY: totalH }],
       totalGFA: netArea * i.effFloors,
@@ -125,16 +131,17 @@ export function buildMassing(i: MassingInputs): MassingResult {
     if (eachArea < 1) return empty;
     const each = scalePolygonToArea(i.buildable, eachArea);
     const sep = Math.max(0, i.twinSeparation);
-    const t1 = translatePolygon(each, sep / 2, 0);
-    const t2 = translatePolygon(each, -sep / 2, 0);
+    const t1 = clipToBuildable(translatePolygon(each, sep / 2, 0), i.buildable);
+    const t2 = clipToBuildable(translatePolygon(each, -sep / 2, 0), i.buildable);
+    const volumes: Volume[] = [];
+    if (t1.length >= 3) volumes.push({ polygon: t1, fromY: 0, toY: totalH });
+    if (t2.length >= 3) volumes.push({ polygon: t2, fromY: 0, toY: totalH });
+    if (volumes.length === 0) return empty;
     return {
-      volumes: [
-        { polygon: t1, fromY: 0, toY: totalH },
-        { polygon: t2, fromY: 0, toY: totalH },
-      ],
-      totalGFA: 2 * eachArea * i.effFloors,
+      volumes,
+      totalGFA: (polygonArea(t1) + polygonArea(t2)) * i.effFloors,
       topY: totalH,
-      primaryFootprint: t1,
+      primaryFootprint: t1.length >= 3 ? t1 : t2,
     };
   }
 
@@ -150,13 +157,14 @@ export function buildMassing(i: MassingInputs): MassingResult {
     for (let s = 0; s < steps; s++) {
       const stepArea = baseArea * Math.pow(1 - shrink, s);
       if (stepArea < 1) break;
-      const stepPoly = scalePolygonToArea(i.buildable, stepArea);
+      const stepPoly = clipToBuildable(scalePolygonToArea(i.buildable, stepArea), i.buildable);
+      if (stepPoly.length < 3) break;
       const stepFloors = s === steps - 1 ? Math.max(1, i.effFloors - floorsUsed) : floorsPerStep;
       if (stepFloors <= 0) break;
       const fromY = floorsUsed * i.floorHeight;
       const toY = (floorsUsed + stepFloors) * i.floorHeight;
       volumes.push({ polygon: stepPoly, fromY, toY });
-      totalGFA += stepArea * stepFloors;
+      totalGFA += polygonArea(stepPoly) * stepFloors;
       floorsUsed += stepFloors;
       if (floorsUsed >= i.effFloors) break;
     }
@@ -174,12 +182,13 @@ export function buildMassing(i: MassingInputs): MassingResult {
     if (lPoly.length < 3) return empty;
     const targetArea = Math.min(Math.max(0, i.effFloorArea), polygonArea(lPoly));
     if (targetArea < 1) return empty;
-    const scaled = scalePolygonToArea(lPoly, targetArea);
+    const clipped = clipToBuildable(scalePolygonToArea(lPoly, targetArea), i.buildable);
+    if (clipped.length < 3) return empty;
     return {
-      volumes: [{ polygon: scaled, fromY: 0, toY: totalH }],
-      totalGFA: polygonArea(scaled) * i.effFloors,
+      volumes: [{ polygon: clipped, fromY: 0, toY: totalH }],
+      totalGFA: polygonArea(clipped) * i.effFloors,
       topY: totalH,
-      primaryFootprint: scaled,
+      primaryFootprint: clipped,
     };
   }
 
@@ -190,12 +199,13 @@ export function buildMassing(i: MassingInputs): MassingResult {
     if (uPoly.length < 3) return empty;
     const targetArea = Math.min(Math.max(0, i.effFloorArea), polygonArea(uPoly));
     if (targetArea < 1) return empty;
-    const scaled = scalePolygonToArea(uPoly, targetArea);
+    const clipped = clipToBuildable(scalePolygonToArea(uPoly, targetArea), i.buildable);
+    if (clipped.length < 3) return empty;
     return {
-      volumes: [{ polygon: scaled, fromY: 0, toY: totalH }],
-      totalGFA: polygonArea(scaled) * i.effFloors,
+      volumes: [{ polygon: clipped, fromY: 0, toY: totalH }],
+      totalGFA: polygonArea(clipped) * i.effFloors,
       topY: totalH,
-      primaryFootprint: scaled,
+      primaryFootprint: clipped,
     };
   }
 
@@ -283,4 +293,17 @@ function placeInsideBuildable(towerPoly: Point[], buildable: Point[], position: 
 function clamp01(x: number): number {
   if (!Number.isFinite(x)) return 0;
   return Math.max(0, Math.min(1, x));
+}
+
+/**
+ * Clip a candidate polygon (footprint) against the buildable polygon so the
+ * volume never extends outside the green area. Returns [] if the clip is
+ * degenerate (very small or fully outside).
+ */
+function clipToBuildable(poly: Point[], buildable: Point[]): Point[] {
+  if (poly.length < 3 || buildable.length < 3) return [];
+  const clipped = clipPolygonToConvex(poly, buildable);
+  if (clipped.length < 3) return [];
+  if (polygonArea(clipped) < 0.5) return [];
+  return clipped;
 }

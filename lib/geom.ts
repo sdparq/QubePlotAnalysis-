@@ -159,3 +159,56 @@ export function rectanglePlotPolygon(frontage: number, depth: number): Point[] {
     { x: -frontage / 2, y: depth / 2 },
   ];
 }
+
+/**
+ * Clip a subject polygon by a CONVEX clip polygon using Sutherland–Hodgman.
+ * Returns the intersection polygon (subject ∩ clip), or [] if the result is empty.
+ *
+ * Works correctly when the clip polygon is convex. For mildly concave clips the
+ * result is close enough for visual purposes, but may include phantom edges —
+ * promote to a full clipping library if that becomes an issue.
+ */
+export function clipPolygonToConvex(subject: Point[], clip: Point[]): Point[] {
+  if (subject.length < 3 || clip.length < 3) return [];
+  const C = isCounterClockwise(clip) ? clip : clip.slice().reverse();
+  let output: Point[] = subject.slice();
+
+  for (let i = 0; i < C.length; i++) {
+    if (output.length === 0) return [];
+    const A = C[i];
+    const B = C[(i + 1) % C.length];
+    const input = output;
+    output = [];
+    let S = input[input.length - 1];
+    for (const E of input) {
+      const eIn = sideOf(A, B, E) >= -1e-9;
+      const sIn = sideOf(A, B, S) >= -1e-9;
+      if (eIn) {
+        if (!sIn) {
+          const inter = lineSegmentIntersection(A, B, S, E);
+          if (inter) output.push(inter);
+        }
+        output.push(E);
+      } else if (sIn) {
+        const inter = lineSegmentIntersection(A, B, S, E);
+        if (inter) output.push(inter);
+      }
+      S = E;
+    }
+  }
+  return output;
+}
+
+function sideOf(A: Point, B: Point, P: Point): number {
+  return (B.x - A.x) * (P.y - A.y) - (B.y - A.y) * (P.x - A.x);
+}
+
+function lineSegmentIntersection(A: Point, B: Point, S: Point, E: Point): Point | null {
+  const dx = E.x - S.x;
+  const dy = E.y - S.y;
+  const cross1 = (B.x - A.x) * (S.y - A.y) - (B.y - A.y) * (S.x - A.x);
+  const cross2 = (B.x - A.x) * dy - (B.y - A.y) * dx;
+  if (Math.abs(cross2) < 1e-9) return null;
+  const t = -cross1 / cross2;
+  return { x: S.x + t * dx, y: S.y + t * dy };
+}
