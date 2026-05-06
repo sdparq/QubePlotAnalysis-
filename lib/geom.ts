@@ -71,13 +71,16 @@ function lineLineIntersection(p1: Point, p2: Point, p3: Point, p4: Point): Point
 }
 
 /**
- * Inward (positive distance) polygon offset using edge normals + line intersections.
+ * Inward polygon offset using edge normals + line intersections.
+ * `distance` may be a single number (uniform) or an array (one per edge — index i is the
+ * offset of the edge going from vertex i to vertex i+1).
  * Works robustly for convex polygons; concave polygons may produce artifacts at re-entrant corners.
  * Returns [] if the inset collapses or self-intersects.
  */
-export function offsetPolygon(poly: Point[], distance: number): Point[] {
+export function offsetPolygon(poly: Point[], distance: number | number[]): Point[] {
   if (poly.length < 3) return [];
-  if (Math.abs(distance) < 1e-9) return poly.slice();
+  const distArr = Array.isArray(distance) ? distance : poly.map(() => distance);
+  if (distArr.every((d) => Math.abs(d) < 1e-9)) return poly.slice();
   const ccw = isCounterClockwise(poly);
   const sign = ccw ? 1 : -1;
 
@@ -95,8 +98,9 @@ export function offsetPolygon(poly: Point[], distance: number): Point[] {
     // Inward normal: rotate edge direction by +90° for CCW, -90° for CW
     const nx = -uy * sign;
     const ny = ux * sign;
+    const d = distArr[i] ?? 0;
     offsetEdges.push({
-      p: { x: a.x + nx * distance, y: a.y + ny * distance },
+      p: { x: a.x + nx * d, y: a.y + ny * d },
       dir: { x: ux, y: uy },
     });
   }

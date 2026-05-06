@@ -17,6 +17,7 @@ import {
   scalePolygon,
   scalePolygonToArea,
 } from "@/lib/geom";
+import { edgeColor } from "@/lib/edge-colors";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
   ssr: false,
@@ -54,10 +55,23 @@ export default function MassingTab() {
     return rectanglePlotPolygon(frontage, depth);
   }, [mode, project.plotPolygon, frontage, depth]);
 
+  // Per-edge setbacks. If user has set them and length matches, use them; otherwise fall back to uniform.
+  const setbackPerEdge: number[] = useMemo(() => {
+    if (mode !== "polygon") return [];
+    const n = plotPoly.length;
+    if (project.setbackPerEdge && project.setbackPerEdge.length === n) return project.setbackPerEdge;
+    return new Array(n).fill(sUniform);
+  }, [mode, plotPoly.length, project.setbackPerEdge, sUniform]);
+
   const buildablePoly: Point[] = useMemo(() => {
-    if (mode === "polygon") return offsetPolygon(plotPoly, sUniform);
+    if (mode === "polygon") return offsetPolygon(plotPoly, setbackPerEdge);
     return rectangleToPolygon(frontage, depth, sFront, sRear, sSide);
-  }, [mode, plotPoly, sUniform, frontage, depth, sFront, sRear, sSide]);
+  }, [mode, plotPoly, setbackPerEdge, frontage, depth, sFront, sRear, sSide]);
+
+  const edgeColors = useMemo(
+    () => (mode === "polygon" ? plotPoly.map((_, i) => edgeColor(i)) : undefined),
+    [mode, plotPoly]
+  );
 
   const plotPolyArea = polygonArea(plotPoly);
   const buildableArea = polygonArea(buildablePoly);
@@ -156,6 +170,7 @@ export default function MassingTab() {
               numFloors={project.numFloors}
               floorHeight={project.floorHeight}
               showFrontMarker={mode === "rectangular"}
+              edgeColors={edgeColors}
             />
           </div>
 
@@ -170,7 +185,17 @@ export default function MassingTab() {
               <PolygonInputs
                 vertices={project.plotPolygon ?? []}
                 setbackUniform={sUniform}
+                setbackPerEdge={setbackPerEdge}
                 onSetback={(v) => patch({ setbackUniform: v })}
+                onSetbackPerEdge={(idx, v) => {
+                  const next = [...setbackPerEdge];
+                  next[idx] = v;
+                  patch({ setbackPerEdge: next });
+                }}
+                onSetbackAll={(v) => {
+                  const next = (project.plotPolygon ?? []).map(() => v);
+                  patch({ setbackPerEdge: next, setbackUniform: v });
+                }}
                 onUpdate={updateVertex}
                 onAddAfter={addVertexAfter}
                 onDelete={deleteVertex}
@@ -243,6 +268,11 @@ export default function MassingTab() {
               mode="idle"
               tracePolygonPx={project.parcel.tracePolygonPx}
               calibration={project.parcel.calibration}
+              edgeColors={
+                mode === "polygon" && project.parcel.tracePolygonPx
+                  ? project.parcel.tracePolygonPx.map((_, i) => edgeColor(i))
+                  : undefined
+              }
             />
           </div>
         </div>
@@ -295,11 +325,14 @@ function RectangularInputs({
 }
 
 function PolygonInputs({
-  vertices, setbackUniform, onSetback, onUpdate, onAddAfter, onDelete, onRecentre,
+  vertices, setbackUniform, setbackPerEdge, onSetback, onSetbackPerEdge, onSetbackAll, onUpdate, onAddAfter, onDelete, onRecentre,
 }: {
   vertices: Point[];
   setbackUniform: number;
+  setbackPerEdge: number[];
   onSetback: (v: number | undefined) => void;
+  onSetbackPerEdge: (i: number, v: number) => void;
+  onSetbackAll: (v: number) => void;
   onUpdate: (i: number, p: Partial<Point>) => void;
   onAddAfter: (i: number) => void;
   onDelete: (i: number) => void;
@@ -323,7 +356,7 @@ function PolygonInputs({
           <div className="grid grid-cols-[28px_1fr_1fr_92px_28px] gap-1 px-2 py-1.5 text-[10.5px] uppercase tracking-[0.10em] text-ink-500 bg-bone-50 border-b border-ink-200">
             <span>#</span><span>X</span><span>Y</span><span className="text-right">Edge →</span><span></span>
           </div>
-          <div className="max-h-[280px] overflow-y-auto">
+          <div className="max-h-[240px] overflow-y-auto">
             {vertices.map((v, i) => (
               <div key={i} className="grid grid-cols-[28px_1fr_1fr_92px_28px] gap-1 px-2 py-1 items-center border-b border-ink-100 last:border-b-0">
                 <span className="text-[11px] text-ink-500 tabular-nums">{i + 1}</span>
@@ -350,7 +383,6 @@ function PolygonInputs({
                   title="Delete vertex"
                   aria-label="Delete vertex"
                 >×</button>
-                {/* Insertion handle below each row */}
                 <span></span>
                 <span className="col-span-3 -mt-0.5 -mb-0.5">
                   <button
@@ -368,17 +400,60 @@ function PolygonInputs({
           <span>{vertices.length} vertices</span>
           <span className="tabular-nums">Perimeter: {fmt2(perimeter)} m</span>
         </div>
-        <p className="text-[11px] text-ink-500 mt-2 leading-relaxed">
-          Enter each corner&rsquo;s X / Y in metres (any origin). The edge length on the right of each row should
-          match the cota on your drawing.
-        </p>
       </div>
 
       <div>
-        <div className="eyebrow text-ink-500 mb-2">Setback (m)</div>
-        <Field label="Uniform setback applied to every edge">
-          <NumInput value={setbackUniform} onChange={onSetback} step={0.5} />
-        </Field>
+        <div className="flex items-center justify-between mb-2">
+          <div className="eyebrow text-ink-500">Setback per edge (m)</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              className="cell-input text-right w-16 !py-1 !px-1.5 !text-[11px]"
+              value={setbackUniform}
+              onChange={(e) => onSetback(parseFloat(e.target.value) || 0)}
+              title="Default value used for newly added edges"
+            />
+            <button
+              className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900"
+              onClick={() => onSetbackAll(setbackUniform)}
+              title="Apply the value above to every edge"
+            >Apply to all</button>
+          </div>
+        </div>
+        <div className="border border-ink-200">
+          <div className="grid grid-cols-[24px_28px_1fr_72px] gap-1 px-2 py-1.5 text-[10.5px] uppercase tracking-[0.10em] text-ink-500 bg-bone-50 border-b border-ink-200">
+            <span></span>
+            <span>#</span>
+            <span>Length</span>
+            <span className="text-right">Setback</span>
+          </div>
+          <div className="max-h-[240px] overflow-y-auto">
+            {vertices.map((_, i) => {
+              const color = edgeColor(i);
+              return (
+                <div key={i} className="grid grid-cols-[24px_28px_1fr_72px] gap-1 px-2 py-1 items-center border-b border-ink-100 last:border-b-0">
+                  <span className="block w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+                  <span className="text-[11px] text-ink-500 tabular-nums">{i + 1}</span>
+                  <span className="text-[11px] text-ink-700 tabular-nums">{fmt2(lengths[i] ?? 0)} m</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    min={0}
+                    className="cell-input text-right !py-1 !px-1.5"
+                    value={setbackPerEdge[i] ?? 0}
+                    onChange={(e) => onSetbackPerEdge(i, parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <p className="text-[11px] text-ink-500 mt-2 leading-relaxed">
+          Each edge of the parcel uses its own setback. The colored swatch matches the edge in the 3D viewer
+          and on the reference plan.
+        </p>
       </div>
     </>
   );

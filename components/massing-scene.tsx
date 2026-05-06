@@ -14,10 +14,12 @@ export interface SceneProps {
   numFloors: number;
   floorHeight: number;
   showFrontMarker?: boolean;
+  /** Optional per-edge colors for the plot outline (length should match plot.length). */
+  edgeColors?: string[];
 }
 
 export default function MassingScene(props: SceneProps) {
-  const { plot, buildable, building, buildingHeight, numFloors, floorHeight, showFrontMarker } = props;
+  const { plot, buildable, building, buildingHeight, numFloors, floorHeight, showFrontMarker, edgeColors } = props;
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -96,8 +98,16 @@ export default function MassingScene(props: SceneProps) {
         </mesh>
       )}
 
-      {/* Plot outline */}
-      <Line points={plotOutline} color="#3f5135" lineWidth={1.6} />
+      {/* Plot outline — per-edge colored when edgeColors is supplied */}
+      {edgeColors && edgeColors.length === plot.length ? (
+        plot.map((p, i) => {
+          const next = plot[(i + 1) % plot.length];
+          const points: [number, number, number][] = [[p.x, 0.02, -p.y], [next.x, 0.02, -next.y]];
+          return <Line key={`edge-${i}`} points={points} color={edgeColors[i]} lineWidth={3} />;
+        })
+      ) : (
+        <Line points={plotOutline} color="#3f5135" lineWidth={1.6} />
+      )}
 
       {/* Building extruded mass */}
       {buildingShape && buildingHeight > 0 && (

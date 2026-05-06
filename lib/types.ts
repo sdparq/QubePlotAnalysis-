@@ -97,6 +97,8 @@ export interface Project {
   setbackSide?: number;
   /** Polygon vertices in plot-local metres. Used when plotMode === "polygon". */
   plotPolygon?: { x: number; y: number }[];
-  /** Uniform setback applied to every polygon edge (m). */
+  /** Uniform setback applied to every polygon edge (m). Used as default if setbackPerEdge is not set. */
   setbackUniform?: number;
+  /** Per-edge setback in metres. Length must match plotPolygon.length. Index i = setback of edge from vertex i to vertex i+1. */
+  setbackPerEdge?: number[];
 }

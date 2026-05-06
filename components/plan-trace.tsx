@@ -24,6 +24,8 @@ export interface PlanTraceProps {
   /** Candidate polygons (selecting mode): user picks one by clicking it */
   candidates?: { x: number; y: number }[][];
   onSelectCandidate?: (index: number) => void;
+  /** Optional per-edge colors for the trace polygon outline. Length should match tracePolygonPx.length. */
+  edgeColors?: string[];
 }
 
 export default function PlanTrace({
@@ -39,6 +41,7 @@ export default function PlanTrace({
   className = "",
   candidates,
   onSelectCandidate,
+  edgeColors,
 }: PlanTraceProps) {
   const [hoveredCandidate, setHoveredCandidate] = useState<number | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -112,17 +115,41 @@ export default function PlanTrace({
           onMouseLeave={() => onHover?.(null)}
           style={{ pointerEvents: mode === "idle" ? "none" : "auto" }}
         >
-          {/* Saved/finished trace polygon */}
-          {tracePoints.length >= 2 && (
+          {/* Saved/finished trace polygon — fill is uniform, edges may be colored */}
+          {tracePoints.length >= 3 && (
             <polygon
               points={tracePoints.map((p) => `${p.x},${p.y}`).join(" ")}
               fill="rgba(100,125,87,0.15)"
-              stroke="#3f5135"
+              stroke={edgeColors ? "none" : "#3f5135"}
               strokeWidth={Math.max(1.2, W * 0.0015)}
             />
           )}
+          {tracePoints.length >= 2 && tracePoints.map((p, i) => {
+            const next = tracePoints[(i + 1) % tracePoints.length];
+            const color = edgeColors?.[i] ?? "#3f5135";
+            return (
+              <line
+                key={`e-${i}`}
+                x1={p.x}
+                y1={p.y}
+                x2={next.x}
+                y2={next.y}
+                stroke={color}
+                strokeWidth={Math.max(1.6, W * 0.0022)}
+                strokeLinecap="round"
+              />
+            );
+          })}
           {tracePoints.map((p, i) => (
-            <circle key={`v-${i}`} cx={p.x} cy={p.y} r={Math.max(3, W * 0.004)} fill="#3f5135" />
+            <circle
+              key={`v-${i}`}
+              cx={p.x}
+              cy={p.y}
+              r={Math.max(3, W * 0.004)}
+              fill={edgeColors?.[i] ?? "#3f5135"}
+              stroke="white"
+              strokeWidth={Math.max(0.8, W * 0.0008)}
+            />
           ))}
 
           {/* Live tracing path */}
