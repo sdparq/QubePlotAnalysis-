@@ -1,4 +1,5 @@
 import type { Project, Typology } from "../types";
+import { commonAreaCategory } from "../types";
 
 export interface FloorSummary {
   floor: number;
@@ -24,8 +25,12 @@ export interface ProgramResult {
   totalSellable: number;
   shaftsDeduction: number;
   commonAreasGFA: number;
+  commonAreasBUAonly: number;
+  commonAreasOpen: number;
+  /** @deprecated kept for backwards compatibility — = commonAreasBUAonly + commonAreasOpen */
   commonAreasNonGFA: number;
   totalGFABuilding: number;
+  totalBUABuilding: number;
   byFloor: FloorSummary[];
   byTypology: TypologySummary[];
   unitsByCategory: Record<string, number>;
@@ -94,14 +99,24 @@ export function computeProgram(project: Project): ProgramResult {
   }
 
   const shaftsDeduction = totalUnits * project.shaftPerUnit;
-  const commonAreasGFA = project.commonAreas
-    .filter((c) => c.countAsGFA)
-    .reduce((s, c) => s + c.area * c.floors, 0);
-  const commonAreasNonGFA = project.commonAreas
-    .filter((c) => !c.countAsGFA)
-    .reduce((s, c) => s + c.area * c.floors, 0);
+
+  let commonAreasGFA = 0;
+  let commonAreasBUAonly = 0;
+  let commonAreasOpen = 0;
+  for (const c of project.commonAreas) {
+    const total = c.area * c.floors;
+    const cat = commonAreaCategory(c);
+    if (cat === "GFA") commonAreasGFA += total;
+    else if (cat === "BUA") commonAreasBUAonly += total;
+    else commonAreasOpen += total;
+  }
+  const commonAreasNonGFA = commonAreasBUAonly + commonAreasOpen;
 
   const totalGFABuilding = totalInteriorGFA + commonAreasGFA - shaftsDeduction;
+  // BUA = unit interiors + balconies (already inside the unit envelope) + every common area that
+  // forms part of the built envelope (GFA-counting + shafts/MEP/lift/parking style spaces). Open-air
+  // amenities are not counted.
+  const totalBUABuilding = totalInteriorGFA + totalBalcony + commonAreasGFA + commonAreasBUAonly;
 
   const circulationKeywords = /lobby|corridor|stair|lift/i;
   const servicesKeywords = /mep|service|pump|electric/i;
@@ -110,8 +125,8 @@ export function computeProgram(project: Project): ProgramResult {
   let servicesGFA = 0;
   let amenitiesGFAarea = 0;
   for (const c of project.commonAreas) {
+    if (commonAreaCategory(c) !== "GFA") continue;
     const total = c.area * c.floors;
-    if (!c.countAsGFA) continue;
     if (circulationKeywords.test(c.name)) circulationGFA += total;
     else if (servicesKeywords.test(c.name)) servicesGFA += total;
     else amenitiesGFAarea += total;
@@ -127,8 +142,11 @@ export function computeProgram(project: Project): ProgramResult {
     totalSellable,
     shaftsDeduction,
     commonAreasGFA,
+    commonAreasBUAonly,
+    commonAreasOpen,
     commonAreasNonGFA,
     totalGFABuilding,
+    totalBUABuilding,
     byFloor,
     byTypology,
     unitsByCategory,
@@ -141,7 +159,7 @@ export function computeProgram(project: Project): ProgramResult {
       servicesPct: servicesGFA / denom,
       amenitiesGFAarea,
       amenitiesPct: amenitiesGFAarea / denom,
-      amenitiesNonGFA: commonAreasNonGFA,
+      amenitiesNonGFA: commonAreasOpen,
       balconiesNonGFA: totalBalcony,
     },
     far: project.plotArea > 0 ? totalGFABuilding / project.plotArea : 0,

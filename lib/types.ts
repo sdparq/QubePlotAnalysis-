@@ -16,13 +16,29 @@ export interface ProgramCell {
   count: number;
 }
 
+export type CommonAreaCategory = "GFA" | "BUA" | "OPEN";
+
 export interface CommonArea {
   id: string;
   name: string;
   area: number;
   floors: number;
-  countAsGFA: boolean;
+  /**
+   * "GFA" — counts toward both GFA and BUA (lobbies, indoor amenities counted for FAR)
+   * "BUA" — counts toward BUA only (shafts, lift cores, stairs, MEP rooms, basement parking)
+   * "OPEN" — counts toward neither (open-air rooftop amenities)
+   */
+  category?: CommonAreaCategory;
+  /** @deprecated kept for backwards compatibility — replaced by `category`. */
+  countAsGFA?: boolean;
   notes?: string;
+}
+
+export function commonAreaCategory(c: CommonArea): CommonAreaCategory {
+  if (c.category) return c.category;
+  if (c.countAsGFA === true) return "GFA";
+  if (c.countAsGFA === false) return "OPEN";
+  return "GFA";
 }
 
 export interface ParkingLevel {

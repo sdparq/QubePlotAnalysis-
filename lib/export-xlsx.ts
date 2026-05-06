@@ -47,6 +47,7 @@ export async function exportToExcel(project: Project) {
     ["Shafts per unit (m²)", project.shaftPerUnit],
     ["PRM parking %", project.prmPercent],
     ["Total GFA (m²)", Number(r.program.totalGFABuilding.toFixed(2))],
+    ["Total BUA (m²)", Number(r.program.totalBUABuilding.toFixed(2))],
     ["FAR", Number(r.program.far.toFixed(3))],
   ];
   setupRows.forEach((row) => wsSetup.addRow(row));
@@ -129,14 +130,18 @@ export async function exportToExcel(project: Project) {
   wsProg.addRow(["Element", "Area (m²)", "Floors", "Total (m²)", "Counts as GFA", "Notes"]);
   applyHeader(wsProg.lastRow!);
   for (const c of project.commonAreas) {
-    wsProg.addRow([c.name, c.area, c.floors, Number((c.area * c.floors).toFixed(2)), c.countAsGFA ? "YES" : "NO (open air)", c.notes ?? ""]);
+    const cat = (c.category ?? (c.countAsGFA === false ? "OPEN" : "GFA"));
+    wsProg.addRow([c.name, c.area, c.floors, Number((c.area * c.floors).toFixed(2)), cat, c.notes ?? ""]);
   }
-  wsProg.addRow(["Subtotal — counts as GFA", "", "", Number(r.program.commonAreasGFA.toFixed(2))]);
+  wsProg.addRow(["Subtotal · GFA", "", "", Number(r.program.commonAreasGFA.toFixed(2))]);
   applySubtotal(wsProg.lastRow!);
-  wsProg.addRow(["Subtotal — non-GFA", "", "", Number(r.program.commonAreasNonGFA.toFixed(2))]);
+  wsProg.addRow(["Subtotal · BUA only", "", "", Number(r.program.commonAreasBUAonly.toFixed(2))]);
+  wsProg.addRow(["Subtotal · Open air", "", "", Number(r.program.commonAreasOpen.toFixed(2))]);
 
   wsProg.addRow([]);
   wsProg.addRow(["TOTAL GFA BUILDING", "", "", Number(r.program.totalGFABuilding.toFixed(2)), `FAR ${r.program.far.toFixed(3)}`]);
+  applySubtotal(wsProg.lastRow!);
+  wsProg.addRow(["TOTAL BUA BUILDING", "", "", Number(r.program.totalBUABuilding.toFixed(2)), "Includes balconies + BUA-only commons"]);
   applySubtotal(wsProg.lastRow!);
 
   wsProg.addRow([]);

@@ -17,9 +17,10 @@ export default function ResultsTab() {
 
   return (
     <div className="grid gap-6">
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <Kpi label="Plot area" value={`${fmt2(project.plotArea)} m²`} />
         <Kpi label="Total GFA" value={`${fmt2(p.totalGFABuilding)} m²`} sub={`FAR ${p.far.toFixed(2)}`} />
+        <Kpi label="Total BUA" value={`${fmt2(p.totalBUABuilding)} m²`} sub={`GFA / BUA ${fmtPct(p.totalGFABuilding / (p.totalBUABuilding || 1))}`} />
         <Kpi label="Units" value={fmt0(p.totalUnits)} />
         <Kpi label="Sellable" value={`${fmt2(p.totalSellable)} m²`} sub={`${fmtPct(p.totalSellable / (p.totalGFABuilding || 1))} of GFA`} />
         <Kpi label="Population" value={fmt0(l.totalPopulation)} sub="from typology occupancy" />
