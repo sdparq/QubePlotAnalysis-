@@ -101,4 +101,8 @@ export interface Project {
   setbackUniform?: number;
   /** Per-edge setback in metres. Length must match plotPolygon.length. Index i = setback of edge from vertex i to vertex i+1. */
   setbackPerEdge?: number[];
+  /** Override for the 3D massing only — number of floors to extrude. Falls back to numFloors if undefined. */
+  massingFloors?: number;
+  /** Override for the 3D massing only — building footprint area per floor (m²). Falls back to GFA/floors. */
+  massingFloorArea?: number;
 }

@@ -75,22 +75,26 @@ export default function MassingTab() {
 
   const plotPolyArea = polygonArea(plotPoly);
   const buildableArea = polygonArea(buildablePoly);
-  const buildingHeight = project.numFloors * project.floorHeight;
-  const avgFloorArea = project.numFloors > 0 ? program.totalGFABuilding / project.numFloors : 0;
 
-  // ---- derive building footprint by scaling buildable polygon to target floor area ----
+  // Effective volume controls — overrides on top of program-derived values.
+  const programFloorArea = project.numFloors > 0 ? program.totalGFABuilding / project.numFloors : 0;
+  const effFloors = project.massingFloors ?? project.numFloors;
+  const effFloorArea = project.massingFloorArea ?? programFloorArea;
+  const buildingHeight = effFloors * project.floorHeight;
+  const totalVolumeGFA = effFloors * effFloorArea;
+
+  // ---- derive building footprint by scaling buildable polygon to effective floor area ----
   const buildingPoly: Point[] = useMemo(() => {
-    if (buildablePoly.length < 3 || avgFloorArea < 1) return [];
-    // Scale around centroid, but cap at buildable size
-    const scaled = scalePolygonToArea(buildablePoly, Math.min(avgFloorArea, buildableArea));
+    if (buildablePoly.length < 3 || effFloorArea < 1) return [];
+    const scaled = scalePolygonToArea(buildablePoly, Math.min(effFloorArea, buildableArea));
     return scaled.length >= 3 ? scaled : [];
-  }, [buildablePoly, avgFloorArea, buildableArea]);
+  }, [buildablePoly, effFloorArea, buildableArea]);
 
-  const exceedsBuildable = avgFloorArea > buildableArea + 0.01 && buildableArea > 0;
-  const coverageOfBuildable = buildableArea > 0 ? Math.min(1, avgFloorArea / buildableArea) : 0;
-  const plotCoverage = plotPolyArea > 0 ? Math.min(1, avgFloorArea / plotPolyArea) : 0;
-  const computedFar = plotPolyArea > 0 ? program.totalGFABuilding / plotPolyArea : 0;
-
+  const exceedsBuildable = effFloorArea > buildableArea + 0.01 && buildableArea > 0;
+  const coverageOfBuildable = buildableArea > 0 ? Math.min(1, effFloorArea / buildableArea) : 0;
+  const plotCoverage = plotPolyArea > 0 ? Math.min(1, effFloorArea / plotPolyArea) : 0;
+  const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
+  const programVsVolumeDelta = totalVolumeGFA - program.totalGFABuilding;
   // ---- vertex editor handlers ----
   function setMode(next: "rectangular" | "polygon") {
     if (next === "polygon" && (!project.plotPolygon || project.plotPolygon.length < 3)) {
@@ -167,7 +171,7 @@ export default function MassingTab() {
               buildable={buildablePoly}
               building={buildingPoly}
               buildingHeight={buildingHeight}
-              numFloors={project.numFloors}
+              numFloors={effFloors}
               floorHeight={project.floorHeight}
               showFrontMarker={mode === "rectangular"}
               edgeColors={edgeColors}
@@ -203,6 +207,20 @@ export default function MassingTab() {
               />
             )}
 
+            <VolumeInputs
+              effFloors={effFloors}
+              effFloorArea={effFloorArea}
+              programFloorArea={programFloorArea}
+              buildableArea={buildableArea}
+              hasFloorsOverride={project.massingFloors !== undefined}
+              hasFloorAreaOverride={project.massingFloorArea !== undefined}
+              floorHeight={project.floorHeight}
+              onFloors={(v) => patch({ massingFloors: v })}
+              onFloorArea={(v) => patch({ massingFloorArea: v })}
+              onMatchProgram={() => patch({ massingFloorArea: undefined, massingFloors: undefined })}
+              onMatchBuildable={() => patch({ massingFloorArea: buildableArea })}
+            />
+
             <div className="border-t border-ink-200 pt-4 grid gap-2 text-sm">
               <Stat
                 label="Plot area"
@@ -214,8 +232,15 @@ export default function MassingTab() {
                 }
               />
               <Stat label="Buildable" value={`${fmt2(buildableArea)} m²`} />
-              <Stat label="Building height" value={`${fmt2(buildingHeight)} m`} sub={`${project.numFloors} × ${project.floorHeight} m`} />
-              <Stat label="Avg floor area" value={`${fmt2(avgFloorArea)} m²`} sub="Total GFA / floors" />
+              <Stat label="Building height" value={`${fmt2(buildingHeight)} m`} sub={`${effFloors} × ${project.floorHeight} m`} />
+              <Stat label="Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} sub={`${effFloors} floors × ${fmt2(effFloorArea)} m²`} />
+              <Stat
+                label="vs program"
+                value={`${programVsVolumeDelta >= 0 ? "+" : ""}${fmt2(programVsVolumeDelta)} m²`}
+                sub={`program: ${fmt2(program.totalGFABuilding)} m²`}
+                good={Math.abs(programVsVolumeDelta) < 1}
+                bad={programVsVolumeDelta < -1}
+              />
               <Stat
                 label="Coverage / buildable"
                 value={fmtPct(coverageOfBuildable)}
@@ -223,15 +248,14 @@ export default function MassingTab() {
                 bad={exceedsBuildable}
               />
               <Stat label="Coverage / plot" value={fmtPct(plotCoverage)} />
-              <Stat label="FAR" value={computedFar.toFixed(2)} sub="GFA / plot area" />
+              <Stat label="FAR" value={computedFar.toFixed(2)} sub="Volume GFA / plot area" />
             </div>
 
             {exceedsBuildable && (
               <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-xs">
                 <strong className="font-semibold">Floor area exceeds buildable footprint.</strong>
                 <div className="mt-1 text-amber-800">
-                  Either reduce GFA, increase number of floors, or revise setbacks. Building shown clamped to
-                  the buildable polygon.
+                  Reduce floor area, add floors, or revise setbacks. Building shown clamped to the buildable polygon.
                 </div>
               </div>
             )}
@@ -282,6 +306,103 @@ export default function MassingTab() {
 }
 
 /* -------------------- subcomponents -------------------- */
+
+function VolumeInputs({
+  effFloors,
+  effFloorArea,
+  programFloorArea,
+  buildableArea,
+  hasFloorsOverride,
+  hasFloorAreaOverride,
+  floorHeight,
+  onFloors,
+  onFloorArea,
+  onMatchProgram,
+  onMatchBuildable,
+}: {
+  effFloors: number;
+  effFloorArea: number;
+  programFloorArea: number;
+  buildableArea: number;
+  hasFloorsOverride: boolean;
+  hasFloorAreaOverride: boolean;
+  floorHeight: number;
+  onFloors: (v: number | undefined) => void;
+  onFloorArea: (v: number | undefined) => void;
+  onMatchProgram: () => void;
+  onMatchBuildable: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="eyebrow text-ink-500">Volume</div>
+        <div className="flex items-center gap-3">
+          <button
+            className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900"
+            onClick={onMatchProgram}
+            title="Reset overrides — match the program (units × interior area / floors)"
+          >Match program</button>
+          <button
+            className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900"
+            onClick={onMatchBuildable}
+            title="Set floor area = buildable area (max coverage)"
+          >Fill buildable</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={`Floors${hasFloorsOverride ? " *" : ""}`}>
+          <div className="relative">
+            <input
+              type="number"
+              step={1}
+              min={1}
+              className="cell-input text-right pr-7"
+              value={effFloors}
+              onChange={(e) => {
+                const n = Math.max(1, Math.round(parseFloat(e.target.value) || 1));
+                onFloors(n);
+              }}
+            />
+            {hasFloorsOverride && (
+              <button
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 text-[14px] leading-none"
+                onClick={() => onFloors(undefined)}
+                title="Reset to project floors"
+              >×</button>
+            )}
+          </div>
+        </Field>
+        <Field label={`Floor area (m²)${hasFloorAreaOverride ? " *" : ""}`}>
+          <div className="relative">
+            <input
+              type="number"
+              step={1}
+              min={0}
+              className="cell-input text-right pr-7"
+              value={Math.round(effFloorArea)}
+              onChange={(e) => {
+                const n = Math.max(0, parseFloat(e.target.value) || 0);
+                onFloorArea(n);
+              }}
+            />
+            {hasFloorAreaOverride && (
+              <button
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700 text-[14px] leading-none"
+                onClick={() => onFloorArea(undefined)}
+                title="Reset to program-derived"
+              >×</button>
+            )}
+          </div>
+        </Field>
+      </div>
+      <div className="text-[11px] text-ink-500 mt-2 leading-relaxed">
+        Auto values: <span className="tabular-nums">{programFloorArea.toFixed(0)} m²/floor</span> from program,
+        max <span className="tabular-nums">{buildableArea.toFixed(0)} m²</span> by buildable.
+        Building height = floors × {floorHeight} m. The asterisk marks an override.
+      </div>
+    </div>
+  );
+}
 
 function RectangularInputs({
   project, patch, placeholder,
