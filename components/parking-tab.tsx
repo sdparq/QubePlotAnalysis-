@@ -10,6 +10,7 @@ export default function ParkingTab() {
   const removeP = useStore((s) => s.removeParking);
   const upsertU = useStore((s) => s.upsertOtherUse);
   const removeU = useStore((s) => s.removeOtherUse);
+  const upsertTypology = useStore((s) => s.upsertTypology);
   const r = computeParking(project);
 
   return (
@@ -138,7 +139,22 @@ export default function ParkingTab() {
                   <td className="font-medium text-ink-900">{rt.typology.name}</td>
                   <td className="text-right text-ink-500 text-xs">{rt.typology.category}</td>
                   <td className="text-right">{fmt0(rt.units)}</td>
-                  <td className="text-right tabular-nums">{rt.ratio.toFixed(2)}</td>
+                  <td className="cell-edit">
+                    <input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      className="cell-input text-right"
+                      value={rt.ratio}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        upsertTypology({
+                          ...rt.typology,
+                          parkingPerUnit: Number.isFinite(v) && v >= 0 ? v : 0,
+                        });
+                      }}
+                    />
+                  </td>
                   <td className="text-right">{fmt0(rt.required)}</td>
                 </tr>
               ))}
