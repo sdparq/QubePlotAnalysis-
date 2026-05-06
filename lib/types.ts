@@ -162,4 +162,17 @@ export interface Project {
   targetGFA?: number;
   /** How the user enters common area sizes. "absolute" = m² × floors (default); "percentage" = each row stores a fraction of targetGFA and the m² is derived. */
   commonAreasInputMode?: "absolute" | "percentage";
+  /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
+  garbage?: GarbageOverrides;
+}
+
+export interface GarbageOverrides {
+  generationKgPer100sqmPerDay?: number;  // default 12 (Dubai DM)
+  storageDays?: number;                   // default 2
+  densityKgPerM3?: number;                // default 150
+  containerCapacityM3?: number;           // default 2.5
+  containerWidthM?: number;               // default 1.37
+  containerLengthM?: number;              // default 2.04
+  separationM?: number;                   // default 0.15
+  frontClearanceM?: number;               // default 0.6
 }

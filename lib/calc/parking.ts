@@ -1,4 +1,4 @@
-import type { Project } from "../types";
+import type { Project, Typology } from "../types";
 import { DUBAI_STANDARDS } from "../standards/dubai";
 
 export interface ParkingResult {
@@ -6,6 +6,9 @@ export interface ParkingResult {
   availablePRM: number;
   availableTotal: number;
   byLevel: { name: string; standard: number; prm: number; total: number }[];
+  /** Per-typology breakdown — each row uses the typology's own parkingPerUnit */
+  requiredByTypology: { typology: Typology; units: number; ratio: number; required: number }[];
+  /** Aggregated by category for high-level summary (sums up the per-typology values) */
   requiredByCategory: { category: string; units: number; ratio: number; required: number }[];
   totalUnitsCounted: number;
   requiredTotal: number;
@@ -29,23 +32,43 @@ export function computeParking(project: Project): ParkingResult {
   const availablePRM = byLevel.reduce((s, l) => s + l.prm, 0);
   const availableTotal = availableStandard + availablePRM;
 
-  const unitCounts: Record<string, number> = {};
+  // Active program cells only (within current floor range)
+  const activeCells = project.program.filter(
+    (c) => c.floor >= 1 && c.floor <= project.numFloors
+  );
+
+  // Sum units per typology id
+  const unitsByTypology = new Map<string, number>();
   const tById = new Map(project.typologies.map((t) => [t.id, t]));
-  for (const cell of project.program) {
-    const t = tById.get(cell.typologyId);
-    if (!t || !cell.count) continue;
-    unitCounts[t.category] = (unitCounts[t.category] || 0) + cell.count;
+  for (const cell of activeCells) {
+    if (!tById.has(cell.typologyId) || !cell.count) continue;
+    unitsByTypology.set(cell.typologyId, (unitsByTypology.get(cell.typologyId) || 0) + cell.count);
   }
 
-  const ratios = DUBAI_STANDARDS.parking.ratiosByCategory as Record<string, number>;
-  const requiredByCategory = Object.entries(unitCounts).map(([category, units]) => {
-    const tForCategory = project.typologies.find((t) => t.category === category);
-    const ratio = tForCategory?.parkingPerUnit ?? ratios[category] ?? 1;
-    return { category, units, ratio, required: units * ratio };
-  });
+  // Per-typology required (uses each typology's own parkingPerUnit)
+  const requiredByTypology = project.typologies
+    .map((t) => {
+      const units = unitsByTypology.get(t.id) || 0;
+      return { typology: t, units, ratio: t.parkingPerUnit, required: units * t.parkingPerUnit };
+    })
+    .filter((r) => r.units > 0);
 
-  const totalUnitsCounted = Object.values(unitCounts).reduce((s, v) => s + v, 0);
-  const requiredTotal = requiredByCategory.reduce((s, r) => s + r.required, 0);
+  // Aggregate by category from the per-typology rows
+  const catMap = new Map<string, { units: number; required: number }>();
+  for (const r of requiredByTypology) {
+    const cat = r.typology.category;
+    const prev = catMap.get(cat) ?? { units: 0, required: 0 };
+    catMap.set(cat, { units: prev.units + r.units, required: prev.required + r.required });
+  }
+  const requiredByCategory = Array.from(catMap.entries()).map(([category, v]) => ({
+    category,
+    units: v.units,
+    ratio: v.units > 0 ? v.required / v.units : 0, // weighted average ratio
+    required: v.required,
+  }));
+
+  const totalUnitsCounted = requiredByTypology.reduce((s, r) => s + r.units, 0);
+  const requiredTotal = requiredByTypology.reduce((s, r) => s + r.required, 0);
 
   const otherUsesRequired = project.otherUses.map((u) => ({
     name: u.name,
@@ -64,6 +87,7 @@ export function computeParking(project: Project): ParkingResult {
     availablePRM,
     availableTotal,
     byLevel,
+    requiredByTypology,
     requiredByCategory,
     totalUnitsCounted,
     requiredTotal,

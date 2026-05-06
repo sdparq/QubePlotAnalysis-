@@ -112,53 +112,89 @@ export default function ParkingTab() {
       <div className="card">
         <div className="mb-5">
           <h2 className="section-title">Required vs available</h2>
+          <p className="section-sub">Each typology contributes its own ratio (set in the Typologies tab).</p>
         </div>
         <div>
           <table className="tbl w-full table-fixed">
             <colgroup>
               <col />
+              <col style={{ width: 100 }} />
               <col style={{ width: 110 }} />
               <col style={{ width: 140 }} />
               <col style={{ width: 110 }} />
             </colgroup>
             <thead>
               <tr>
-                <th>Category</th>
+                <th>Typology</th>
+                <th className="text-right">Category</th>
                 <th className="text-right">Units</th>
                 <th className="text-right">Spaces / unit</th>
                 <th className="text-right">Required</th>
               </tr>
             </thead>
             <tbody>
-              {r.requiredByCategory.map((rc) => (
-                <tr key={rc.category}>
-                  <td className="font-medium text-ink-900">{rc.category}</td>
-                  <td className="text-right">{fmt0(rc.units)}</td>
-                  <td className="text-right">{rc.ratio}</td>
-                  <td className="text-right">{fmt0(rc.required)}</td>
+              {r.requiredByTypology.map((rt) => (
+                <tr key={rt.typology.id}>
+                  <td className="font-medium text-ink-900">{rt.typology.name}</td>
+                  <td className="text-right text-ink-500 text-xs">{rt.typology.category}</td>
+                  <td className="text-right">{fmt0(rt.units)}</td>
+                  <td className="text-right tabular-nums">{rt.ratio.toFixed(2)}</td>
+                  <td className="text-right">{fmt0(rt.required)}</td>
                 </tr>
               ))}
               <tr className="row-subtotal">
-                <td colSpan={3} className="text-right uppercase tracking-[0.10em] text-[11px]">Residential required</td>
+                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Residential required</td>
                 <td className="text-right">{fmt0(r.requiredTotal)}</td>
               </tr>
               {r.otherUsesTotal > 0 && (
                 <tr className="row-subtotal">
-                  <td colSpan={3} className="text-right uppercase tracking-[0.10em] text-[11px]">Other uses required</td>
+                  <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Other uses required</td>
                   <td className="text-right">{fmt0(r.otherUsesTotal)}</td>
                 </tr>
               )}
               <tr className="row-total">
-                <td colSpan={3} className="text-right uppercase tracking-[0.10em] text-[11px]">Total required</td>
+                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Total required</td>
                 <td className="text-right">{fmt0(r.grandRequired)}</td>
               </tr>
               <tr>
-                <td colSpan={3} className="text-right text-ink-500 text-xs">Of which PRM ({(project.prmPercent * 100).toFixed(0)}%)</td>
+                <td colSpan={4} className="text-right text-ink-500 text-xs">Of which PRM ({(project.prmPercent * 100).toFixed(0)}%)</td>
                 <td className="text-right">{fmt0(r.requiredPRM)}</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        {r.requiredByCategory.length > 0 && (
+          <div className="mt-5">
+            <div className="eyebrow text-ink-500 mb-2">Summary by category</div>
+            <table className="tbl w-full table-fixed">
+              <colgroup>
+                <col />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 110 }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th className="text-right">Units</th>
+                  <th className="text-right">Avg ratio</th>
+                  <th className="text-right">Required</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.requiredByCategory.map((rc) => (
+                  <tr key={rc.category}>
+                    <td className="font-medium text-ink-900">{rc.category}</td>
+                    <td className="text-right">{fmt0(rc.units)}</td>
+                    <td className="text-right tabular-nums">{rc.ratio.toFixed(2)}</td>
+                    <td className="text-right">{fmt0(rc.required)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="kpi">
             <span className="kpi-label">Total balance</span>
