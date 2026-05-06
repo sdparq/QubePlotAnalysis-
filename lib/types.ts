@@ -105,4 +105,16 @@ export interface Project {
   massingFloors?: number;
   /** Override for the 3D massing only — building footprint area per floor (m²). Falls back to GFA/floors. */
   massingFloorArea?: number;
+  /** Building shape preset for the 3D massing. Defaults to "block". */
+  massingShape?: "block" | "podiumTower" | "courtyard" | "twinTowers";
+  /** Podium-and-tower preset parameters. */
+  podiumFloors?: number;
+  podiumCoverage?: number;          // 0..1 fraction of buildable area
+  towerCoverage?: number;           // 0..1 fraction of buildable area
+  towerPosition?: "C" | "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
+  /** Courtyard preset — fraction of the building footprint that is the central patio. */
+  courtyardRatio?: number;          // 0..0.6
+  /** Twin-towers preset. */
+  twinSeparation?: number;          // metres between tower centroids
+  twinCoverage?: number;            // 0..1 fraction of buildable area, per tower
 }

@@ -14,10 +14,9 @@ import {
   polygonPerimeter,
   rectanglePlotPolygon,
   rectangleToPolygon,
-  scalePolygon,
-  scalePolygonToArea,
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
+import { buildMassing, type MassingShape, type TowerPosition } from "@/lib/massing";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
   ssr: false,
@@ -81,18 +80,53 @@ export default function MassingTab() {
   const effFloors = project.massingFloors ?? project.numFloors;
   const effFloorArea = project.massingFloorArea ?? programFloorArea;
   const buildingHeight = effFloors * project.floorHeight;
-  const totalVolumeGFA = effFloors * effFloorArea;
 
-  // ---- derive building footprint by scaling buildable polygon to effective floor area ----
-  const buildingPoly: Point[] = useMemo(() => {
-    if (buildablePoly.length < 3 || effFloorArea < 1) return [];
-    const scaled = scalePolygonToArea(buildablePoly, Math.min(effFloorArea, buildableArea));
-    return scaled.length >= 3 ? scaled : [];
-  }, [buildablePoly, effFloorArea, buildableArea]);
+  // Shape preset + parameters with sensible defaults
+  const shape: MassingShape = project.massingShape ?? "block";
+  const podiumFloors = project.podiumFloors ?? Math.min(2, effFloors);
+  const podiumCoverage = project.podiumCoverage ?? 0.95;
+  const towerCoverage = project.towerCoverage ?? 0.45;
+  const towerPosition: TowerPosition = project.towerPosition ?? "C";
+  const courtyardRatio = project.courtyardRatio ?? 0.18;
+  const twinSeparation = project.twinSeparation ?? Math.max(8, Math.sqrt(buildableArea) * 0.25);
+  const twinCoverage = project.twinCoverage ?? 0.28;
 
-  const exceedsBuildable = effFloorArea > buildableArea + 0.01 && buildableArea > 0;
-  const coverageOfBuildable = buildableArea > 0 ? Math.min(1, effFloorArea / buildableArea) : 0;
-  const plotCoverage = plotPolyArea > 0 ? Math.min(1, effFloorArea / plotPolyArea) : 0;
+  const massing = useMemo(
+    () =>
+      buildMassing({
+        buildable: buildablePoly,
+        effFloors,
+        effFloorArea,
+        floorHeight: project.floorHeight,
+        shape,
+        podiumFloors,
+        podiumCoverage,
+        towerCoverage,
+        towerPosition,
+        courtyardRatio,
+        twinSeparation,
+        twinCoverage,
+      }),
+    [
+      buildablePoly,
+      effFloors,
+      effFloorArea,
+      project.floorHeight,
+      shape,
+      podiumFloors,
+      podiumCoverage,
+      towerCoverage,
+      towerPosition,
+      courtyardRatio,
+      twinSeparation,
+      twinCoverage,
+    ]
+  );
+
+  const totalVolumeGFA = massing.totalGFA;
+  const exceedsBuildable = effFloorArea > buildableArea + 0.01 && buildableArea > 0 && shape === "block";
+  const coverageOfBuildable = buildableArea > 0 ? Math.min(1, (massing.volumes[0]?.polygon ? polygonArea(massing.volumes[0].polygon) : 0) / buildableArea) : 0;
+  const plotCoverage = plotPolyArea > 0 && massing.volumes.length > 0 ? Math.min(1, polygonArea(massing.volumes[0].polygon) / plotPolyArea) : 0;
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
   const programVsVolumeDelta = totalVolumeGFA - program.totalGFABuilding;
   // ---- vertex editor handlers ----
@@ -169,9 +203,8 @@ export default function MassingTab() {
             <MassingScene
               plot={plotPoly}
               buildable={buildablePoly}
-              building={buildingPoly}
-              buildingHeight={buildingHeight}
-              numFloors={effFloors}
+              volumes={massing.volumes}
+              primaryFootprint={massing.primaryFootprint}
               floorHeight={project.floorHeight}
               showFrontMarker={mode === "rectangular"}
               edgeColors={edgeColors}
@@ -206,6 +239,24 @@ export default function MassingTab() {
                 onRecentre={recentrePolygon}
               />
             )}
+
+            <ShapeSelector
+              shape={shape}
+              onShape={(s) => patch({ massingShape: s })}
+            />
+
+            <ShapeParams
+              shape={shape}
+              effFloors={effFloors}
+              podiumFloors={podiumFloors}
+              podiumCoverage={podiumCoverage}
+              towerCoverage={towerCoverage}
+              towerPosition={towerPosition}
+              courtyardRatio={courtyardRatio}
+              twinSeparation={twinSeparation}
+              twinCoverage={twinCoverage}
+              onPatch={(p) => patch(p)}
+            />
 
             <VolumeInputs
               effFloors={effFloors}
@@ -306,6 +357,188 @@ export default function MassingTab() {
 }
 
 /* -------------------- subcomponents -------------------- */
+
+const SHAPE_OPTIONS: { id: MassingShape; label: string; sub: string }[] = [
+  { id: "block", label: "Single block", sub: "Uniform extrusion of the buildable area." },
+  { id: "podiumTower", label: "Podium + tower", sub: "Wide podium at base, narrow tower above." },
+  { id: "courtyard", label: "Courtyard", sub: "Perimeter ring with a central patio." },
+  { id: "twinTowers", label: "Twin towers", sub: "Two parallel towers separated by a gap." },
+];
+
+function ShapeSelector({ shape, onShape }: { shape: MassingShape; onShape: (s: MassingShape) => void }) {
+  return (
+    <div>
+      <div className="eyebrow text-ink-500 mb-2">Building shape</div>
+      <div className="grid grid-cols-2 gap-2">
+        {SHAPE_OPTIONS.map((o) => {
+          const active = o.id === shape;
+          return (
+            <button
+              key={o.id}
+              onClick={() => onShape(o.id)}
+              className={`text-left p-2.5 border transition-colors ${
+                active
+                  ? "border-qube-500 bg-qube-50"
+                  : "border-ink-200 bg-white hover:border-qube-300 hover:bg-bone-50"
+              }`}
+            >
+              <div className={`text-[12px] font-medium ${active ? "text-qube-800" : "text-ink-900"}`}>
+                {o.label}
+              </div>
+              <div className="text-[10.5px] text-ink-500 mt-0.5 leading-snug">{o.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const TOWER_POSITIONS: TowerPosition[] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
+
+function ShapeParams({
+  shape,
+  effFloors,
+  podiumFloors,
+  podiumCoverage,
+  towerCoverage,
+  towerPosition,
+  courtyardRatio,
+  twinSeparation,
+  twinCoverage,
+  onPatch,
+}: {
+  shape: MassingShape;
+  effFloors: number;
+  podiumFloors: number;
+  podiumCoverage: number;
+  towerCoverage: number;
+  towerPosition: TowerPosition;
+  courtyardRatio: number;
+  twinSeparation: number;
+  twinCoverage: number;
+  onPatch: (p: Record<string, unknown>) => void;
+}) {
+  if (shape === "block") return null;
+
+  if (shape === "podiumTower") {
+    return (
+      <div className="grid gap-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`Podium floors (of ${effFloors})`}>
+            <input
+              type="number"
+              step={1}
+              min={0}
+              max={effFloors}
+              className="cell-input text-right"
+              value={podiumFloors}
+              onChange={(e) => onPatch({ podiumFloors: Math.max(0, Math.min(effFloors, Math.round(parseFloat(e.target.value) || 0))) })}
+            />
+          </Field>
+          <Field label="Tower position">
+            <select
+              className="cell-input"
+              value={towerPosition}
+              onChange={(e) => onPatch({ towerPosition: e.target.value as TowerPosition })}
+            >
+              {TOWER_POSITIONS.map((p) => <option key={p} value={p}>{p === "C" ? "Centred" : p}</option>)}
+            </select>
+          </Field>
+        </div>
+        <PercentSlider
+          label="Podium coverage of buildable"
+          value={podiumCoverage}
+          onChange={(v) => onPatch({ podiumCoverage: v })}
+          min={0.4} max={1} step={0.01}
+        />
+        <PercentSlider
+          label="Tower coverage of buildable"
+          value={towerCoverage}
+          onChange={(v) => onPatch({ towerCoverage: v })}
+          min={0.1} max={0.9} step={0.01}
+        />
+        <p className="text-[11px] text-ink-500 leading-relaxed">
+          GFA shown below is computed from the actual podium and tower footprints, not the global floor-area override.
+        </p>
+      </div>
+    );
+  }
+
+  if (shape === "courtyard") {
+    return (
+      <div className="grid gap-3">
+        <PercentSlider
+          label="Courtyard ratio (% of footprint)"
+          value={courtyardRatio}
+          onChange={(v) => onPatch({ courtyardRatio: v })}
+          min={0} max={0.6} step={0.005}
+        />
+        <p className="text-[11px] text-ink-500 leading-relaxed">
+          The "Floor area" below is the net usable area per floor (outer ring minus patio). The outer footprint
+          is sized accordingly, capped at the buildable area.
+        </p>
+      </div>
+    );
+  }
+
+  if (shape === "twinTowers") {
+    return (
+      <div className="grid gap-3">
+        <Field label="Tower separation (m)">
+          <input
+            type="number"
+            step={0.5}
+            min={0}
+            className="cell-input text-right"
+            value={twinSeparation.toFixed(1)}
+            onChange={(e) => onPatch({ twinSeparation: Math.max(0, parseFloat(e.target.value) || 0) })}
+          />
+        </Field>
+        <PercentSlider
+          label="Each tower coverage of buildable"
+          value={twinCoverage}
+          onChange={(v) => onPatch({ twinCoverage: v })}
+          min={0.05} max={0.45} step={0.01}
+        />
+        <p className="text-[11px] text-ink-500 leading-relaxed">
+          Two identical towers spaced along the X axis. Increase the separation to reveal a courtyard between them.
+        </p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function PercentSlider({
+  label, value, onChange, min, max, step,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">{label}</span>
+        <span className="text-[11px] text-ink-700 tabular-nums">{(value * 100).toFixed(0)}%</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full accent-qube-500"
+      />
+    </div>
+  );
+}
 
 function VolumeInputs({
   effFloors,
