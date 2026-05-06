@@ -10,6 +10,7 @@ import ParkingTab from "@/components/parking-tab";
 import LiftsTab from "@/components/lifts-tab";
 import GarbageTab from "@/components/garbage-tab";
 import MassingTab from "@/components/massing-tab";
+import EconomicTab from "@/components/economic-tab";
 import ResultsTab from "@/components/results-tab";
 import HeaderBar from "@/components/header-bar";
 
@@ -23,7 +24,8 @@ const TABS = [
   { id: "lifts", num: "06", label: "Lifts" },
   { id: "garbage", num: "07", label: "Garbage" },
   { id: "massing", num: "08", label: "Massing" },
-  { id: "results", num: "09", label: "Results" },
+  { id: "economic", num: "09", label: "Economic" },
+  { id: "results", num: "10", label: "Results" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -73,6 +75,7 @@ export default function Page() {
           {tab === "lifts" && <LiftsTab />}
           {tab === "garbage" && <GarbageTab />}
           {tab === "massing" && <MassingTab />}
+          {tab === "economic" && <EconomicTab />}
           {tab === "results" && <ResultsTab />}
         </div>
       </main>

@@ -164,6 +164,8 @@ export interface Project {
   commonAreasInputMode?: "absolute" | "percentage";
   /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
   garbage?: GarbageOverrides;
+  /** Real-estate economic analysis configuration. */
+  economic?: EconomicConfig;
 }
 
 export interface GarbageOverrides {
@@ -175,4 +177,35 @@ export interface GarbageOverrides {
   containerLengthM?: number;              // default 2.04
   separationM?: number;                   // default 0.15
   frontClearanceM?: number;               // default 0.6
+}
+
+export interface EconomicConfig {
+  currency?: string;                          // default "AED"
+  /** AED per m² of sellable area, keyed by typology id. */
+  typologyPricing?: { [typologyId: string]: number };
+  /** Parking sold separately. */
+  parkingSpacesForSale?: number;
+  parkingPricePerSpace?: number;
+  /** Optional retail / F&B revenue. */
+  retailRevenue?: number;
+
+  /** Land acquisition cost (total). */
+  landCost?: number;
+  /** Construction rate per m² of BUA. */
+  constructionRatePerBUA?: number;
+
+  /** Soft costs (consultants, design fees) — fraction of construction. */
+  softCostsPct?: number;          // default 0.06
+  /** Marketing & sales — fraction of revenue. */
+  marketingPct?: number;          // default 0.04
+  /** Permits & DM fees — fraction of construction. */
+  permitsPct?: number;            // default 0.02
+  /** Contingency — fraction of (construction + soft costs). */
+  contingencyPct?: number;        // default 0.05
+  /** Financing / interest during construction — fraction of construction. */
+  financingPct?: number;          // default 0.03
+  /** Brokerage / agent fees — fraction of revenue. */
+  brokeragePct?: number;          // default 0.02
+  /** Optional branding fee (e.g. hotel-branded residence) — fraction of revenue. */
+  brandingFeePct?: number;        // default 0
 }
