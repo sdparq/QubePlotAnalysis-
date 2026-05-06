@@ -1,10 +1,11 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
 import { fmt2, fmtPct } from "@/lib/format";
 import PlanTrace from "./plan-trace";
+import VariantCard from "./variant-card";
 import {
   type Point,
   edgeLengths,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import { buildMassing, type MassingShape, type TowerPosition } from "@/lib/massing";
+import { generateVariants, type Variant, type VariantParams } from "@/lib/variants";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
   ssr: false,
@@ -124,6 +126,42 @@ export default function MassingTab() {
   );
 
   const totalVolumeGFA = massing.totalGFA;
+
+  // Variants
+  const [variants, setVariants] = useState<Variant[]>([]);
+  const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
+
+  function exploreVariants() {
+    const list = generateVariants({
+      buildable: buildablePoly,
+      effFloors,
+      effFloorArea,
+      floorHeight: project.floorHeight,
+      programGFA: program.totalGFABuilding,
+    });
+    setVariants(list);
+  }
+
+  function applyVariant(v: Variant) {
+    const p: Partial<typeof project> = { massingShape: v.params.shape };
+    const params = v.params;
+    if (params.shape === "block") {
+      if (params.floorArea !== undefined) p.massingFloorArea = params.floorArea;
+    } else if (params.shape === "podiumTower") {
+      if (params.podiumFloors !== undefined) p.podiumFloors = params.podiumFloors;
+      if (params.podiumCoverage !== undefined) p.podiumCoverage = params.podiumCoverage;
+      if (params.towerCoverage !== undefined) p.towerCoverage = params.towerCoverage;
+      if (params.towerPosition !== undefined) p.towerPosition = params.towerPosition;
+    } else if (params.shape === "courtyard") {
+      if (params.courtyardRatio !== undefined) p.courtyardRatio = params.courtyardRatio;
+      if (params.floorArea !== undefined) p.massingFloorArea = params.floorArea;
+    } else if (params.shape === "twinTowers") {
+      if (params.twinSeparation !== undefined) p.twinSeparation = params.twinSeparation;
+      if (params.twinCoverage !== undefined) p.twinCoverage = params.twinCoverage;
+    }
+    patch(p);
+    setActiveVariantId(v.id);
+  }
   const exceedsBuildable = effFloorArea > buildableArea + 0.01 && buildableArea > 0 && shape === "block";
   const coverageOfBuildable = buildableArea > 0 ? Math.min(1, (massing.volumes[0]?.polygon ? polygonArea(massing.volumes[0].polygon) : 0) / buildableArea) : 0;
   const plotCoverage = plotPolyArea > 0 && massing.volumes.length > 0 ? Math.min(1, polygonArea(massing.volumes[0].polygon) / plotPolyArea) : 0;
@@ -321,6 +359,45 @@ export default function MassingTab() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="section-title">Variants</h2>
+            <p className="section-sub">
+              Generate and compare massing alternatives ranked by GFA fit, façade exposure and coverage efficiency.
+              Click a thumbnail to apply its parameters to the 3D viewer above.
+            </p>
+          </div>
+          <button
+            className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
+            onClick={exploreVariants}
+            disabled={buildablePoly.length < 3}
+          >
+            {variants.length === 0 ? "Explore variants" : "Re-explore"}
+          </button>
+        </div>
+
+        {variants.length === 0 ? (
+          <div className="text-sm text-ink-500 italic py-8 text-center border border-dashed border-ink-200 bg-bone-50">
+            No variants yet — click "Explore variants" to generate alternatives.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {variants.map((v) => (
+              <VariantCard
+                key={v.id}
+                variant={v}
+                plot={plotPoly}
+                buildable={buildablePoly}
+                programGFA={program.totalGFABuilding}
+                active={v.id === activeVariantId}
+                onApply={() => applyVariant(v)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {project.parcel && (
