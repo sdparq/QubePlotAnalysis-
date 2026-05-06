@@ -37,7 +37,18 @@ export default function SetupTab() {
           <Field label="PRM parking %">
             <NumInput value={project.prmPercent * 100} step={0.5} onChange={(v) => patch({ prmPercent: v / 100 })} suffix="%" />
           </Field>
+          <Field label="Target GFA (m²)">
+            <NumInput
+              value={project.targetGFA ?? 0}
+              step={10}
+              onChange={(v) => patch({ targetGFA: v > 0 ? v : undefined })}
+            />
+          </Field>
         </div>
+        <p className="text-[11px] text-ink-500 mt-3">
+          Target GFA is the building&rsquo;s GFA cap (typically FAR × plot area). It powers the
+          &ldquo;% of GFA&rdquo; input mode in the Common Areas tab — leave 0 if you prefer to enter areas in m² there.
+        </p>
       </div>
 
       <div className="card">

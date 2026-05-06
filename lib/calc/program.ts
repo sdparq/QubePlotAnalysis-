@@ -1,5 +1,5 @@
 import type { Project, Typology } from "../types";
-import { commonAreaCategory } from "../types";
+import { commonAreaCategory, effectiveCommonAreaTotal } from "../types";
 
 export interface FloorSummary {
   floor: number;
@@ -104,7 +104,7 @@ export function computeProgram(project: Project): ProgramResult {
   let commonAreasBUAonly = 0;
   let commonAreasOpen = 0;
   for (const c of project.commonAreas) {
-    const total = c.area * c.floors;
+    const total = effectiveCommonAreaTotal(c, project);
     const cat = commonAreaCategory(c);
     if (cat === "GFA") commonAreasGFA += total;
     else if (cat === "BUA") commonAreasBUAonly += total;
@@ -126,7 +126,7 @@ export function computeProgram(project: Project): ProgramResult {
   let amenitiesGFAarea = 0;
   for (const c of project.commonAreas) {
     if (commonAreaCategory(c) !== "GFA") continue;
-    const total = c.area * c.floors;
+    const total = effectiveCommonAreaTotal(c, project);
     if (circulationKeywords.test(c.name)) circulationGFA += total;
     else if (servicesKeywords.test(c.name)) servicesGFA += total;
     else amenitiesGFAarea += total;
