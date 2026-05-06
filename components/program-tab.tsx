@@ -79,8 +79,8 @@ export default function ProgramTab() {
               <tr className="row-total">
                 <td>TOTAL</td>
                 {project.typologies.map((t) => {
-                  const total = project.program.filter((c) => c.typologyId === t.id).reduce((s, c) => s + c.count, 0);
-                  return <td key={t.id} className="text-right !px-2">{fmt0(total)}</td>;
+                  const ts = program.byTypology.find((x) => x.typology.id === t.id);
+                  return <td key={t.id} className="text-right !px-2">{fmt0(ts?.totalUnits ?? 0)}</td>;
                 })}
                 <td className="text-right !px-2">{fmt0(program.totalUnits)}</td>
                 <td className="text-right">{fmt2(program.totalSellable)}</td>

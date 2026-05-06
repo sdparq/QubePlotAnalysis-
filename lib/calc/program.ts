@@ -47,9 +47,13 @@ export interface ProgramResult {
 export function computeProgram(project: Project): ProgramResult {
   const tById = new Map(project.typologies.map((t) => [t.id, t]));
 
+  // Only consider cells whose floor is within the project's current floor range.
+  // Stale cells (left over after numFloors was reduced) must not contribute to any total.
+  const activeCells = project.program.filter((c) => c.floor >= 1 && c.floor <= project.numFloors);
+
   const floors = Array.from({ length: project.numFloors }, (_, i) => i + 1);
   const byFloor: FloorSummary[] = floors.map((floor) => {
-    const cells = project.program.filter((c) => c.floor === floor);
+    const cells = activeCells.filter((c) => c.floor === floor);
     let units = 0,
       totalBalcony = 0,
       totalSellable = 0,
@@ -71,7 +75,7 @@ export function computeProgram(project: Project): ProgramResult {
   const totalSellable = byFloor.reduce((s, f) => s + f.totalSellable, 0);
 
   const byTypology: TypologySummary[] = project.typologies.map((t) => {
-    const totalUnitsT = project.program
+    const totalUnitsT = activeCells
       .filter((c) => c.typologyId === t.id)
       .reduce((s, c) => s + c.count, 0);
     return {
