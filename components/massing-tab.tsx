@@ -17,7 +17,7 @@ import {
   rectangleToPolygon,
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
-import { buildMassing, type MassingShape, type TowerPosition } from "@/lib/massing";
+import { buildMassing, type CornerPosition, type MassingShape, type SidePosition, type TowerPosition } from "@/lib/massing";
 import { generateVariants, type Variant, type VariantParams } from "@/lib/variants";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
@@ -92,6 +92,13 @@ export default function MassingTab() {
   const courtyardRatio = project.courtyardRatio ?? 0.18;
   const twinSeparation = project.twinSeparation ?? Math.max(8, Math.sqrt(buildableArea) * 0.25);
   const twinCoverage = project.twinCoverage ?? 0.28;
+  const steppedSteps = project.steppedSteps ?? 4;
+  const steppedShrink = project.steppedShrink ?? 0.15;
+  const lNotchPosition: CornerPosition = project.lNotchPosition ?? "NE";
+  const lNotchRatio = project.lNotchRatio ?? 0.32;
+  const uOpening: SidePosition = project.uOpening ?? "N";
+  const uArmRatio = project.uArmRatio ?? 0.28;
+  const uNotchDepth = project.uNotchDepth ?? 0.55;
 
   const massing = useMemo(
     () =>
@@ -108,6 +115,13 @@ export default function MassingTab() {
         courtyardRatio,
         twinSeparation,
         twinCoverage,
+        steppedSteps,
+        steppedShrink,
+        lNotchPosition,
+        lNotchRatio,
+        uOpening,
+        uArmRatio,
+        uNotchDepth,
       }),
     [
       buildablePoly,
@@ -122,6 +136,13 @@ export default function MassingTab() {
       courtyardRatio,
       twinSeparation,
       twinCoverage,
+      steppedSteps,
+      steppedShrink,
+      lNotchPosition,
+      lNotchRatio,
+      uOpening,
+      uArmRatio,
+      uNotchDepth,
     ]
   );
 
@@ -138,6 +159,9 @@ export default function MassingTab() {
       effFloorArea,
       floorHeight: project.floorHeight,
       programGFA: program.totalGFABuilding,
+      plotArea: plotPolyArea,
+      maxFAR: project.maxFAR,
+      maxHeightM: project.maxHeightM,
     });
     setVariants(list);
   }
@@ -158,6 +182,19 @@ export default function MassingTab() {
     } else if (params.shape === "twinTowers") {
       if (params.twinSeparation !== undefined) p.twinSeparation = params.twinSeparation;
       if (params.twinCoverage !== undefined) p.twinCoverage = params.twinCoverage;
+    } else if (params.shape === "stepped") {
+      if (params.steppedSteps !== undefined) p.steppedSteps = params.steppedSteps;
+      if (params.steppedShrink !== undefined) p.steppedShrink = params.steppedShrink;
+      if (params.floorArea !== undefined) p.massingFloorArea = params.floorArea;
+    } else if (params.shape === "lShape") {
+      if (params.lNotchPosition !== undefined) p.lNotchPosition = params.lNotchPosition;
+      if (params.lNotchRatio !== undefined) p.lNotchRatio = params.lNotchRatio;
+      if (params.floorArea !== undefined) p.massingFloorArea = params.floorArea;
+    } else if (params.shape === "uShape") {
+      if (params.uOpening !== undefined) p.uOpening = params.uOpening;
+      if (params.uArmRatio !== undefined) p.uArmRatio = params.uArmRatio;
+      if (params.uNotchDepth !== undefined) p.uNotchDepth = params.uNotchDepth;
+      if (params.floorArea !== undefined) p.massingFloorArea = params.floorArea;
     }
     patch(p);
     setActiveVariantId(v.id);
@@ -293,6 +330,13 @@ export default function MassingTab() {
               courtyardRatio={courtyardRatio}
               twinSeparation={twinSeparation}
               twinCoverage={twinCoverage}
+              steppedSteps={steppedSteps}
+              steppedShrink={steppedShrink}
+              lNotchPosition={lNotchPosition}
+              lNotchRatio={lNotchRatio}
+              uOpening={uOpening}
+              uArmRatio={uArmRatio}
+              uNotchDepth={uNotchDepth}
               onPatch={(p) => patch(p)}
             />
 
@@ -308,6 +352,14 @@ export default function MassingTab() {
               onFloorArea={(v) => patch({ massingFloorArea: v })}
               onMatchProgram={() => patch({ massingFloorArea: undefined, massingFloors: undefined })}
               onMatchBuildable={() => patch({ massingFloorArea: buildableArea })}
+            />
+
+            <ConstraintsInputs
+              maxFAR={project.maxFAR}
+              maxHeightM={project.maxHeightM}
+              currentFAR={computedFar}
+              currentHeight={buildingHeight}
+              onPatch={(p) => patch(p)}
             />
 
             <div className="border-t border-ink-200 pt-4 grid gap-2 text-sm">
@@ -440,7 +492,13 @@ const SHAPE_OPTIONS: { id: MassingShape; label: string; sub: string }[] = [
   { id: "podiumTower", label: "Podium + tower", sub: "Wide podium at base, narrow tower above." },
   { id: "courtyard", label: "Courtyard", sub: "Perimeter ring with a central patio." },
   { id: "twinTowers", label: "Twin towers", sub: "Two parallel towers separated by a gap." },
+  { id: "stepped", label: "Stepped / terraced", sub: "Footprint shrinks every few floors." },
+  { id: "lShape", label: "L-shape", sub: "Notch removed from one corner." },
+  { id: "uShape", label: "U-shape", sub: "Two arms wrapping a central courtyard." },
 ];
+
+const CORNER_POSITIONS: CornerPosition[] = ["NW", "NE", "SW", "SE"];
+const SIDE_POSITIONS: SidePosition[] = ["N", "E", "S", "W"];
 
 function ShapeSelector({ shape, onShape }: { shape: MassingShape; onShape: (s: MassingShape) => void }) {
   return (
@@ -483,6 +541,13 @@ function ShapeParams({
   courtyardRatio,
   twinSeparation,
   twinCoverage,
+  steppedSteps,
+  steppedShrink,
+  lNotchPosition,
+  lNotchRatio,
+  uOpening,
+  uArmRatio,
+  uNotchDepth,
   onPatch,
 }: {
   shape: MassingShape;
@@ -494,6 +559,13 @@ function ShapeParams({
   courtyardRatio: number;
   twinSeparation: number;
   twinCoverage: number;
+  steppedSteps: number;
+  steppedShrink: number;
+  lNotchPosition: CornerPosition;
+  lNotchRatio: number;
+  uOpening: SidePosition;
+  uArmRatio: number;
+  uNotchDepth: number;
   onPatch: (p: Record<string, unknown>) => void;
 }) {
   if (shape === "block") return null;
@@ -585,6 +657,84 @@ function ShapeParams({
     );
   }
 
+  if (shape === "stepped") {
+    return (
+      <div className="grid gap-3">
+        <Field label={`Steps (max ${effFloors})`}>
+          <input
+            type="number"
+            step={1}
+            min={2}
+            max={Math.max(2, effFloors)}
+            className="cell-input text-right"
+            value={steppedSteps}
+            onChange={(e) => onPatch({ steppedSteps: Math.max(2, Math.min(effFloors, Math.round(parseFloat(e.target.value) || 2))) })}
+          />
+        </Field>
+        <PercentSlider
+          label="Shrink per step"
+          value={steppedShrink}
+          onChange={(v) => onPatch({ steppedShrink: v })}
+          min={0.02} max={0.4} step={0.005}
+        />
+        <p className="text-[11px] text-ink-500 leading-relaxed">
+          Each step is a stack of floors with a footprint reduced by the shrink % from the level below.
+          The base step uses the floor area set in Volume.
+        </p>
+      </div>
+    );
+  }
+
+  if (shape === "lShape") {
+    return (
+      <div className="grid gap-3">
+        <Field label="Notch corner">
+          <select
+            className="cell-input"
+            value={lNotchPosition}
+            onChange={(e) => onPatch({ lNotchPosition: e.target.value as CornerPosition })}
+          >
+            {CORNER_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </Field>
+        <PercentSlider
+          label="Notch size (% of bounding box)"
+          value={lNotchRatio}
+          onChange={(v) => onPatch({ lNotchRatio: v })}
+          min={0.1} max={0.55} step={0.01}
+        />
+      </div>
+    );
+  }
+
+  if (shape === "uShape") {
+    return (
+      <div className="grid gap-3">
+        <Field label="Open side">
+          <select
+            className="cell-input"
+            value={uOpening}
+            onChange={(e) => onPatch({ uOpening: e.target.value as SidePosition })}
+          >
+            {SIDE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </Field>
+        <PercentSlider
+          label="Arm thickness"
+          value={uArmRatio}
+          onChange={(v) => onPatch({ uArmRatio: v })}
+          min={0.15} max={0.45} step={0.01}
+        />
+        <PercentSlider
+          label="Notch depth"
+          value={uNotchDepth}
+          onChange={(v) => onPatch({ uNotchDepth: v })}
+          min={0.25} max={0.85} step={0.01}
+        />
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -613,6 +763,75 @@ function PercentSlider({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full accent-qube-500"
       />
+    </div>
+  );
+}
+
+function ConstraintsInputs({
+  maxFAR,
+  maxHeightM,
+  currentFAR,
+  currentHeight,
+  onPatch,
+}: {
+  maxFAR: number | undefined;
+  maxHeightM: number | undefined;
+  currentFAR: number;
+  currentHeight: number;
+  onPatch: (p: Record<string, unknown>) => void;
+}) {
+  const farOver = maxFAR !== undefined && maxFAR > 0 && currentFAR > maxFAR;
+  const heightOver = maxHeightM !== undefined && maxHeightM > 0 && currentHeight > maxHeightM;
+  return (
+    <div>
+      <div className="eyebrow text-ink-500 mb-2">Zoning constraints</div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Max FAR">
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            className="cell-input text-right"
+            value={maxFAR ?? ""}
+            placeholder="—"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") onPatch({ maxFAR: undefined });
+              else {
+                const n = parseFloat(raw);
+                onPatch({ maxFAR: Number.isFinite(n) && n >= 0 ? n : undefined });
+              }
+            }}
+          />
+        </Field>
+        <Field label="Max height (m)">
+          <input
+            type="number"
+            step={1}
+            min={0}
+            className="cell-input text-right"
+            value={maxHeightM ?? ""}
+            placeholder="—"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") onPatch({ maxHeightM: undefined });
+              else {
+                const n = parseFloat(raw);
+                onPatch({ maxHeightM: Number.isFinite(n) && n >= 0 ? n : undefined });
+              }
+            }}
+          />
+        </Field>
+      </div>
+      {(farOver || heightOver) && (
+        <div className="mt-2 text-[11px] text-red-700">
+          {farOver && <div>FAR {currentFAR.toFixed(2)} exceeds max {maxFAR}.</div>}
+          {heightOver && <div>Height {currentHeight.toFixed(1)} m exceeds max {maxHeightM} m.</div>}
+        </div>
+      )}
+      {!farOver && !heightOver && (maxFAR || maxHeightM) && (
+        <div className="mt-2 text-[11px] text-emerald-700">All constraints met.</div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,12 @@
 import { type Point, polygonArea, polygonPerimeter } from "./geom";
-import { buildMassing, type MassingResult, type MassingShape, type TowerPosition } from "./massing";
+import {
+  buildMassing,
+  type CornerPosition,
+  type MassingResult,
+  type MassingShape,
+  type SidePosition,
+  type TowerPosition,
+} from "./massing";
 
 export interface VariantParams {
   shape: MassingShape;
@@ -10,6 +17,13 @@ export interface VariantParams {
   courtyardRatio?: number;
   twinSeparation?: number;
   twinCoverage?: number;
+  steppedSteps?: number;
+  steppedShrink?: number;
+  lNotchPosition?: CornerPosition;
+  lNotchRatio?: number;
+  uOpening?: SidePosition;
+  uArmRatio?: number;
+  uNotchDepth?: number;
   floorArea?: number;
 }
 
@@ -39,9 +53,14 @@ export interface GenerateVariantsInput {
   effFloorArea: number;
   floorHeight: number;
   programGFA: number;
+  plotArea?: number;
+  maxFAR?: number;
+  maxHeightM?: number;
 }
 
 const TOWER_POSITIONS: TowerPosition[] = ["C", "N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const CORNERS: CornerPosition[] = ["NE", "NW", "SE", "SW"];
+const SIDES: SidePosition[] = ["N", "S", "E", "W"];
 
 export function generateVariants(input: GenerateVariantsInput): Variant[] {
   const { buildable, effFloors, effFloorArea, floorHeight, programGFA } = input;
@@ -101,6 +120,49 @@ export function generateVariants(input: GenerateVariantsInput): Variant[] {
     });
   }
 
+  // --- Stepped / terraced presets ---
+  for (const shrink of [0.10, 0.18]) {
+    candidates.push({
+      id: `stepped-${Math.round(shrink * 100)}`,
+      label: `Stepped · ${Math.round(shrink * 100)}% / step`,
+      params: {
+        shape: "stepped",
+        steppedSteps: 4,
+        steppedShrink: shrink,
+        floorArea: Math.min(effFloorArea, buildableArea),
+      },
+    });
+  }
+
+  // --- L-shape presets (one per corner) ---
+  for (const corner of CORNERS) {
+    candidates.push({
+      id: `l-${corner}`,
+      label: `L-shape · ${corner} notch`,
+      params: {
+        shape: "lShape",
+        lNotchPosition: corner,
+        lNotchRatio: 0.32,
+        floorArea: Math.min(effFloorArea, buildableArea * 0.7),
+      },
+    });
+  }
+
+  // --- U-shape presets (one per opening side) ---
+  for (const side of SIDES) {
+    candidates.push({
+      id: `u-${side}`,
+      label: `U-shape · open ${side}`,
+      params: {
+        shape: "uShape",
+        uOpening: side,
+        uArmRatio: 0.28,
+        uNotchDepth: 0.55,
+        floorArea: Math.min(effFloorArea, buildableArea * 0.65),
+      },
+    });
+  }
+
   // Build massing for each
   const built: Variant[] = candidates.map((c) => {
     const massing = buildMassing({
@@ -116,6 +178,13 @@ export function generateVariants(input: GenerateVariantsInput): Variant[] {
       courtyardRatio: c.params.courtyardRatio ?? 0.2,
       twinSeparation: c.params.twinSeparation ?? sep,
       twinCoverage: c.params.twinCoverage ?? 0.25,
+      steppedSteps: c.params.steppedSteps ?? 4,
+      steppedShrink: c.params.steppedShrink ?? 0.15,
+      lNotchPosition: c.params.lNotchPosition ?? "NE",
+      lNotchRatio: c.params.lNotchRatio ?? 0.3,
+      uOpening: c.params.uOpening ?? "N",
+      uArmRatio: c.params.uArmRatio ?? 0.28,
+      uNotchDepth: c.params.uNotchDepth ?? 0.55,
     });
     const buildingHeight = effFloors * floorHeight;
     const perimeter = massing.volumes.reduce((s, v) => s + polygonPerimeter(v.polygon), 0);
@@ -145,13 +214,21 @@ export function generateVariants(input: GenerateVariantsInput): Variant[] {
   const maxFacade = Math.max(1, ...facadeRatios);
 
   for (const v of valid) {
-    v.score = scoreVariant(v, buildableArea, programGFA, maxFacade);
+    v.score = scoreVariant(v, buildableArea, programGFA, maxFacade, input.plotArea, input.maxFAR, input.maxHeightM);
   }
   valid.sort((a, b) => b.score.total - a.score.total);
   return valid;
 }
 
-function scoreVariant(v: Variant, buildableArea: number, programGFA: number, maxFacade: number): VariantScore {
+function scoreVariant(
+  v: Variant,
+  buildableArea: number,
+  programGFA: number,
+  maxFacade: number,
+  plotArea?: number,
+  maxFAR?: number,
+  maxHeightM?: number
+): VariantScore {
   let gfaFit = 60;
   if (programGFA > 0) {
     const r = v.totalGFA / programGFA;
@@ -161,8 +238,22 @@ function scoreVariant(v: Variant, buildableArea: number, programGFA: number, max
   const facade = maxFacade > 0 ? Math.max(0, Math.min(100, (fr / maxFacade) * 100)) : 50;
   const cov = buildableArea > 0 ? v.avgFootprint / buildableArea : 0;
   const efficiency = Math.max(0, 100 - Math.abs(cov - 0.6) * 200);
-  const constraintFit = 100;
-  const total = gfaFit * 0.5 + facade * 0.2 + efficiency * 0.2 + constraintFit * 0.1;
+
+  // Hard constraints — penalise violations strongly so they sink in the ranking
+  let constraintFit = 100;
+  if (maxFAR !== undefined && maxFAR > 0 && plotArea && plotArea > 0) {
+    const far = v.totalGFA / plotArea;
+    if (far > maxFAR) {
+      const over = (far - maxFAR) / maxFAR;
+      constraintFit = Math.max(0, 100 - over * 250);
+    }
+  }
+  if (maxHeightM !== undefined && maxHeightM > 0 && v.buildingHeight > maxHeightM) {
+    const over = (v.buildingHeight - maxHeightM) / maxHeightM;
+    constraintFit = Math.min(constraintFit, Math.max(0, 100 - over * 300));
+  }
+
+  const total = gfaFit * 0.4 + facade * 0.2 + efficiency * 0.2 + constraintFit * 0.2;
   return {
     total: Math.round(total),
     constraintFit: Math.round(constraintFit),

@@ -7,8 +7,17 @@ import {
   translatePolygon,
 } from "./geom";
 
-export type MassingShape = "block" | "podiumTower" | "courtyard" | "twinTowers";
+export type MassingShape =
+  | "block"
+  | "podiumTower"
+  | "courtyard"
+  | "twinTowers"
+  | "stepped"
+  | "lShape"
+  | "uShape";
 export type TowerPosition = "C" | "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
+export type CornerPosition = "NE" | "NW" | "SE" | "SW";
+export type SidePosition = "N" | "S" | "E" | "W";
 
 export interface Volume {
   polygon: Point[];
@@ -38,6 +47,13 @@ export interface MassingInputs {
   courtyardRatio: number;
   twinSeparation: number;
   twinCoverage: number;
+  steppedSteps: number;
+  steppedShrink: number;
+  lNotchPosition: CornerPosition;
+  lNotchRatio: number;
+  uOpening: SidePosition;
+  uArmRatio: number;
+  uNotchDepth: number;
 }
 
 export function buildMassing(i: MassingInputs): MassingResult {
@@ -122,7 +138,133 @@ export function buildMassing(i: MassingInputs): MassingResult {
     };
   }
 
+  if (i.shape === "stepped") {
+    const steps = Math.max(2, Math.min(8, Math.round(i.steppedSteps)));
+    const shrink = Math.max(0.02, Math.min(0.5, i.steppedShrink));
+    const baseArea = Math.min(Math.max(0, i.effFloorArea), buildableArea);
+    if (baseArea < 1) return empty;
+    const floorsPerStep = Math.max(1, Math.floor(i.effFloors / steps));
+    const volumes: Volume[] = [];
+    let totalGFA = 0;
+    let floorsUsed = 0;
+    for (let s = 0; s < steps; s++) {
+      const stepArea = baseArea * Math.pow(1 - shrink, s);
+      if (stepArea < 1) break;
+      const stepPoly = scalePolygonToArea(i.buildable, stepArea);
+      const stepFloors = s === steps - 1 ? Math.max(1, i.effFloors - floorsUsed) : floorsPerStep;
+      if (stepFloors <= 0) break;
+      const fromY = floorsUsed * i.floorHeight;
+      const toY = (floorsUsed + stepFloors) * i.floorHeight;
+      volumes.push({ polygon: stepPoly, fromY, toY });
+      totalGFA += stepArea * stepFloors;
+      floorsUsed += stepFloors;
+      if (floorsUsed >= i.effFloors) break;
+    }
+    return {
+      volumes,
+      totalGFA,
+      topY: floorsUsed * i.floorHeight,
+      primaryFootprint: volumes[0]?.polygon ?? [],
+    };
+  }
+
+  if (i.shape === "lShape") {
+    const ratio = Math.max(0.05, Math.min(0.6, i.lNotchRatio));
+    const lPoly = lShapePolygon(i.buildable, ratio, i.lNotchPosition);
+    if (lPoly.length < 3) return empty;
+    const targetArea = Math.min(Math.max(0, i.effFloorArea), polygonArea(lPoly));
+    if (targetArea < 1) return empty;
+    const scaled = scalePolygonToArea(lPoly, targetArea);
+    return {
+      volumes: [{ polygon: scaled, fromY: 0, toY: totalH }],
+      totalGFA: polygonArea(scaled) * i.effFloors,
+      topY: totalH,
+      primaryFootprint: scaled,
+    };
+  }
+
+  if (i.shape === "uShape") {
+    const arm = Math.max(0.1, Math.min(0.5, i.uArmRatio));
+    const depth = Math.max(0.2, Math.min(0.9, i.uNotchDepth));
+    const uPoly = uShapePolygon(i.buildable, arm, depth, i.uOpening);
+    if (uPoly.length < 3) return empty;
+    const targetArea = Math.min(Math.max(0, i.effFloorArea), polygonArea(uPoly));
+    if (targetArea < 1) return empty;
+    const scaled = scalePolygonToArea(uPoly, targetArea);
+    return {
+      volumes: [{ polygon: scaled, fromY: 0, toY: totalH }],
+      totalGFA: polygonArea(scaled) * i.effFloors,
+      topY: totalH,
+      primaryFootprint: scaled,
+    };
+  }
+
   return empty;
+}
+
+/** Build an L-shape polygon centered at the buildable centroid, sized to the buildable bbox. */
+function lShapePolygon(buildable: Point[], ratio: number, position: CornerPosition): Point[] {
+  const bb = polygonBBox(buildable);
+  const W = bb.w;
+  const D = bb.h;
+  if (W <= 0 || D <= 0) return [];
+  const Wx = W * ratio;
+  const Dy = D * ratio;
+  // Default L with notch at NE corner of a [0,0]..[W,D] rectangle, CCW
+  let pts: Point[] = [
+    { x: 0, y: 0 },
+    { x: W, y: 0 },
+    { x: W, y: D - Dy },
+    { x: W - Wx, y: D - Dy },
+    { x: W - Wx, y: D },
+    { x: 0, y: D },
+  ];
+  // Mirror for other corners
+  if (position === "NW") pts = pts.map((p) => ({ x: W - p.x, y: p.y }));
+  if (position === "SE") pts = pts.map((p) => ({ x: p.x, y: D - p.y }));
+  if (position === "SW") pts = pts.map((p) => ({ x: W - p.x, y: D - p.y }));
+  // Center on the buildable centroid
+  const c = polygonCentroidLite(buildable);
+  return pts.map((p) => ({ x: p.x - W / 2 + c.x, y: p.y - D / 2 + c.y }));
+}
+
+/** Build a U-shape polygon centered at the buildable centroid. `opening` = side that is open. */
+function uShapePolygon(buildable: Point[], arm: number, depth: number, opening: SidePosition): Point[] {
+  const bb = polygonBBox(buildable);
+  const W = bb.w;
+  const D = bb.h;
+  if (W <= 0 || D <= 0) return [];
+  // Default opening = N (top side opens), arms vertical, base on the south.
+  // Notch is a rectangle from (W*arm, 0) to (W*(1-arm), D*depth) — wait need to rethink.
+  // Actually with N opening: arms go from south up, notch eats from the north.
+  // Polygon CCW (bottom-left start):
+  const aw = W * arm;
+  const dh = D * depth;
+  let pts: Point[] = [
+    { x: 0, y: 0 },
+    { x: W, y: 0 },
+    { x: W, y: D },
+    { x: W - aw, y: D },
+    { x: W - aw, y: D - dh },
+    { x: aw, y: D - dh },
+    { x: aw, y: D },
+    { x: 0, y: D },
+  ];
+  // Rotate for other openings
+  if (opening === "S") pts = pts.map((p) => ({ x: p.x, y: D - p.y }));
+  if (opening === "E") pts = pts.map((p) => ({ x: p.y * (W / D), y: p.x * (D / W) })); // rotate 90° CW with rescale
+  if (opening === "W") {
+    pts = pts.map((p) => ({ x: p.y * (W / D), y: p.x * (D / W) }));
+    pts = pts.map((p) => ({ x: W - p.x, y: p.y }));
+  }
+  const c = polygonCentroidLite(buildable);
+  return pts.map((p) => ({ x: p.x - W / 2 + c.x, y: p.y - D / 2 + c.y }));
+}
+
+function polygonCentroidLite(poly: Point[]): Point {
+  // Bounding-box centroid is good enough here — buildMassing only uses it to centre the L/U.
+  const bb = polygonBBox(poly);
+  return { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
 }
 
 function placeInsideBuildable(towerPoly: Point[], buildable: Point[], position: TowerPosition): Point[] {

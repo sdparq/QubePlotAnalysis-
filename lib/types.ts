@@ -106,7 +106,7 @@ export interface Project {
   /** Override for the 3D massing only — building footprint area per floor (m²). Falls back to GFA/floors. */
   massingFloorArea?: number;
   /** Building shape preset for the 3D massing. Defaults to "block". */
-  massingShape?: "block" | "podiumTower" | "courtyard" | "twinTowers";
+  massingShape?: "block" | "podiumTower" | "courtyard" | "twinTowers" | "stepped" | "lShape" | "uShape";
   /** Podium-and-tower preset parameters. */
   podiumFloors?: number;
   podiumCoverage?: number;          // 0..1 fraction of buildable area
@@ -117,4 +117,17 @@ export interface Project {
   /** Twin-towers preset. */
   twinSeparation?: number;          // metres between tower centroids
   twinCoverage?: number;            // 0..1 fraction of buildable area, per tower
+  /** Stepped / terraced preset. */
+  steppedSteps?: number;            // 2..6 — number of stepped levels
+  steppedShrink?: number;           // 0..0.5 — fraction the footprint shrinks per step
+  /** L-shape preset. */
+  lNotchPosition?: "NE" | "NW" | "SE" | "SW";
+  lNotchRatio?: number;             // 0..0.6 — fraction of the bbox cut from the chosen corner
+  /** U-shape preset. */
+  uOpening?: "N" | "S" | "E" | "W";
+  uArmRatio?: number;               // 0..0.5 — thickness of each arm relative to bbox
+  uNotchDepth?: number;             // 0..0.9 — depth of the central notch as fraction of bbox
+  /** Hard constraints used to score variants and flag the active massing. */
+  maxFAR?: number;
+  maxHeightM?: number;
 }
