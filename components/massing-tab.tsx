@@ -350,6 +350,22 @@ export default function MassingTab() {
                     const next = (project.customNeighbors ?? []).filter((n) => n.id !== id);
                     patch({ customNeighbors: next });
                   }}
+                  onDuplicateCustomNeighbor={(id) => {
+                    const src = (project.customNeighbors ?? []).find((n) => n.id === id);
+                    if (!src) return id;
+                    const newId = `cn-${Date.now()}`;
+                    const offset = Math.max(8, src.widthM * 0.6);
+                    const copy = {
+                      ...src,
+                      id: newId,
+                      centerX: Number((src.centerX + offset).toFixed(2)),
+                      centerZ: src.centerZ,
+                      name: src.name ? `${src.name} copy` : undefined,
+                      tower: src.tower ? { ...src.tower } : undefined,
+                    };
+                    patch({ customNeighbors: [...(project.customNeighbors ?? []), copy] });
+                    return newId;
+                  }}
                 />
               ) : (
                 <MassingScene

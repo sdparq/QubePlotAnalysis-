@@ -42,6 +42,7 @@ export interface ContextSceneProps {
   onAddCustomNeighbor?: (centerX: number, centerZ: number) => string;
   onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
   onDeleteCustomNeighbor?: (id: string) => void;
+  onDuplicateCustomNeighbor?: (id: string) => string;
 }
 
 type MapStyle = "topo" | "satellite" | "schematic";
@@ -162,7 +163,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
     mapStyle = "topo",
     customNeighbors = [],
     onSetHeight, onToggleHide, onSetMapStyle, onSetBuildingOffset,
-    onAddCustomNeighbor, onUpdateCustomNeighbor, onDeleteCustomNeighbor,
+    onAddCustomNeighbor, onUpdateCustomNeighbor, onDeleteCustomNeighbor, onDuplicateCustomNeighbor,
   } = props;
   const [placeMode, setPlaceMode] = useState(false);
   const [addNeighbourMode, setAddNeighbourMode] = useState(false);
@@ -584,15 +585,27 @@ export default function MassingContextScene(props: ContextSceneProps) {
               </>
             )}
           </div>
-          <button
-            className="btn btn-danger btn-xs justify-self-start"
-            onClick={() => {
-              if (confirm("Delete this neighbour?")) {
-                onDeleteCustomNeighbor(selectedCustom.id);
-                setSelection(null);
-              }
-            }}
-          >Delete</button>
+          <div className="flex items-center gap-2">
+            {onDuplicateCustomNeighbor && (
+              <button
+                className="btn btn-secondary btn-xs"
+                onClick={() => {
+                  const newId = onDuplicateCustomNeighbor(selectedCustom.id);
+                  setSelection({ kind: "custom", id: newId });
+                }}
+                title="Create a copy of this neighbour 8 m east"
+              >Duplicate</button>
+            )}
+            <button
+              className="btn btn-danger btn-xs"
+              onClick={() => {
+                if (confirm("Delete this neighbour?")) {
+                  onDeleteCustomNeighbor(selectedCustom.id);
+                  setSelection(null);
+                }
+              }}
+            >Delete</button>
+          </div>
         </div>
       )}
 
