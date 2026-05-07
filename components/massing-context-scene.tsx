@@ -7,6 +7,7 @@ import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import type { CustomNeighbor } from "@/lib/types";
+import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT } from "@/lib/ai-render";
 
 export interface ContextSceneProps {
   plot: Point[];
@@ -31,13 +32,13 @@ export interface ContextSceneProps {
   /** OSM way ids hidden from the scene */
   nearbyHidden?: string[];
   /** Map style to use for the basemap */
-  mapStyle?: "topo" | "satellite" | "schematic" | "scheme";
+  mapStyle?: "topo" | "satellite" | "schematic";
   /** User-defined extra neighbours */
   customNeighbors?: CustomNeighbor[];
   /** Persist user edits */
   onSetHeight?: (osmId: string, height: number) => void;
   onToggleHide?: (osmId: string, hide: boolean) => void;
-  onSetMapStyle?: (style: "topo" | "satellite" | "schematic" | "scheme") => void;
+  onSetMapStyle?: (style: "topo" | "satellite" | "schematic") => void;
   onSetBuildingOffset?: (x: number, z: number) => void;
   onAddCustomNeighbor?: (centerX: number, centerZ: number) => string;
   onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
@@ -47,7 +48,7 @@ export interface ContextSceneProps {
   onShuffleTowers?: (minH: number, maxH: number) => void;
 }
 
-type MapStyle = "topo" | "satellite" | "schematic" | "scheme";
+type MapStyle = "topo" | "satellite" | "schematic";
 
 function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
   if (style === "satellite") {
@@ -176,6 +177,50 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const [shuffleMinH, setShuffleMinH] = useState(25);
   const [shuffleMaxH, setShuffleMaxH] = useState(110);
 
+  // ---- AI render (Option B: Gemini image-to-image) ----
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [apiKey, setApiKey] = useState<string>("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("qube.gemini.apiKey");
+    if (saved) setApiKey(saved);
+  }, []);
+  const [keyDialog, setKeyDialog] = useState<{ open: boolean; draft: string }>({ open: false, draft: "" });
+  const [aiRendering, setAiRendering] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string } | null>(null);
+  const [aiPrompt, setAiPrompt] = useState<string>(DEFAULT_SCHEME_PROMPT);
+
+  const persistKey = useCallback((k: string) => {
+    setApiKey(k);
+    try { window.localStorage.setItem("qube.gemini.apiKey", k); } catch {}
+  }, []);
+
+  const captureCanvasPng = useCallback((): string | null => {
+    const c = containerRef.current?.querySelector("canvas") as HTMLCanvasElement | null;
+    if (!c) return null;
+    try { return c.toDataURL("image/png"); } catch { return null; }
+  }, []);
+
+  const handleAiRender = useCallback(async () => {
+    if (!apiKey) {
+      setKeyDialog({ open: true, draft: "" });
+      return;
+    }
+    const png = captureCanvasPng();
+    if (!png) { setAiError("Could not capture the viewer canvas."); return; }
+    setAiRendering(true);
+    setAiError(null);
+    try {
+      const out = await renderSchemeWithGemini(apiKey, png, aiPrompt);
+      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiRendering(false);
+    }
+  }, [apiKey, aiPrompt, captureCanvasPng]);
+
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
       const next = new Map(prev);
@@ -196,22 +241,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
     let cancelled = false;
     setGround(null);
     setGroundError(null);
-    if (mapStyle === "scheme") {
-      // Synthetic flat sand-coloured ground — no tile fetch.
-      const sizeM = 2 * contextRadiusM;
-      const c = document.createElement("canvas");
-      c.width = 16; c.height = 16;
-      const cx = c.getContext("2d");
-      if (cx) {
-        cx.fillStyle = "#ece4d2";
-        cx.fillRect(0, 0, 16, 16);
-      }
-      const tex = new THREE.CanvasTexture(c);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.needsUpdate = true;
-      setGround({ texture: tex, sizeM, planeX: 0, planeZ: 0 });
-      return () => { cancelled = true; };
-    }
     loadContextTiles(latitude, longitude, contextRadiusM, mapStyle)
       .then((g) => { if (!cancelled) setGround(g); })
       .catch((e: Error) => { if (!cancelled) setGroundError(e.message); });
@@ -239,39 +268,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
     return () => { cancelled = true; };
   }, [latitude, longitude, contextRadiusM]);
 
-  // OSM highways (only fetched in scheme mode)
-  const [osmHighways, setOsmHighways] = useState<Point[][]>([]);
-  useEffect(() => {
-    if (mapStyle !== "scheme") { setOsmHighways([]); return; }
-    let cancelled = false;
-    async function fetchHighways() {
-      try {
-        const radius = Math.round(contextRadiusM);
-        const query = `[out:json][timeout:25];way["highway"](around:${radius},${latitude},${longitude});(._;>;);out;`;
-        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`OSM highway fetch ${res.status}`);
-        const data = (await res.json()) as { elements: OsmElement[] };
-        if (cancelled) return;
-        setOsmHighways(parseOsmLines(data.elements, latitude, longitude));
-      } catch {
-        if (!cancelled) setOsmHighways([]);
-      }
-    }
-    fetchHighways();
-    return () => { cancelled = true; };
-  }, [latitude, longitude, contextRadiusM, mapStyle]);
-
-  const trees = useMemo(() => {
-    if (mapStyle !== "scheme") return [] as { x: number; z: number; scale: number }[];
-    return generateTrees(osmHighways);
-  }, [mapStyle, osmHighways]);
-
-  const windowTex = useMemo(() => {
-    if (mapStyle !== "scheme") return null;
-    return makeWindowTexture(floorHeight);
-  }, [mapStyle, floorHeight]);
-
   const hidden = useMemo(() => new Set(nearbyHidden), [nearbyHidden]);
   type Selection = { kind: "osm"; id: string } | { kind: "custom"; id: string } | null;
   const [selection, setSelection] = useState<Selection>(null);
@@ -294,7 +290,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
   }, [selection, neighborObjects, onUpdateCustomNeighbor]);
 
   return (
-    <div className="relative w-full h-full">
+    <div ref={containerRef} className="relative w-full h-full">
       <Canvas
         shadows
         orthographic
@@ -304,12 +300,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
           far: maxDim * 400,
           zoom: 1,
         }}
-        style={{
-          background:
-            mapStyle === "scheme"
-              ? "linear-gradient(180deg, #f3e8cc 0%, #e6d3a3 100%)"
-              : "#bccbd6",
-        }}
+        gl={{ preserveDrawingBuffer: true }}
+        style={{ background: "#bccbd6" }}
         dpr={[1, 2]}
         onPointerMissed={() => setSelection(null)}
       >
@@ -368,18 +360,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
           />
         ))}
 
-        {/* Scheme mode: highways drawn as light grey ribbons */}
-        {mapStyle === "scheme" && osmHighways.map((line, i) => {
-          if (line.length < 2) return null;
-          const pts: [number, number, number][] = line.map((p) => [p.x, 0.05, -p.y]);
-          return <Line key={`hw-${i}`} points={pts} color="#cfc6b3" lineWidth={5} />;
-        })}
-
-        {/* Scheme mode: trees scattered along highways */}
-        {mapStyle === "scheme" && trees.map((t, i) => (
-          <SchemeTree key={`tr-${i}`} x={t.x} z={t.z} scale={t.scale} />
-        ))}
-
         {selectedObject && (
           <TransformControls
             object={selectedObject}
@@ -435,17 +415,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
                 receiveShadow
               >
                 <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-                {mapStyle === "scheme" ? (
-                  <meshStandardMaterial
-                    color="#d8c39a"
-                    map={windowTex ?? undefined}
-                    roughness={0.78}
-                    metalness={0}
-                  />
-                ) : (
-                  <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
-                )}
-                <Edges color={mapStyle === "scheme" ? "#3a2f1c" : "#33422e"} threshold={1} />
+                <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
+                <Edges color="#33422e" threshold={1} />
               </mesh>
             );
           })}
@@ -510,14 +481,14 @@ export default function MassingContextScene(props: ContextSceneProps) {
       {!selectedOsm && !selectedCustom && ground && (
         <div className="absolute top-2 left-2 grid gap-2 max-w-[260px]">
           <div className="inline-flex border border-ink-200 bg-white/95 shadow-sm">
-            {(["topo", "satellite", "schematic", "scheme"] as MapStyle[]).map((s) => (
+            {(["topo", "satellite", "schematic"] as MapStyle[]).map((s) => (
               <button
                 key={s}
                 onClick={() => onSetMapStyle?.(s)}
                 className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
                   mapStyle === s ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
                 }`}
-              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : s === "schematic" ? "Map" : "Scheme"}</button>
+              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : "Schematic"}</button>
             ))}
           </div>
 
@@ -582,6 +553,27 @@ export default function MassingContextScene(props: ContextSceneProps) {
               {addNeighbourMode ? "Click on map to place…" : "+ Add neighbour"}
             </button>
           )}
+
+          <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
+            <span className="eyebrow text-ink-500 text-[10px]">AI render (Gemini)</span>
+            <button
+              className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
+              onClick={handleAiRender}
+              disabled={aiRendering}
+              title="Capture the viewer and re-render it as a BIG-style scheme using Google AI Studio"
+            >
+              {aiRendering ? "Rendering…" : "✦ Render scheme"}
+            </button>
+            <button
+              className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
+              onClick={() => setKeyDialog({ open: true, draft: apiKey })}
+            >
+              {apiKey ? "Replace API key" : "Set API key"}
+            </button>
+            {aiError && (
+              <div className="text-[10px] text-red-700 leading-snug max-w-[220px]">{aiError}</div>
+            )}
+          </div>
           {onShuffleTowers && customNeighbors.some((n) => n.tower) && (
             <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
               <span className="eyebrow text-ink-500 text-[10px]">Shuffle towers</span>
@@ -796,8 +788,127 @@ export default function MassingContextScene(props: ContextSceneProps) {
       )}
 
       <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-white/85 text-[9px] text-ink-700 border border-ink-200">
-        © Esri · Maxar · Earthstar Geographics · GIS User Community · Buildings © OpenStreetMap
+        © Esri · Maxar · Earthstar Geographics · GIS User Community · Buildings © OpenStreetMap · Render via Google Gemini
       </div>
+
+      {/* API key dialog */}
+      {keyDialog.open && (
+        <div className="absolute inset-0 z-30 bg-ink-900/55 flex items-center justify-center p-4">
+          <div className="bg-white border border-ink-200 shadow-lg max-w-[440px] w-full p-4 grid gap-3">
+            <div>
+              <div className="eyebrow text-ink-500">Google AI Studio</div>
+              <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini API key</h3>
+              <p className="text-[11.5px] text-ink-500 mt-1 leading-snug">
+                Stored only in your browser (localStorage). Get a free key at{" "}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-qube-700 hover:text-qube-900 underline"
+                >aistudio.google.com</a>.
+              </p>
+            </div>
+            <input
+              type="password"
+              autoFocus
+              spellCheck={false}
+              className="cell-input"
+              placeholder="AIza…"
+              value={keyDialog.draft}
+              onChange={(e) => setKeyDialog((s) => ({ ...s, draft: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && keyDialog.draft.trim()) {
+                  persistKey(keyDialog.draft.trim());
+                  setKeyDialog({ open: false, draft: "" });
+                }
+              }}
+            />
+            <div className="flex items-center justify-end gap-2">
+              {apiKey && (
+                <button
+                  className="text-[11px] text-red-700 hover:text-red-900 underline mr-auto"
+                  onClick={() => {
+                    persistKey("");
+                    setKeyDialog({ open: false, draft: "" });
+                  }}
+                >Forget key</button>
+              )}
+              <button
+                className="px-3 py-1.5 text-[11px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 hover:bg-bone-50"
+                onClick={() => setKeyDialog({ open: false, draft: "" })}
+              >Cancel</button>
+              <button
+                className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
+                disabled={!keyDialog.draft.trim()}
+                onClick={() => {
+                  persistKey(keyDialog.draft.trim());
+                  setKeyDialog({ open: false, draft: "" });
+                }}
+              >Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI render result modal */}
+      {aiResult && (
+        <div className="absolute inset-0 z-30 bg-ink-900/65 flex items-center justify-center p-4">
+          <div className="bg-white border border-ink-200 shadow-lg max-w-[1100px] w-full max-h-full overflow-auto grid gap-3 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="eyebrow text-ink-500">AI scheme render</div>
+                <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini output</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  download="qube-scheme.png"
+                  href={aiResult.imageDataUrl}
+                  className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] border border-ink-300 text-ink-800 hover:bg-bone-50"
+                >Download PNG</a>
+                <button
+                  className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
+                  disabled={aiRendering}
+                  onClick={handleAiRender}
+                >Re-render</button>
+                <button
+                  className="text-ink-400 hover:text-ink-700 text-[18px] leading-none px-2"
+                  onClick={() => setAiResult(null)}
+                  title="Close"
+                >×</button>
+              </div>
+            </div>
+            <div className="border border-ink-200 bg-bone-50 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={aiResult.imageDataUrl} alt="Gemini scheme render" className="max-w-full h-auto" />
+            </div>
+            {aiResult.note && (
+              <p className="text-[11px] text-ink-500 leading-snug whitespace-pre-wrap">{aiResult.note}</p>
+            )}
+            <details className="text-[11px] text-ink-700">
+              <summary className="cursor-pointer text-ink-500 uppercase tracking-[0.10em] text-[10.5px]">Edit prompt</summary>
+              <textarea
+                className="cell-input mt-2 w-full font-mono text-[11px] leading-snug"
+                rows={10}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+              />
+              <button
+                className="mt-1 text-[10.5px] text-qube-700 hover:text-qube-900 underline"
+                onClick={() => setAiPrompt(DEFAULT_SCHEME_PROMPT)}
+              >Reset to default</button>
+            </details>
+          </div>
+        </div>
+      )}
+
+      {aiRendering && !aiResult && (
+        <div className="absolute inset-0 z-20 bg-ink-900/35 flex items-center justify-center pointer-events-none">
+          <div className="bg-white px-4 py-3 border border-ink-200 shadow-md text-[12px] text-ink-700 grid gap-2 justify-items-center">
+            <div className="w-6 h-6 border-2 border-qube-500 border-t-transparent rounded-full animate-spin" />
+            <span>Rendering with Gemini…</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -977,132 +1088,3 @@ function parseOsm(elements: OsmElement[], originLat: number, originLng: number):
   return buildings;
 }
 
-/* ---------- Scheme-mode helpers ---------- */
-
-function parseOsmLines(elements: OsmElement[], originLat: number, originLng: number): Point[][] {
-  const nodeMap = new Map<number, OsmNode>();
-  for (const el of elements) if (el.type === "node") nodeMap.set(el.id, el);
-  const lines: Point[][] = [];
-  for (const el of elements) {
-    if (el.type !== "way" || !el.tags?.highway) continue;
-    const path: Point[] = [];
-    for (const nid of el.nodes) {
-      const n = nodeMap.get(nid);
-      if (!n) continue;
-      const xy = latLngToLocalXY(n.lat, n.lon, originLat, originLng);
-      path.push({ x: xy.x, y: xy.y });
-    }
-    if (path.length >= 2) lines.push(path);
-  }
-  return lines;
-}
-
-function generateTrees(highways: Point[][]): { x: number; z: number; scale: number }[] {
-  const trees: { x: number; z: number; scale: number }[] = [];
-  const spacing = 14; // metres along the road
-  const sideOffset = 4.5;
-  let counter = 0;
-  for (const line of highways) {
-    if (line.length < 2) continue;
-    let leftover = 0;
-    for (let i = 0; i < line.length - 1; i++) {
-      const a = line[i];
-      const b = line[i + 1];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-3) continue;
-      const tx = dx / len;
-      const ty = dy / len;
-      // Perpendicular (in OSM-local x,y plane).
-      const px = -ty;
-      const py = tx;
-      let d = leftover;
-      while (d <= len) {
-        const t = d / len;
-        const cx = a.x + dx * t;
-        const cy = a.y + dy * t;
-        // Pseudo-random but deterministic-ish through counter — alternate sides + jitter.
-        counter += 1;
-        const r = pseudoRand(counter);
-        const side = r < 0.5 ? -1 : 1;
-        const jitter = 0.5 + r * 1.5;
-        const wx = cx + px * (sideOffset + jitter) * side;
-        const wy = cy + py * (sideOffset + jitter) * side;
-        const scale = 0.85 + pseudoRand(counter * 7919) * 0.4;
-        trees.push({ x: wx, z: -wy, scale });
-        d += spacing + (pseudoRand(counter * 31) * 6 - 3);
-      }
-      leftover = d - len;
-    }
-  }
-  // Cap to avoid extreme counts
-  if (trees.length > 800) trees.length = 800;
-  return trees;
-}
-
-function pseudoRand(seed: number): number {
-  const x = Math.sin(seed) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-function SchemeTree({ x, z, scale }: { x: number; z: number; scale: number }) {
-  const trunkH = 2.4 * scale;
-  const crownR = 1.5 * scale;
-  const crownH = 3.2 * scale;
-  return (
-    <group position={[x, 0, z]}>
-      <mesh position={[0, trunkH / 2, 0]} castShadow>
-        <cylinderGeometry args={[0.18 * scale, 0.28 * scale, trunkH, 6]} />
-        <meshStandardMaterial color="#8a6a44" roughness={1} />
-      </mesh>
-      <mesh position={[0, trunkH + crownH / 2, 0]} castShadow>
-        <coneGeometry args={[crownR, crownH, 8]} />
-        <meshStandardMaterial color="#7a8e58" roughness={1} />
-      </mesh>
-    </group>
-  );
-}
-
-function makeWindowTexture(floorHeight: number): THREE.Texture {
-  const tileWm = 2.5;       // one window bay = 2.5 m wide
-  const tileHm = Math.max(2, floorHeight); // one floor tall
-  const pxPerM = 48;
-  const w = Math.round(pxPerM * tileWm);
-  const h = Math.round(pxPerM * tileHm);
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    // Wall colour
-    ctx.fillStyle = "#d8c39a";
-    ctx.fillRect(0, 0, w, h);
-    // Floor slab line at the bottom of the cell
-    ctx.fillStyle = "#7d6643";
-    ctx.fillRect(0, h - 3, w, 3);
-    // Window
-    const wW = Math.round(w * 0.62);
-    const wH = Math.round(h * 0.55);
-    const wx = Math.round((w - wW) / 2);
-    const wy = Math.round((h - wH) / 2 - h * 0.08);
-    ctx.fillStyle = "#3a4a55";
-    ctx.fillRect(wx, wy, wW, wH);
-    // Mullion (vertical divider)
-    ctx.fillStyle = "#d8c39a";
-    ctx.fillRect(wx + Math.round(wW / 2) - 1, wy, 2, wH);
-    // Sill
-    ctx.fillStyle = "#a48f6d";
-    ctx.fillRect(wx, wy + wH, wW, 2);
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  // ExtrudeGeometry's default UVs use raw (x, y) world coords on caps and
-  // (along-edge length, depth) on side walls — both effectively in metres,
-  // so 1 / tileSize gives the right tile density.
-  tex.repeat.set(1 / tileWm, 1 / tileHm);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
