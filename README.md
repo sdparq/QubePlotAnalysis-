@@ -67,21 +67,21 @@ The app is configured as a fully static export — works on any static host, no 
 
 That's it — no plugin needed, no env vars.
 
-## Urban-context 3D view (optional)
+## Urban-context 3D view
 
-The Massing tab has a *Studio / In context* toggle. The In-context view drops the project building onto a Mapbox satellite tile and surrounds it with the neighbouring buildings extruded from OpenStreetMap data — like a SimCity-style block of the actual streetscape.
+The Massing tab has a *Studio / In context* toggle. The In-context view drops the project building onto an Esri satellite tile composite and surrounds it with the neighbouring buildings extruded from OpenStreetMap data — like a SimCity-style block of the actual streetscape.
 
-To enable it:
+**No API keys, no signups.** Both the satellite imagery (Esri World Imagery) and the building footprints (OSM Overpass) are public free services with proper attribution shown on the viewer.
 
-1. **Get a Mapbox public token** at [account.mapbox.com](https://account.mapbox.com/access-tokens/) (free tier covers 50 k requests / month, plenty for internal feasibility studies).
-2. **Restrict the token** to your Netlify domain (URL restriction).
-3. In **Netlify → Site configuration → Environment variables** add:
-   - `NEXT_PUBLIC_MAPBOX_TOKEN` = the token
-4. **Trigger a redeploy** so the variable is picked up at build time.
-5. In the app, fill **Latitude** and **Longitude** in Setup (and *North heading* if the plot's +Y axis isn't aligned to true north).
-6. Open Massing → click **In context** in the top-right of the 3D viewer.
+To use it:
 
-The OSM building footprints are fetched from the public Overpass API on the fly (no key, no setup), and extruded with default 9 m height when the OSM record doesn't carry a `height` or `building:levels` tag. Within ~350 m of the plot.
+1. Fill **Latitude** and **Longitude** in Setup (clic-derecho en Google Maps sobre el solar → primera línea son las coords).
+2. Optional **North heading** if the plot's +Y axis isn't aligned to true north.
+3. Open Massing → click **In context** in the top-right of the 3D viewer.
+
+The OSM building footprints are fetched within ~350 m of the plot. When OSM doesn't have a `height` or `building:levels` tag for a building it falls back to 9 m. Esri tiles cover Dubai with high detail.
+
+Limits: Esri's free tile usage and Overpass API are rate-limited but sufficient for normal interactive use. If you hit a rate cap, just wait a few seconds and reload.
 
 ## Adding new normatives
 

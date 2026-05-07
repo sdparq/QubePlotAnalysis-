@@ -1,7 +1,7 @@
 "use client";
-import { Canvas, useLoader } from "@react-three/fiber";
+import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Edges, Line } from "@react-three/drei";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
@@ -18,16 +18,28 @@ export interface ContextSceneProps {
   longitude: number;
   /** Heading of plot's +Y axis relative to true north, degrees clockwise */
   northHeadingDeg: number;
-  /** Mapbox public token */
-  mapboxToken: string;
-  /** Half-side of the satellite image footprint in metres (controls zoom). */
+  /** Half-side of the satellite imagery footprint in metres. Auto-picks zoom. */
   contextRadiusM?: number;
 }
 
-/** Approximate equirectangular projection — fine for ~1 km radius around the origin */
+/* ---------- Web Mercator helpers ---------- */
+
+const TILE_PX = 256;
+
+function lonLatToWorldPx(lon: number, lat: number, zoom: number): { x: number; y: number } {
+  const n = Math.pow(2, zoom);
+  const x = ((lon + 180) / 360) * n * TILE_PX;
+  const latRad = (lat * Math.PI) / 180;
+  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n * TILE_PX;
+  return { x, y };
+}
+
 const M_PER_DEG_LAT = 111320;
 function metersPerDegLng(latDeg: number) {
   return 111320 * Math.cos((latDeg * Math.PI) / 180);
+}
+function metersPerPixel(lat: number, zoom: number) {
+  return (156543.03 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
 }
 function latLngToLocalXY(
   lat: number,
@@ -41,14 +53,84 @@ function latLngToLocalXY(
 }
 
 interface OsmBuilding {
-  polygon: Point[]; // local metres relative to project origin
+  polygon: Point[];
   height: number;
+}
+
+interface ContextGround {
+  texture: THREE.Texture;
+  sizeM: number;
+  planeX: number;
+  planeZ: number;
+}
+
+async function loadEsriContext(
+  lat: number,
+  lon: number,
+  contextRadiusM: number
+): Promise<ContextGround> {
+  // Pick a zoom such that 3 tiles span ≈ 2 × contextRadius
+  const targetSizeM = 2 * contextRadiusM;
+  // mPerPx = 156543 cos(lat) / 2^z, image size = 3 * 256 px ⇒ size_m = 768 mPerPx
+  const z = Math.max(13, Math.min(19, Math.round(Math.log2((768 * 156543 * Math.cos((lat * Math.PI) / 180)) / targetSizeM))));
+  const grid = 3;
+  const center = lonLatToWorldPx(lon, lat, z);
+  const projectTileX = Math.floor(center.x / TILE_PX);
+  const projectTileY = Math.floor(center.y / TILE_PX);
+  const half = Math.floor(grid / 2);
+  const startTileX = projectTileX - half;
+  const startTileY = projectTileY - half;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = grid * TILE_PX;
+  canvas.height = grid * TILE_PX;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+
+  const tileTasks: Promise<void>[] = [];
+  for (let dy = 0; dy < grid; dy++) {
+    for (let dx = 0; dx < grid; dx++) {
+      const tx = startTileX + dx;
+      const ty = startTileY + dy;
+      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
+      tileTasks.push(
+        new Promise<void>((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            ctx.drawImage(img, dx * TILE_PX, dy * TILE_PX);
+            resolve();
+          };
+          img.onerror = () => reject(new Error(`Tile fetch failed: ${url}`));
+          img.src = url;
+        })
+      );
+    }
+  }
+  await Promise.all(tileTasks);
+
+  const mPerPx = metersPerPixel(lat, z);
+  const sizeM = grid * TILE_PX * mPerPx;
+  const sizePx = grid * TILE_PX;
+  const projectInImagePx = center.x - startTileX * TILE_PX;
+  const projectInImagePy = center.y - startTileY * TILE_PX;
+  const planeX = -(projectInImagePx - sizePx / 2) * mPerPx;
+  // Image y down = south = world +Z (toward camera)
+  const planeZ = -(projectInImagePy - sizePx / 2) * mPerPx;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = false; // align image NW with world NW (see massing-context-scene rationale)
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+
+  return { texture, sizeM, planeX, planeZ };
 }
 
 export default function MassingContextScene(props: ContextSceneProps) {
   const {
     plot, volumes, floorHeight, edgeColors,
-    latitude, longitude, northHeadingDeg, mapboxToken,
+    latitude, longitude, northHeadingDeg,
     contextRadiusM = 350,
   } = props;
 
@@ -57,39 +139,30 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const camDist = Math.max(contextRadiusM * 1.4, maxDim * 1.5);
   const headingRad = (northHeadingDeg * Math.PI) / 180;
 
-  // Pick a Mapbox zoom that approximately covers contextRadiusM half-side.
-  // metres-per-pixel ≈ 156543 * cos(lat) / 2^zoom (web-mercator)
-  // image is rendered at 1024 px @2x = 2048 effective px → 1024 px after CSS
-  // We want imageSizeM ≈ 2 × contextRadius
-  // imageSizeM = imagePixels × metresPerPixel = 1024 × 156543·cos(lat) / 2^zoom
-  // → zoom ≈ log2(1024 × 156543 × cos(lat) / imageSizeM)
-  const zoom = useMemo(() => {
-    const m = (1024 * 156543 * Math.cos((latitude * Math.PI) / 180)) / (2 * contextRadiusM);
-    return Math.max(13, Math.min(20, Math.round(Math.log2(m))));
-  }, [latitude, contextRadiusM]);
-
-  const satelliteUrl = useMemo(() => {
-    if (!mapboxToken) return "";
-    // 1024×1024 @2x = 2048 logical, free tier
-    return `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${longitude},${latitude},${zoom},0/1024x1024@2x?access_token=${mapboxToken}`;
-  }, [longitude, latitude, zoom, mapboxToken]);
-
-  // Compute the actual ground-plane size that matches the chosen zoom
-  const groundSizeM = useMemo(() => {
-    const mPerPx = (156543 * Math.cos((latitude * Math.PI) / 180)) / Math.pow(2, zoom);
-    return 1024 * mPerPx;
-  }, [latitude, zoom]);
-
-  // Fetch OSM buildings around the project on mount / coords change
-  const [osmBuildings, setOsmBuildings] = useState<OsmBuilding[]>([]);
-  const [osmLoading, setOsmLoading] = useState(false);
-  const [osmError, setOsmError] = useState<string | null>(null);
+  const [ground, setGround] = useState<ContextGround | null>(null);
+  const [groundError, setGroundError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setGround(null);
+    setGroundError(null);
+    loadEsriContext(latitude, longitude, contextRadiusM)
+      .then((g) => {
+        if (!cancelled) setGround(g);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setGroundError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [latitude, longitude, contextRadiusM]);
+
+  // OSM buildings
+  const [osmBuildings, setOsmBuildings] = useState<OsmBuilding[]>([]);
+  useEffect(() => {
+    let cancelled = false;
     async function fetchOSM() {
-      setOsmLoading(true);
-      setOsmError(null);
       try {
         const radius = Math.round(contextRadiusM);
         const query = `[out:json][timeout:25];way[building](around:${radius},${latitude},${longitude});(._;>;);out;`;
@@ -99,10 +172,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
         const data = (await res.json()) as { elements: OsmElement[] };
         if (cancelled) return;
         setOsmBuildings(parseOsm(data.elements, latitude, longitude));
-      } catch (e) {
-        if (!cancelled) setOsmError(e instanceof Error ? e.message : "OSM fetch failed");
-      } finally {
-        if (!cancelled) setOsmLoading(false);
+      } catch {
+        if (!cancelled) setOsmBuildings([]);
       }
     }
     fetchOSM();
@@ -112,132 +183,137 @@ export default function MassingContextScene(props: ContextSceneProps) {
   }, [latitude, longitude, contextRadiusM]);
 
   return (
-    <Canvas
-      shadows
-      camera={{
-        position: [camDist * 0.85, camDist * 0.7, camDist],
-        fov: 45,
-        near: 0.5,
-        far: maxDim * 200,
-      }}
-      style={{ background: "#bccbd6" }}
-      dpr={[1, 2]}
-    >
-      <ambientLight intensity={0.65} />
-      <directionalLight position={[300, 500, 200]} intensity={0.9} castShadow />
+    <div className="relative w-full h-full">
+      <Canvas
+        shadows
+        camera={{
+          position: [camDist * 0.85, camDist * 0.7, camDist],
+          fov: 45,
+          near: 0.5,
+          far: maxDim * 200,
+        }}
+        style={{ background: "#bccbd6" }}
+        dpr={[1, 2]}
+      >
+        <ambientLight intensity={0.65} />
+        <directionalLight position={[300, 500, 200]} intensity={0.9} castShadow />
 
-      {/* Satellite ground texture */}
-      <Suspense fallback={null}>
-        {satelliteUrl && <SatelliteGround url={satelliteUrl} sizeM={groundSizeM} />}
-      </Suspense>
-
-      {/* OSM extruded buildings around the plot */}
-      {osmBuildings.map((b, i) => (
-        <OsmBuildingMesh key={i} polygon={b.polygon} height={b.height} />
-      ))}
-
-      {/* Project building (rotated by north heading) */}
-      <group rotation={[0, -headingRad, 0]}>
-        {edgeColors && edgeColors.length === plot.length ? (
-          plot.map((p, i) => {
-            const next = plot[(i + 1) % plot.length];
-            const pts: [number, number, number][] = [
-              [p.x, 0.15, -p.y],
-              [next.x, 0.15, -next.y],
-            ];
-            return <Line key={`edge-${i}`} points={pts} color={edgeColors[i]} lineWidth={3} />;
-          })
-        ) : (
-          <PlotOutline plot={plot} />
+        {ground && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ground.planeX, 0, ground.planeZ]} receiveShadow>
+            <planeGeometry args={[ground.sizeM, ground.sizeM]} />
+            <meshStandardMaterial map={ground.texture} roughness={1} metalness={0} />
+          </mesh>
         )}
 
-        {volumes.map((v, i) => {
-          const shape = polyToShape(v.polygon);
-          const depth = v.toY - v.fromY;
-          if (!shape || depth <= 0) return null;
-          if (v.hole && v.hole.length >= 3) {
-            const reversed = v.hole.slice().reverse();
-            const path = new THREE.Path();
-            path.moveTo(reversed[0].x, reversed[0].y);
-            for (let j = 1; j < reversed.length; j++) path.lineTo(reversed[j].x, reversed[j].y);
-            path.closePath();
-            shape.holes.push(path);
-          }
-          return (
-            <mesh
-              key={i}
-              rotation={[-Math.PI / 2, 0, 0]}
-              position={[0, v.fromY, 0]}
-              castShadow
-              receiveShadow
-            >
-              <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-              <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
-              <Edges color="#33422e" threshold={1} />
-            </mesh>
-          );
-        })}
+        {osmBuildings.map((b, i) => (
+          <OsmBuildingMesh key={i} polygon={b.polygon} height={b.height} />
+        ))}
 
-        {/* Floor rings */}
-        {volumes.map((v, vi) => {
-          if (floorHeight <= 0) return null;
-          const startFloor = Math.floor(v.fromY / floorHeight) + 1;
-          const endFloor = Math.ceil(v.toY / floorHeight) - 1;
-          const rings: { y: number; emphasis: boolean }[] = [];
-          for (let f = startFloor; f <= endFloor; f++) {
-            const y = f * floorHeight;
-            if (y > v.fromY + 1e-3 && y < v.toY - 1e-3) {
-              rings.push({ y, emphasis: f % 5 === 0 });
+        <group rotation={[0, -headingRad, 0]}>
+          {edgeColors && edgeColors.length === plot.length ? (
+            plot.map((p, i) => {
+              const next = plot[(i + 1) % plot.length];
+              const pts: [number, number, number][] = [
+                [p.x, 0.15, -p.y],
+                [next.x, 0.15, -next.y],
+              ];
+              return <Line key={`edge-${i}`} points={pts} color={edgeColors[i]} lineWidth={3} />;
+            })
+          ) : (
+            <PlotOutline plot={plot} />
+          )}
+
+          {volumes.map((v, i) => {
+            const shape = polyToShape(v.polygon);
+            const depth = v.toY - v.fromY;
+            if (!shape || depth <= 0) return null;
+            if (v.hole && v.hole.length >= 3) {
+              const reversed = v.hole.slice().reverse();
+              const path = new THREE.Path();
+              path.moveTo(reversed[0].x, reversed[0].y);
+              for (let j = 1; j < reversed.length; j++) path.lineTo(reversed[j].x, reversed[j].y);
+              path.closePath();
+              shape.holes.push(path);
             }
-          }
-          return rings.map((r, ri) => {
-            const points: [number, number, number][] = v.polygon.map(
-              (p) => [p.x, r.y, -p.y] as [number, number, number]
-            );
-            points.push([v.polygon[0].x, r.y, -v.polygon[0].y]);
             return (
-              <Line
-                key={`fl-${vi}-${ri}`}
-                points={points}
-                color={r.emphasis ? "#0a0a0a" : "#2a3525"}
-                lineWidth={r.emphasis ? 2.4 : 1.2}
-                transparent
-                opacity={r.emphasis ? 0.95 : 0.7}
-                depthTest={false}
-                depthWrite={false}
-                renderOrder={2}
-              />
+              <mesh
+                key={i}
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[0, v.fromY, 0]}
+                castShadow
+                receiveShadow
+              >
+                <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
+                <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
+                <Edges color="#33422e" threshold={1} />
+              </mesh>
             );
-          });
-        })}
-      </group>
+          })}
 
-      <OrbitControls
-        enablePan
-        enableZoom
-        enableRotate
-        target={[0, maxDim / 4, 0]}
-        maxPolarAngle={Math.PI / 2 - 0.02}
-        minDistance={20}
-        maxDistance={contextRadiusM * 8}
-      />
-    </Canvas>
+          {volumes.map((v, vi) => {
+            if (floorHeight <= 0) return null;
+            const startFloor = Math.floor(v.fromY / floorHeight) + 1;
+            const endFloor = Math.ceil(v.toY / floorHeight) - 1;
+            const rings: { y: number; emphasis: boolean }[] = [];
+            for (let f = startFloor; f <= endFloor; f++) {
+              const y = f * floorHeight;
+              if (y > v.fromY + 1e-3 && y < v.toY - 1e-3) {
+                rings.push({ y, emphasis: f % 5 === 0 });
+              }
+            }
+            return rings.map((r, ri) => {
+              const points: [number, number, number][] = v.polygon.map(
+                (p) => [p.x, r.y, -p.y] as [number, number, number]
+              );
+              points.push([v.polygon[0].x, r.y, -v.polygon[0].y]);
+              return (
+                <Line
+                  key={`fl-${vi}-${ri}`}
+                  points={points}
+                  color={r.emphasis ? "#0a0a0a" : "#2a3525"}
+                  lineWidth={r.emphasis ? 2.4 : 1.2}
+                  transparent
+                  opacity={r.emphasis ? 0.95 : 0.7}
+                  depthTest={false}
+                  depthWrite={false}
+                  renderOrder={2}
+                />
+              );
+            });
+          })}
+        </group>
+
+        <OrbitControls
+          enablePan
+          enableZoom
+          enableRotate
+          target={[0, maxDim / 4, 0]}
+          maxPolarAngle={Math.PI / 2 - 0.02}
+          minDistance={20}
+          maxDistance={contextRadiusM * 8}
+        />
+      </Canvas>
+
+      {/* Loading and error overlays */}
+      {!ground && !groundError && (
+        <div className="absolute top-2 left-2 px-2 py-1 bg-white/85 text-[10.5px] uppercase tracking-[0.10em] text-ink-700 border border-ink-200">
+          Loading satellite tiles…
+        </div>
+      )}
+      {groundError && (
+        <div className="absolute top-2 left-2 px-2 py-1 bg-red-50 text-[10.5px] text-red-800 border border-red-200">
+          Could not load tiles: {groundError}
+        </div>
+      )}
+      {/* Esri / OSM attribution (required) */}
+      <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-white/85 text-[9px] text-ink-700 border border-ink-200">
+        © Esri · Maxar · Earthstar Geographics · GIS User Community · Buildings © OpenStreetMap
+      </div>
+    </div>
   );
 }
 
 /* ---------- helpers ---------- */
-
-function SatelliteGround({ url, sizeM }: { url: string; sizeM: number }) {
-  const texture = useLoader(THREE.TextureLoader, url);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[sizeM, sizeM]} />
-      <meshStandardMaterial map={texture} roughness={1} metalness={0} />
-    </mesh>
-  );
-}
 
 function OsmBuildingMesh({ polygon, height }: { polygon: Point[]; height: number }) {
   const shape = useMemo(() => {
@@ -272,8 +348,6 @@ function PlotOutline({ plot }: { plot: Point[] }) {
   return <Line points={points} color="#3f5135" lineWidth={1.6} />;
 }
 
-/* ---------- OSM Overpass parsing ---------- */
-
 interface OsmNode {
   type: "node";
   id: number;
@@ -290,13 +364,10 @@ type OsmElement = OsmNode | OsmWay;
 
 function parseOsm(elements: OsmElement[], originLat: number, originLng: number): OsmBuilding[] {
   const nodeMap = new Map<number, OsmNode>();
-  for (const el of elements) {
-    if (el.type === "node") nodeMap.set(el.id, el);
-  }
+  for (const el of elements) if (el.type === "node") nodeMap.set(el.id, el);
   const buildings: OsmBuilding[] = [];
   for (const el of elements) {
-    if (el.type !== "way") continue;
-    if (!el.tags?.building) continue;
+    if (el.type !== "way" || !el.tags?.building) continue;
     const polygon: Point[] = [];
     for (const nid of el.nodes) {
       const n = nodeMap.get(nid);
@@ -304,27 +375,23 @@ function parseOsm(elements: OsmElement[], originLat: number, originLng: number):
       const xy = latLngToLocalXY(n.lat, n.lon, originLat, originLng);
       polygon.push({ x: xy.x, y: xy.y });
     }
-    // Drop closing-repeat if present
     if (polygon.length >= 2) {
       const a = polygon[0];
       const b = polygon[polygon.length - 1];
       if (Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3) polygon.pop();
     }
     if (polygon.length < 3) continue;
-
-    const tags = el.tags ?? {};
-    const heightTag = tags["height"];
-    const levelsTag = tags["building:levels"];
+    const tags = el.tags;
     let height = 0;
-    if (heightTag) {
-      const n = parseFloat(heightTag);
+    if (tags["height"]) {
+      const n = parseFloat(tags["height"]);
       if (Number.isFinite(n)) height = n;
     }
-    if (height <= 0 && levelsTag) {
-      const lv = parseFloat(levelsTag);
+    if (height <= 0 && tags["building:levels"]) {
+      const lv = parseFloat(tags["building:levels"]);
       if (Number.isFinite(lv)) height = lv * 3.2;
     }
-    if (height <= 0) height = 9; // sensible default for unspecified buildings
+    if (height <= 0) height = 9;
     buildings.push({ polygon, height });
   }
   return buildings;
