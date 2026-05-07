@@ -248,11 +248,12 @@ export default function MassingContextScene(props: ContextSceneProps) {
     <div className="relative w-full h-full">
       <Canvas
         shadows
+        orthographic
         camera={{
           position: [camDist * 0.85, camDist * 0.7, camDist],
-          fov: 45,
-          near: 0.5,
-          far: maxDim * 200,
+          near: 0.1,
+          far: maxDim * 400,
+          zoom: 1,
         }}
         style={{ background: "#bccbd6" }}
         dpr={[1, 2]}
@@ -414,8 +415,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
           enableRotate
           target={[0, maxDim / 4, 0]}
           maxPolarAngle={Math.PI / 2 - 0.02}
-          minDistance={20}
-          maxDistance={contextRadiusM * 8}
+          minZoom={0.15}
+          maxZoom={20}
         />
       </Canvas>
 
