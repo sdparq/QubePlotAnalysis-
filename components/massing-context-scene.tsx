@@ -1,7 +1,7 @@
 "use client";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Edges, Line } from "@react-three/drei";
-import { useEffect, useMemo, useState } from "react";
+import { OrbitControls, Edges, Line, TransformControls } from "@react-three/drei";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
@@ -43,6 +43,8 @@ export interface ContextSceneProps {
   onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
   onDeleteCustomNeighbor?: (id: string) => void;
   onDuplicateCustomNeighbor?: (id: string) => string;
+  /** Randomise tower heights and positions across all neighbours. */
+  onShuffleTowers?: () => void;
 }
 
 type MapStyle = "topo" | "satellite" | "schematic";
@@ -164,9 +166,22 @@ export default function MassingContextScene(props: ContextSceneProps) {
     customNeighbors = [],
     onSetHeight, onToggleHide, onSetMapStyle, onSetBuildingOffset,
     onAddCustomNeighbor, onUpdateCustomNeighbor, onDeleteCustomNeighbor, onDuplicateCustomNeighbor,
+    onShuffleTowers,
   } = props;
   const [placeMode, setPlaceMode] = useState(false);
   const [addNeighbourMode, setAddNeighbourMode] = useState(false);
+  const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate");
+  const [isDragging, setIsDragging] = useState(false);
+  const [neighborObjects, setNeighborObjects] = useState<Map<string, THREE.Group>>(new Map());
+
+  const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
+    setNeighborObjects((prev) => {
+      const next = new Map(prev);
+      if (g) next.set(id, g);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
@@ -213,6 +228,19 @@ export default function MassingContextScene(props: ContextSceneProps) {
     selection?.kind === "osm" ? osmBuildings.find((b) => b.id === selection.id) ?? null : null;
   const selectedCustom =
     selection?.kind === "custom" ? customNeighbors.find((n) => n.id === selection.id) ?? null : null;
+  const selectedObject =
+    selection?.kind === "custom" ? neighborObjects.get(selection.id) ?? null : null;
+
+  const commitTransform = useCallback(() => {
+    if (selection?.kind !== "custom" || !onUpdateCustomNeighbor) return;
+    const obj = neighborObjects.get(selection.id);
+    if (!obj) return;
+    onUpdateCustomNeighbor(selection.id, {
+      centerX: Number(obj.position.x.toFixed(2)),
+      centerZ: Number(obj.position.z.toFixed(2)),
+      rotationDeg: Number(((obj.rotation.y * 180) / Math.PI).toFixed(1)),
+    });
+  }, [selection, neighborObjects, onUpdateCustomNeighbor]);
 
   return (
     <div className="relative w-full h-full">
@@ -279,8 +307,23 @@ export default function MassingContextScene(props: ContextSceneProps) {
             neighbor={n}
             isSelected={selection?.kind === "custom" && selection.id === n.id}
             onSelect={() => setSelection({ kind: "custom", id: n.id })}
+            registerRef={registerNeighborRef}
           />
         ))}
+
+        {selectedObject && (
+          <TransformControls
+            object={selectedObject}
+            mode={transformMode}
+            showY={false}
+            size={0.9}
+            onMouseDown={() => setIsDragging(true)}
+            onMouseUp={() => {
+              setIsDragging(false);
+              commitTransform();
+            }}
+          />
+        )}
 
         {/* Project building */}
         <group
@@ -361,6 +404,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
         </group>
 
         <OrbitControls
+          enabled={!isDragging}
           enablePan
           enableZoom
           enableRotate
@@ -458,6 +502,15 @@ export default function MassingContextScene(props: ContextSceneProps) {
               {addNeighbourMode ? "Click on map to place…" : "+ Add neighbour"}
             </button>
           )}
+          {onShuffleTowers && customNeighbors.some((n) => n.tower) && (
+            <button
+              className="px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white/95 text-ink-800 hover:bg-bone-50 transition-colors"
+              onClick={onShuffleTowers}
+              title="Randomise tower heights and offsets within their podiums"
+            >
+              ⤲ Shuffle towers
+            </button>
+          )}
         </div>
       )}
 
@@ -517,6 +570,22 @@ export default function MassingContextScene(props: ContextSceneProps) {
               title="Deselect"
             >×</button>
           </div>
+          <div className="inline-flex border border-ink-200 bg-bone-50 self-start">
+            {(["translate", "rotate"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setTransformMode(m)}
+                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                  transformMode === m ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-200"
+                }`}
+                title={m === "translate" ? "Drag the gizmo arrows to move" : "Drag the gizmo ring to rotate"}
+              >{m === "translate" ? "Move" : "Rotate"}</button>
+            ))}
+          </div>
+          <p className="text-[10.5px] text-ink-500 leading-snug">
+            Drag the on-screen gizmo to {transformMode === "translate" ? "move" : "rotate"} this neighbour, or
+            edit the numbers below.
+          </p>
           <label className="grid gap-1">
             <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Name</span>
             <input
@@ -655,15 +724,36 @@ function OsmBuildingMesh({
 }
 
 function CustomNeighborMesh({
-  neighbor, isSelected, onSelect,
-}: { neighbor: CustomNeighbor; isSelected: boolean; onSelect: () => void }) {
-  const { centerX, centerZ, rotationDeg, widthM, depthM, heightM, tower } = neighbor;
-  const rotRad = (rotationDeg * Math.PI) / 180;
+  neighbor, isSelected, onSelect, registerRef,
+}: {
+  neighbor: CustomNeighbor;
+  isSelected: boolean;
+  onSelect: () => void;
+  registerRef: (id: string, g: THREE.Group | null) => void;
+}) {
+  const { widthM, depthM, heightM, tower } = neighbor;
+  const groupRef = useRef<THREE.Group>(null);
+
+  // Register / unregister the group so the parent can attach TransformControls.
+  useEffect(() => {
+    registerRef(neighbor.id, groupRef.current);
+    return () => registerRef(neighbor.id, null);
+  }, [neighbor.id, registerRef]);
+
+  // Apply position / rotation imperatively so TransformControls can mutate
+  // the same Object3D without conflicting with declarative JSX props.
+  useEffect(() => {
+    if (!groupRef.current) return;
+    groupRef.current.position.set(neighbor.centerX, 0, neighbor.centerZ);
+    groupRef.current.rotation.y = (neighbor.rotationDeg * Math.PI) / 180;
+  }, [neighbor.centerX, neighbor.centerZ, neighbor.rotationDeg]);
+
   const baseColor = isSelected ? "#fdf6e3" : "#f3f1ec";
   const edgeColorStr = isSelected ? "#a17e4c" : "#aeada6";
   const emissive = isSelected ? new THREE.Color("#a17e4c") : new THREE.Color("#000000");
+
   return (
-    <group position={[centerX, 0, centerZ]} rotation={[0, rotRad, 0]}>
+    <group ref={groupRef}>
       <mesh
         position={[0, heightM / 2, 0]}
         castShadow

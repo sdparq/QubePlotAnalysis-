@@ -366,6 +366,26 @@ export default function MassingTab() {
                     patch({ customNeighbors: [...(project.customNeighbors ?? []), copy] });
                     return newId;
                   }}
+                  onShuffleTowers={() => {
+                    const next = (project.customNeighbors ?? []).map((n) => {
+                      if (!n.tower) return n;
+                      const minH = 25;
+                      const maxH = 110;
+                      const newH = Math.round((minH + Math.random() * (maxH - minH)) * 10) / 10;
+                      const maxOffsetX = Math.max(0, (n.widthM - n.tower.widthM) / 2);
+                      const maxOffsetZ = Math.max(0, (n.depthM - n.tower.depthM) / 2);
+                      return {
+                        ...n,
+                        tower: {
+                          ...n.tower,
+                          heightM: newH,
+                          offsetXM: Number(((Math.random() * 2 - 1) * maxOffsetX).toFixed(2)),
+                          offsetZM: Number(((Math.random() * 2 - 1) * maxOffsetZ).toFixed(2)),
+                        },
+                      };
+                    });
+                    patch({ customNeighbors: next });
+                  }}
                 />
               ) : (
                 <MassingScene
