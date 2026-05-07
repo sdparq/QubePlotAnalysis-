@@ -212,3 +212,101 @@ function lineSegmentIntersection(A: Point, B: Point, S: Point, E: Point): Point 
   const t = -cross1 / cross2;
   return { x: S.x + t * dx, y: S.y + t * dy };
 }
+
+/* ---------- Boolean polygon ops via polygon-clipping ----------
+ * polygon-clipping speaks GeoJSON-style nested coords:
+ *   ring   = [[x,y], [x,y], ..., [x,y]]   (first point repeated at the end)
+ *   poly   = [outerRing, hole1, hole2, ...]
+ *   multi  = [poly, poly, ...]
+ *
+ * Our internal Point[] is a single ring without the closing repeat, so we
+ * convert in/out at the boundary. For our massing use cases we want the
+ * largest outer ring back, so the helpers return one Point[] (the biggest
+ * piece) — convenient for "subject ∩ clip" or "buildable − notch".
+ */
+
+type Ring = [number, number][];
+type Geom = Ring[][];
+
+function toGeom(poly: Point[]): Geom {
+  if (poly.length < 3) return [];
+  const ring: Ring = poly.map((p) => [p.x, p.y]);
+  // Close the ring as required by polygon-clipping
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
+  return [[ring]];
+}
+
+function ringToPoints(ring: Ring): Point[] {
+  // Drop the closing repeat
+  const pts: Point[] = [];
+  for (let i = 0; i < ring.length; i++) {
+    if (i === ring.length - 1 && pts.length > 0) {
+      const a = ring[i];
+      const b = ring[0];
+      if (a[0] === b[0] && a[1] === b[1]) break;
+    }
+    pts.push({ x: ring[i][0], y: ring[i][1] });
+  }
+  return pts;
+}
+
+function pickLargest(g: Geom): Point[] {
+  let best: Point[] = [];
+  let bestArea = 0;
+  for (const poly of g) {
+    if (!poly || poly.length === 0) continue;
+    const outer = ringToPoints(poly[0]);
+    const a = polygonArea(outer);
+    if (a > bestArea) {
+      bestArea = a;
+      best = outer;
+    }
+  }
+  return best;
+}
+
+/** Intersection of two polygons. Returns the largest resulting outer ring (or [] if empty). */
+export function polygonIntersection(a: Point[], b: Point[]): Point[] {
+  if (a.length < 3 || b.length < 3) return [];
+  // Lazy load to keep the boundary clean for tree shaking
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pc = require("polygon-clipping") as typeof import("polygon-clipping");
+  try {
+    const result = pc.intersection(toGeom(a), toGeom(b)) as unknown as Geom;
+    return pickLargest(result);
+  } catch {
+    return [];
+  }
+}
+
+/** A − B. Returns the largest resulting outer ring (or [] if empty). */
+export function polygonDifference(a: Point[], b: Point[]): Point[] {
+  if (a.length < 3) return [];
+  if (b.length < 3) return a.slice();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pc = require("polygon-clipping") as typeof import("polygon-clipping");
+  try {
+    const result = pc.difference(toGeom(a), toGeom(b)) as unknown as Geom;
+    return pickLargest(result);
+  } catch {
+    return [];
+  }
+}
+
+/** Union of two or more polygons. */
+export function polygonUnion(...polys: Point[][]): Point[] {
+  const valid = polys.filter((p) => p.length >= 3);
+  if (valid.length === 0) return [];
+  if (valid.length === 1) return valid[0].slice();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pc = require("polygon-clipping") as typeof import("polygon-clipping");
+  try {
+    const [first, ...rest] = valid;
+    const result = pc.union(toGeom(first), ...rest.map(toGeom)) as unknown as Geom;
+    return pickLargest(result);
+  } catch {
+    return [];
+  }
+}

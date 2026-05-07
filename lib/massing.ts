@@ -1,8 +1,9 @@
 import {
   type Point,
-  clipPolygonToConvex,
   polygonArea,
   polygonBBox,
+  polygonDifference,
+  polygonIntersection,
   scalePolygon,
   scalePolygonToArea,
   translatePolygon,
@@ -212,69 +213,91 @@ export function buildMassing(i: MassingInputs): MassingResult {
   return empty;
 }
 
-/** Build an L-shape polygon centered at the buildable centroid, sized to the buildable bbox. */
+/**
+ * Build an L-shape by subtracting a corner notch from the buildable polygon.
+ * The notch is a rectangle aligned with the buildable's bounding box and
+ * positioned at the chosen corner. Boolean difference (polygon-clipping)
+ * keeps the result inside the buildable even on irregular plots.
+ */
 function lShapePolygon(buildable: Point[], ratio: number, position: CornerPosition): Point[] {
   const bb = polygonBBox(buildable);
-  const W = bb.w;
-  const D = bb.h;
-  if (W <= 0 || D <= 0) return [];
-  const Wx = W * ratio;
-  const Dy = D * ratio;
-  // Default L with notch at NE corner of a [0,0]..[W,D] rectangle, CCW
-  let pts: Point[] = [
-    { x: 0, y: 0 },
-    { x: W, y: 0 },
-    { x: W, y: D - Dy },
-    { x: W - Wx, y: D - Dy },
-    { x: W - Wx, y: D },
-    { x: 0, y: D },
+  if (bb.w <= 0 || bb.h <= 0) return [];
+  const Wx = bb.w * ratio;
+  const Dy = bb.h * ratio;
+  let nx0 = bb.minX;
+  let ny0 = bb.minY;
+  let nx1 = bb.minX + Wx;
+  let ny1 = bb.minY + Dy;
+  if (position === "NE") {
+    nx0 = bb.maxX - Wx;
+    nx1 = bb.maxX;
+    ny0 = bb.maxY - Dy;
+    ny1 = bb.maxY;
+  } else if (position === "NW") {
+    nx0 = bb.minX;
+    nx1 = bb.minX + Wx;
+    ny0 = bb.maxY - Dy;
+    ny1 = bb.maxY;
+  } else if (position === "SE") {
+    nx0 = bb.maxX - Wx;
+    nx1 = bb.maxX;
+    ny0 = bb.minY;
+    ny1 = bb.minY + Dy;
+  } else if (position === "SW") {
+    nx0 = bb.minX;
+    nx1 = bb.minX + Wx;
+    ny0 = bb.minY;
+    ny1 = bb.minY + Dy;
+  }
+  const notch: Point[] = [
+    { x: nx0, y: ny0 },
+    { x: nx1, y: ny0 },
+    { x: nx1, y: ny1 },
+    { x: nx0, y: ny1 },
   ];
-  // Mirror for other corners
-  if (position === "NW") pts = pts.map((p) => ({ x: W - p.x, y: p.y }));
-  if (position === "SE") pts = pts.map((p) => ({ x: p.x, y: D - p.y }));
-  if (position === "SW") pts = pts.map((p) => ({ x: W - p.x, y: D - p.y }));
-  // Center on the buildable centroid
-  const c = polygonCentroidLite(buildable);
-  return pts.map((p) => ({ x: p.x - W / 2 + c.x, y: p.y - D / 2 + c.y }));
+  return polygonDifference(buildable, notch);
 }
 
-/** Build a U-shape polygon centered at the buildable centroid. `opening` = side that is open. */
+/**
+ * Build a U-shape by subtracting a central rectangular notch from one side
+ * of the buildable polygon. Opening side determines which edge the U opens
+ * onto. Uses polygon-clipping difference so the result is always inside the
+ * buildable, regardless of plot shape.
+ */
 function uShapePolygon(buildable: Point[], arm: number, depth: number, opening: SidePosition): Point[] {
   const bb = polygonBBox(buildable);
-  const W = bb.w;
-  const D = bb.h;
-  if (W <= 0 || D <= 0) return [];
-  // Default opening = N (top side opens), arms vertical, base on the south.
-  // Notch is a rectangle from (W*arm, 0) to (W*(1-arm), D*depth) — wait need to rethink.
-  // Actually with N opening: arms go from south up, notch eats from the north.
-  // Polygon CCW (bottom-left start):
-  const aw = W * arm;
-  const dh = D * depth;
-  let pts: Point[] = [
-    { x: 0, y: 0 },
-    { x: W, y: 0 },
-    { x: W, y: D },
-    { x: W - aw, y: D },
-    { x: W - aw, y: D - dh },
-    { x: aw, y: D - dh },
-    { x: aw, y: D },
-    { x: 0, y: D },
-  ];
-  // Rotate for other openings
-  if (opening === "S") pts = pts.map((p) => ({ x: p.x, y: D - p.y }));
-  if (opening === "E") pts = pts.map((p) => ({ x: p.y * (W / D), y: p.x * (D / W) })); // rotate 90° CW with rescale
-  if (opening === "W") {
-    pts = pts.map((p) => ({ x: p.y * (W / D), y: p.x * (D / W) }));
-    pts = pts.map((p) => ({ x: W - p.x, y: p.y }));
+  if (bb.w <= 0 || bb.h <= 0) return [];
+  // Notch sits centered along the chosen side, leaving 'arm' fraction at each end.
+  let nx0: number, nx1: number, ny0: number, ny1: number;
+  if (opening === "N") {
+    nx0 = bb.minX + bb.w * arm;
+    nx1 = bb.maxX - bb.w * arm;
+    ny0 = bb.maxY - bb.h * depth;
+    ny1 = bb.maxY;
+  } else if (opening === "S") {
+    nx0 = bb.minX + bb.w * arm;
+    nx1 = bb.maxX - bb.w * arm;
+    ny0 = bb.minY;
+    ny1 = bb.minY + bb.h * depth;
+  } else if (opening === "E") {
+    nx0 = bb.maxX - bb.w * depth;
+    nx1 = bb.maxX;
+    ny0 = bb.minY + bb.h * arm;
+    ny1 = bb.maxY - bb.h * arm;
+  } else {
+    // W
+    nx0 = bb.minX;
+    nx1 = bb.minX + bb.w * depth;
+    ny0 = bb.minY + bb.h * arm;
+    ny1 = bb.maxY - bb.h * arm;
   }
-  const c = polygonCentroidLite(buildable);
-  return pts.map((p) => ({ x: p.x - W / 2 + c.x, y: p.y - D / 2 + c.y }));
-}
-
-function polygonCentroidLite(poly: Point[]): Point {
-  // Bounding-box centroid is good enough here — buildMassing only uses it to centre the L/U.
-  const bb = polygonBBox(poly);
-  return { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+  const notch: Point[] = [
+    { x: nx0, y: ny0 },
+    { x: nx1, y: ny0 },
+    { x: nx1, y: ny1 },
+    { x: nx0, y: ny1 },
+  ];
+  return polygonDifference(buildable, notch);
 }
 
 function placeInsideBuildable(towerPoly: Point[], buildable: Point[], position: TowerPosition): Point[] {
@@ -297,12 +320,13 @@ function clamp01(x: number): number {
 
 /**
  * Clip a candidate polygon (footprint) against the buildable polygon so the
- * volume never extends outside the green area. Returns [] if the clip is
- * degenerate (very small or fully outside).
+ * volume never extends outside the green area. Uses the full polygon-clipping
+ * Martinez–Rueda intersection so it is robust on concave buildables. Returns
+ * [] if the clip is degenerate (very small or fully outside).
  */
 function clipToBuildable(poly: Point[], buildable: Point[]): Point[] {
   if (poly.length < 3 || buildable.length < 3) return [];
-  const clipped = clipPolygonToConvex(poly, buildable);
+  const clipped = polygonIntersection(poly, buildable);
   if (clipped.length < 3) return [];
   if (polygonArea(clipped) < 0.5) return [];
   return clipped;

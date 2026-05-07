@@ -19,6 +19,7 @@
     "three": "0.169.0",
     "exceljs": "4.4.0",
     "pdfjs-dist": "4.7.76",
+    "polygon-clipping": "0.15.7",
     "zustand": "4.5.5"
   },
   "devDependencies": {
