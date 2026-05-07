@@ -286,35 +286,7 @@ export default function MassingTab() {
             />
           </div>
 
-          <div className="grid gap-5 content-start">
-            {mode === "rectangular" ? (
-              <RectangularInputs
-                project={project}
-                patch={patch}
-                placeholder={sqRoot.toFixed(1)}
-              />
-            ) : (
-              <PolygonInputs
-                vertices={project.plotPolygon ?? []}
-                setbackUniform={sUniform}
-                setbackPerEdge={setbackPerEdge}
-                onSetback={(v) => patch({ setbackUniform: v })}
-                onSetbackPerEdge={(idx, v) => {
-                  const next = [...setbackPerEdge];
-                  next[idx] = v;
-                  patch({ setbackPerEdge: next });
-                }}
-                onSetbackAll={(v) => {
-                  const next = (project.plotPolygon ?? []).map(() => v);
-                  patch({ setbackPerEdge: next, setbackUniform: v });
-                }}
-                onUpdate={updateVertex}
-                onAddAfter={addVertexAfter}
-                onDelete={deleteVertex}
-                onRecentre={recentrePolygon}
-              />
-            )}
-
+          <div className="grid gap-4 content-start">
             <ShapeSelector
               shape={shape}
               onShape={(s) => patch({ massingShape: s })}
@@ -354,6 +326,33 @@ export default function MassingTab() {
               onMatchBuildable={() => patch({ massingFloorArea: buildableArea })}
             />
 
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-ink-200 pt-3">
+              <Stat label="Plot area" value={`${fmt2(plotPolyArea)} m²`} />
+              <Stat label="Buildable" value={`${fmt2(buildableArea)} m²`} />
+              <Stat label="Height" value={`${fmt2(buildingHeight)} m`} />
+              <Stat label="Volume GFA" value={fmt2(totalVolumeGFA)} />
+              <Stat
+                label="vs program"
+                value={`${programVsVolumeDelta >= 0 ? "+" : ""}${fmt2(programVsVolumeDelta)}`}
+                good={Math.abs(programVsVolumeDelta) < 1}
+                bad={programVsVolumeDelta < -1}
+              />
+              <Stat label="FAR" value={computedFar.toFixed(2)} />
+              <Stat
+                label="Cov / buildable"
+                value={fmtPct(coverageOfBuildable)}
+                good={!exceedsBuildable}
+                bad={exceedsBuildable}
+              />
+              <Stat label="Cov / plot" value={fmtPct(plotCoverage)} />
+            </div>
+
+            {exceedsBuildable && (
+              <div className="border border-amber-200 bg-amber-50 text-amber-900 p-2 text-[11px] leading-snug">
+                Floor area exceeds buildable footprint — reduce area, add floors, or revise setbacks. The building is clamped.
+              </div>
+            )}
+
             <ConstraintsInputs
               maxFAR={project.maxFAR}
               maxHeightM={project.maxHeightM}
@@ -362,46 +361,40 @@ export default function MassingTab() {
               onPatch={(p) => patch(p)}
             />
 
-            <div className="border-t border-ink-200 pt-4 grid gap-2 text-sm">
-              <Stat
-                label="Plot area"
-                value={`${fmt2(plotPolyArea)} m²`}
-                sub={
-                  project.plotArea > 0 && Math.abs(plotPolyArea - project.plotArea) > 1
-                    ? `entered: ${fmt2(project.plotArea)} m²`
-                    : undefined
-                }
-              />
-              <Stat label="Buildable" value={`${fmt2(buildableArea)} m²`} />
-              <Stat label="Building height" value={`${fmt2(buildingHeight)} m`} sub={`${effFloors} × ${project.floorHeight} m`} />
-              <Stat label="Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} sub={`${effFloors} floors × ${fmt2(effFloorArea)} m²`} />
-              <Stat
-                label="vs program"
-                value={`${programVsVolumeDelta >= 0 ? "+" : ""}${fmt2(programVsVolumeDelta)} m²`}
-                sub={`program: ${fmt2(program.totalGFABuilding)} m²`}
-                good={Math.abs(programVsVolumeDelta) < 1}
-                bad={programVsVolumeDelta < -1}
-              />
-              <Stat
-                label="Coverage / buildable"
-                value={fmtPct(coverageOfBuildable)}
-                good={!exceedsBuildable}
-                bad={exceedsBuildable}
-              />
-              <Stat label="Coverage / plot" value={fmtPct(plotCoverage)} />
-              <Stat label="FAR" value={computedFar.toFixed(2)} sub="Volume GFA / plot area" />
-            </div>
+            <Collapsible
+              title={mode === "polygon" ? "Plot geometry · vertices & setbacks" : "Plot dimensions & setbacks"}
+              defaultOpen={mode === "polygon" ? (project.plotPolygon?.length ?? 0) === 0 : false}
+            >
+              {mode === "rectangular" ? (
+                <RectangularInputs
+                  project={project}
+                  patch={patch}
+                  placeholder={sqRoot.toFixed(1)}
+                />
+              ) : (
+                <PolygonInputs
+                  vertices={project.plotPolygon ?? []}
+                  setbackUniform={sUniform}
+                  setbackPerEdge={setbackPerEdge}
+                  onSetback={(v) => patch({ setbackUniform: v })}
+                  onSetbackPerEdge={(idx, v) => {
+                    const next = [...setbackPerEdge];
+                    next[idx] = v;
+                    patch({ setbackPerEdge: next });
+                  }}
+                  onSetbackAll={(v) => {
+                    const next = (project.plotPolygon ?? []).map(() => v);
+                    patch({ setbackPerEdge: next, setbackUniform: v });
+                  }}
+                  onUpdate={updateVertex}
+                  onAddAfter={addVertexAfter}
+                  onDelete={deleteVertex}
+                  onRecentre={recentrePolygon}
+                />
+              )}
+            </Collapsible>
 
-            {exceedsBuildable && (
-              <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-xs">
-                <strong className="font-semibold">Floor area exceeds buildable footprint.</strong>
-                <div className="mt-1 text-amber-800">
-                  Reduce floor area, add floors, or revise setbacks. Building shown clamped to the buildable polygon.
-                </div>
-              </div>
-            )}
-
-            <div className="border-t border-ink-200 pt-3 flex items-center gap-2 text-[10.5px] uppercase tracking-[0.18em] text-ink-500 flex-wrap">
+            <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.18em] text-ink-500 flex-wrap">
               <span className="inline-block w-3 h-3 bg-[#ede9df] border border-[#3f5135]" />
               Plot
               <span className="inline-block w-3 h-3 bg-[#bccab0] ml-3" />
@@ -1148,5 +1141,25 @@ function Stat({ label, value, sub, good, bad }: { label: string; value: string; 
         {sub && <span className="block text-[10.5px] text-ink-500 font-normal mt-0.5">{sub}</span>}
       </span>
     </div>
+  );
+}
+
+function Collapsible({
+  title, defaultOpen, children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group border-t border-ink-200 pt-3" open={defaultOpen}>
+      <summary className="cursor-pointer list-none flex items-center justify-between text-[10.5px] uppercase tracking-[0.18em] text-ink-500 hover:text-ink-900 transition-colors">
+        <span>{title}</span>
+        <svg className="w-3 h-3 transition-transform group-open:rotate-180" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </summary>
+      <div className="grid gap-4 mt-4">{children}</div>
+    </details>
   );
 }
