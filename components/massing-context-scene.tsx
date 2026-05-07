@@ -1,10 +1,8 @@
 "use client";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useLoader } from "@react-three/fiber";
 import { OrbitControls, Edges, Line } from "@react-three/drei";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
-import { TilesRenderer } from "3d-tiles-renderer";
-import { GoogleCloudAuthPlugin, ReorientationPlugin, TilesFadePlugin } from "3d-tiles-renderer/plugins";
 import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
@@ -16,24 +14,102 @@ export interface ContextSceneProps {
   floorHeight: number;
   primaryFootprint?: Point[];
   edgeColors?: string[];
-  /** Geographic location of the plot's local origin */
   latitude: number;
   longitude: number;
   /** Heading of plot's +Y axis relative to true north, degrees clockwise */
   northHeadingDeg: number;
-  /** Google Cloud Map Tiles API key */
-  apiKey: string;
+  /** Mapbox public token */
+  mapboxToken: string;
+  /** Half-side of the satellite image footprint in metres (controls zoom). */
+  contextRadiusM?: number;
+}
+
+/** Approximate equirectangular projection — fine for ~1 km radius around the origin */
+const M_PER_DEG_LAT = 111320;
+function metersPerDegLng(latDeg: number) {
+  return 111320 * Math.cos((latDeg * Math.PI) / 180);
+}
+function latLngToLocalXY(
+  lat: number,
+  lng: number,
+  originLat: number,
+  originLng: number
+): { x: number; y: number } {
+  const x = (lng - originLng) * metersPerDegLng(originLat);
+  const y = (lat - originLat) * M_PER_DEG_LAT;
+  return { x, y };
+}
+
+interface OsmBuilding {
+  polygon: Point[]; // local metres relative to project origin
+  height: number;
 }
 
 export default function MassingContextScene(props: ContextSceneProps) {
-  const { plot, volumes, floorHeight, edgeColors, apiKey, latitude, longitude, northHeadingDeg } = props;
+  const {
+    plot, volumes, floorHeight, edgeColors,
+    latitude, longitude, northHeadingDeg, mapboxToken,
+    contextRadiusM = 350,
+  } = props;
+
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
-  const camDist = maxDim * 1.6;
-
-  const buildingGroupRef = useRef<THREE.Group | null>(null);
-  // Apply heading rotation: northHeading degrees clockwise means rotate the building group around +Y by -heading
+  const camDist = Math.max(contextRadiusM * 1.4, maxDim * 1.5);
   const headingRad = (northHeadingDeg * Math.PI) / 180;
+
+  // Pick a Mapbox zoom that approximately covers contextRadiusM half-side.
+  // metres-per-pixel ≈ 156543 * cos(lat) / 2^zoom (web-mercator)
+  // image is rendered at 1024 px @2x = 2048 effective px → 1024 px after CSS
+  // We want imageSizeM ≈ 2 × contextRadius
+  // imageSizeM = imagePixels × metresPerPixel = 1024 × 156543·cos(lat) / 2^zoom
+  // → zoom ≈ log2(1024 × 156543 × cos(lat) / imageSizeM)
+  const zoom = useMemo(() => {
+    const m = (1024 * 156543 * Math.cos((latitude * Math.PI) / 180)) / (2 * contextRadiusM);
+    return Math.max(13, Math.min(20, Math.round(Math.log2(m))));
+  }, [latitude, contextRadiusM]);
+
+  const satelliteUrl = useMemo(() => {
+    if (!mapboxToken) return "";
+    // 1024×1024 @2x = 2048 logical, free tier
+    return `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${longitude},${latitude},${zoom},0/1024x1024@2x?access_token=${mapboxToken}`;
+  }, [longitude, latitude, zoom, mapboxToken]);
+
+  // Compute the actual ground-plane size that matches the chosen zoom
+  const groundSizeM = useMemo(() => {
+    const mPerPx = (156543 * Math.cos((latitude * Math.PI) / 180)) / Math.pow(2, zoom);
+    return 1024 * mPerPx;
+  }, [latitude, zoom]);
+
+  // Fetch OSM buildings around the project on mount / coords change
+  const [osmBuildings, setOsmBuildings] = useState<OsmBuilding[]>([]);
+  const [osmLoading, setOsmLoading] = useState(false);
+  const [osmError, setOsmError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchOSM() {
+      setOsmLoading(true);
+      setOsmError(null);
+      try {
+        const radius = Math.round(contextRadiusM);
+        const query = `[out:json][timeout:25];way[building](around:${radius},${latitude},${longitude});(._;>;);out;`;
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`OSM fetch ${res.status}`);
+        const data = (await res.json()) as { elements: OsmElement[] };
+        if (cancelled) return;
+        setOsmBuildings(parseOsm(data.elements, latitude, longitude));
+      } catch (e) {
+        if (!cancelled) setOsmError(e instanceof Error ? e.message : "OSM fetch failed");
+      } finally {
+        if (!cancelled) setOsmLoading(false);
+      }
+    }
+    fetchOSM();
+    return () => {
+      cancelled = true;
+    };
+  }, [latitude, longitude, contextRadiusM]);
 
   return (
     <Canvas
@@ -42,35 +118,39 @@ export default function MassingContextScene(props: ContextSceneProps) {
         position: [camDist * 0.85, camDist * 0.7, camDist],
         fov: 45,
         near: 0.5,
-        far: 1e8,
+        far: maxDim * 200,
       }}
-      style={{ background: "#9bb3c4" }}
+      style={{ background: "#bccbd6" }}
       dpr={[1, 2]}
     >
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[200, 400, 250]} intensity={0.9} castShadow />
+      <ambientLight intensity={0.65} />
+      <directionalLight position={[300, 500, 200]} intensity={0.9} castShadow />
 
+      {/* Satellite ground texture */}
       <Suspense fallback={null}>
-        <GoogleTiles apiKey={apiKey} latitude={latitude} longitude={longitude} />
+        {satelliteUrl && <SatelliteGround url={satelliteUrl} sizeM={groundSizeM} />}
       </Suspense>
 
-      {/* Building group rotated to align with true north */}
-      <group ref={buildingGroupRef} rotation={[0, -headingRad, 0]}>
-        {/* Plot outline */}
+      {/* OSM extruded buildings around the plot */}
+      {osmBuildings.map((b, i) => (
+        <OsmBuildingMesh key={i} polygon={b.polygon} height={b.height} />
+      ))}
+
+      {/* Project building (rotated by north heading) */}
+      <group rotation={[0, -headingRad, 0]}>
         {edgeColors && edgeColors.length === plot.length ? (
           plot.map((p, i) => {
             const next = plot[(i + 1) % plot.length];
-            const points: [number, number, number][] = [
-              [p.x, 0.05, -p.y],
-              [next.x, 0.05, -next.y],
+            const pts: [number, number, number][] = [
+              [p.x, 0.15, -p.y],
+              [next.x, 0.15, -next.y],
             ];
-            return <Line key={`edge-${i}`} points={points} color={edgeColors[i]} lineWidth={3} />;
+            return <Line key={`edge-${i}`} points={pts} color={edgeColors[i]} lineWidth={3} />;
           })
         ) : (
-          <PlotOutlineLine plot={plot} />
+          <PlotOutline plot={plot} />
         )}
 
-        {/* Volumes */}
         {volumes.map((v, i) => {
           const shape = polyToShape(v.polygon);
           const depth = v.toY - v.fromY;
@@ -139,66 +219,43 @@ export default function MassingContextScene(props: ContextSceneProps) {
         target={[0, maxDim / 4, 0]}
         maxPolarAngle={Math.PI / 2 - 0.02}
         minDistance={20}
-        maxDistance={maxDim * 30}
+        maxDistance={contextRadiusM * 8}
       />
     </Canvas>
   );
 }
 
-function GoogleTiles({
-  apiKey,
-  latitude,
-  longitude,
-}: {
-  apiKey: string;
-  latitude: number;
-  longitude: number;
-}) {
-  const { camera, gl, scene } = useThree();
-  const tilesRef = useRef<TilesRenderer | null>(null);
+/* ---------- helpers ---------- */
 
-  useEffect(() => {
-    const tiles = new TilesRenderer();
-    tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
-    tiles.registerPlugin(
-      new ReorientationPlugin({
-        lat: (latitude * Math.PI) / 180,
-        lon: (longitude * Math.PI) / 180,
-        height: 0,
-        up: "+y",
-        recenter: true,
-      })
-    );
-    tiles.registerPlugin(new TilesFadePlugin());
-    tiles.fetchOptions.mode = "cors";
-    tiles.errorTarget = 24; // higher = lower detail; 24 is a balanced default
-    tiles.setCamera(camera);
-    tiles.setResolutionFromRenderer(camera, gl);
-    scene.add(tiles.group);
-    tilesRef.current = tiles;
-    return () => {
-      try {
-        scene.remove(tiles.group);
-        tiles.dispose();
-      } catch {
-        /* ignore */
-      }
-      tilesRef.current = null;
-    };
-  }, [apiKey, latitude, longitude, camera, gl, scene]);
-
-  useFrame(() => {
-    const t = tilesRef.current;
-    if (!t) return;
-    t.setCamera(camera);
-    t.setResolutionFromRenderer(camera, gl);
-    t.update();
-  });
-
-  return null;
+function SatelliteGround({ url, sizeM }: { url: string; sizeM: number }) {
+  const texture = useLoader(THREE.TextureLoader, url);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <planeGeometry args={[sizeM, sizeM]} />
+      <meshStandardMaterial map={texture} roughness={1} metalness={0} />
+    </mesh>
+  );
 }
 
-/* ------------ small helpers (mirrored from MassingScene) ------------ */
+function OsmBuildingMesh({ polygon, height }: { polygon: Point[]; height: number }) {
+  const shape = useMemo(() => {
+    if (polygon.length < 3) return null;
+    const s = new THREE.Shape();
+    s.moveTo(polygon[0].x, polygon[0].y);
+    for (let i = 1; i < polygon.length; i++) s.lineTo(polygon[i].x, polygon[i].y);
+    s.closePath();
+    return s;
+  }, [polygon]);
+  if (!shape || height <= 0) return null;
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow castShadow>
+      <extrudeGeometry args={[shape, { depth: height, bevelEnabled: false }]} />
+      <meshStandardMaterial color="#cdcdc7" roughness={0.85} metalness={0.05} />
+    </mesh>
+  );
+}
 
 function polyToShape(points: Point[]): THREE.Shape | null {
   if (points.length < 3) return null;
@@ -209,8 +266,66 @@ function polyToShape(points: Point[]): THREE.Shape | null {
   return s;
 }
 
-function PlotOutlineLine({ plot }: { plot: Point[] }) {
-  const points: [number, number, number][] = plot.map((p) => [p.x, 0.05, -p.y]);
-  if (plot.length > 0) points.push([plot[0].x, 0.05, -plot[0].y]);
+function PlotOutline({ plot }: { plot: Point[] }) {
+  const points: [number, number, number][] = plot.map((p) => [p.x, 0.15, -p.y]);
+  if (plot.length > 0) points.push([plot[0].x, 0.15, -plot[0].y]);
   return <Line points={points} color="#3f5135" lineWidth={1.6} />;
+}
+
+/* ---------- OSM Overpass parsing ---------- */
+
+interface OsmNode {
+  type: "node";
+  id: number;
+  lat: number;
+  lon: number;
+}
+interface OsmWay {
+  type: "way";
+  id: number;
+  nodes: number[];
+  tags?: Record<string, string>;
+}
+type OsmElement = OsmNode | OsmWay;
+
+function parseOsm(elements: OsmElement[], originLat: number, originLng: number): OsmBuilding[] {
+  const nodeMap = new Map<number, OsmNode>();
+  for (const el of elements) {
+    if (el.type === "node") nodeMap.set(el.id, el);
+  }
+  const buildings: OsmBuilding[] = [];
+  for (const el of elements) {
+    if (el.type !== "way") continue;
+    if (!el.tags?.building) continue;
+    const polygon: Point[] = [];
+    for (const nid of el.nodes) {
+      const n = nodeMap.get(nid);
+      if (!n) continue;
+      const xy = latLngToLocalXY(n.lat, n.lon, originLat, originLng);
+      polygon.push({ x: xy.x, y: xy.y });
+    }
+    // Drop closing-repeat if present
+    if (polygon.length >= 2) {
+      const a = polygon[0];
+      const b = polygon[polygon.length - 1];
+      if (Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3) polygon.pop();
+    }
+    if (polygon.length < 3) continue;
+
+    const tags = el.tags ?? {};
+    const heightTag = tags["height"];
+    const levelsTag = tags["building:levels"];
+    let height = 0;
+    if (heightTag) {
+      const n = parseFloat(heightTag);
+      if (Number.isFinite(n)) height = n;
+    }
+    if (height <= 0 && levelsTag) {
+      const lv = parseFloat(levelsTag);
+      if (Number.isFinite(lv)) height = lv * 3.2;
+    }
+    if (height <= 0) height = 9; // sensible default for unspecified buildings
+    buildings.push({ polygon, height });
+  }
+  return buildings;
 }

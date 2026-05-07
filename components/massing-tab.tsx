@@ -164,13 +164,13 @@ export default function MassingTab() {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
-  // 3D viewer mode: studio (existing) vs in-context (Google 3D Tiles)
+  // 3D viewer mode: studio (existing) vs in-context (Mapbox satellite + OSM)
   const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
-  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
   const hasGeoCoords =
     typeof project.latitude === "number" && typeof project.longitude === "number"
       && project.latitude !== 0 && project.longitude !== 0;
-  const canShowContext = hasGeoCoords && googleApiKey.length > 0;
+  const canShowContext = hasGeoCoords && mapboxToken.length > 0;
 
   function exploreVariants() {
     const list = generateVariants({
@@ -307,7 +307,7 @@ export default function MassingTab() {
                   latitude={project.latitude!}
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}
-                  apiKey={googleApiKey}
+                  mapboxToken={mapboxToken}
                 />
               ) : (
                 <MassingScene
@@ -330,7 +330,7 @@ export default function MassingTab() {
                 <button
                   onClick={() => canShowContext && setViewMode("context")}
                   disabled={!canShowContext}
-                  title={!canShowContext ? (hasGeoCoords ? "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Netlify" : "Set latitude / longitude in Setup") : ""}
+                  title={!canShowContext ? (hasGeoCoords ? "Set NEXT_PUBLIC_MAPBOX_TOKEN in Netlify" : "Set latitude / longitude in Setup") : ""}
                   className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
                     viewMode === "context" ? "bg-ink-900 text-bone-100" : canShowContext ? "text-ink-700 hover:bg-bone-50" : "text-ink-300 cursor-not-allowed"
                   }`}
