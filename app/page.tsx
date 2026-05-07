@@ -82,6 +82,7 @@ export default function Page() {
       <footer className="border-t border-ink-200 bg-bone-50 py-4">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between gap-4 text-[10.5px] uppercase tracking-[0.18em] text-ink-500">
           <span>QUBE · Plot Feasibility</span>
+          <a href="/demo" className="text-qube-700 hover:text-qube-900 transition-colors">▶ Watch demo</a>
           <span className="truncate">{project.name} · Auto-saved locally</span>
         </div>
       </footer>
