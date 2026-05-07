@@ -274,16 +274,40 @@ export default function MassingTab() {
         </div>
 
         <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
-          <div className="aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
-            <MassingScene
-              plot={plotPoly}
-              buildable={buildablePoly}
-              volumes={massing.volumes}
-              primaryFootprint={massing.primaryFootprint}
-              floorHeight={project.floorHeight}
-              showFrontMarker={mode === "rectangular"}
-              edgeColors={edgeColors}
-            />
+          <div className="grid gap-4 content-start">
+            <div className="aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
+              <MassingScene
+                plot={plotPoly}
+                buildable={buildablePoly}
+                volumes={massing.volumes}
+                primaryFootprint={massing.primaryFootprint}
+                floorHeight={project.floorHeight}
+                showFrontMarker={mode === "rectangular"}
+                edgeColors={edgeColors}
+              />
+            </div>
+
+            {project.parcel && (
+              <div className="border border-ink-200 bg-bone-50 overflow-hidden">
+                <div className="px-3 py-2 border-b border-ink-200 bg-white flex items-center justify-between gap-3 flex-wrap">
+                  <span className="eyebrow text-ink-500">Reference plan</span>
+                  {project.parcel.calibration && (
+                    <span className="tag-ok">Calibrated · {project.parcel.calibration.metres.toFixed(2)} m ref</span>
+                  )}
+                </div>
+                <PlanTrace
+                  parcel={project.parcel}
+                  mode="idle"
+                  tracePolygonPx={project.parcel.tracePolygonPx}
+                  calibration={project.parcel.calibration}
+                  edgeColors={
+                    mode === "polygon" && project.parcel.tracePolygonPx
+                      ? project.parcel.tracePolygonPx.map((_, i) => edgeColor(i))
+                      : undefined
+                  }
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid gap-4 content-start">
@@ -445,35 +469,6 @@ export default function MassingTab() {
         )}
       </div>
 
-      {project.parcel && (
-        <div className="card">
-          <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="section-title">Reference plan</h2>
-              <p className="section-sub">
-                Source drawing and traced polygon used to build the 3D massing.
-                {!project.parcel.calibration && " Calibrate the scale in the Plot tab to lock the geometry in metres."}
-              </p>
-            </div>
-            {project.parcel.calibration && (
-              <span className="tag-ok">Calibrated · {project.parcel.calibration.metres.toFixed(2)} m ref</span>
-            )}
-          </div>
-          <div className="border border-ink-200 bg-bone-50 overflow-hidden max-w-3xl mx-auto">
-            <PlanTrace
-              parcel={project.parcel}
-              mode="idle"
-              tracePolygonPx={project.parcel.tracePolygonPx}
-              calibration={project.parcel.calibration}
-              edgeColors={
-                mode === "polygon" && project.parcel.tracePolygonPx
-                  ? project.parcel.tracePolygonPx.map((_, i) => edgeColor(i))
-                  : undefined
-              }
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
