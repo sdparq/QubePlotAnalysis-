@@ -274,7 +274,7 @@ export default function MassingTab() {
         </div>
 
         <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
-          <div className="aspect-[4/3] lg:aspect-auto lg:min-h-[560px] border border-ink-200 bg-bone-100 overflow-hidden">
+          <div className="aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
             <MassingScene
               plot={plotPoly}
               buildable={buildablePoly}
