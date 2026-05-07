@@ -315,7 +315,9 @@ export default function MassingContextScene(props: ContextSceneProps) {
           <TransformControls
             object={selectedObject}
             mode={transformMode}
-            showY={false}
+            showX={transformMode === "translate"}
+            showY={transformMode === "rotate"}
+            showZ={transformMode === "translate"}
             size={0.9}
             onMouseDown={() => setIsDragging(true)}
             onMouseUp={() => {
