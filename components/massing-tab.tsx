@@ -164,13 +164,12 @@ export default function MassingTab() {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
-  // 3D viewer mode: studio (existing) vs in-context (Google Photorealistic 3D Tiles)
+  // 3D viewer mode: studio (existing) vs in-context (Esri satellite + OSM)
   const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
-  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
   const hasGeoCoords =
     typeof project.latitude === "number" && typeof project.longitude === "number"
       && project.latitude !== 0 && project.longitude !== 0;
-  const canShowContext = hasGeoCoords && googleApiKey.length > 0;
+  const canShowContext = hasGeoCoords;
 
   function exploreVariants() {
     const list = generateVariants({
@@ -307,8 +306,20 @@ export default function MassingTab() {
                   latitude={project.latitude!}
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}
-                  apiKey={googleApiKey}
-                  groundElevationM={project.groundElevationM}
+                  buildingYOffsetM={project.groundElevationM ?? 0}
+                  nearbyHeightOverrides={project.nearbyHeightOverrides}
+                  nearbyHidden={project.nearbyHidden}
+                  onSetHeight={(id, h) => {
+                    const next = { ...(project.nearbyHeightOverrides ?? {}) };
+                    next[id] = h;
+                    patch({ nearbyHeightOverrides: next });
+                  }}
+                  onToggleHide={(id, hide) => {
+                    const cur = new Set(project.nearbyHidden ?? []);
+                    if (hide) cur.add(id);
+                    else cur.delete(id);
+                    patch({ nearbyHidden: Array.from(cur) });
+                  }}
                 />
               ) : (
                 <MassingScene
@@ -331,7 +342,7 @@ export default function MassingTab() {
                 <button
                   onClick={() => canShowContext && setViewMode("context")}
                   disabled={!canShowContext}
-                  title={!canShowContext ? (hasGeoCoords ? "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Netlify and redeploy" : "Set latitude / longitude in Setup") : ""}
+                  title={!canShowContext ? "Set latitude / longitude in Setup" : ""}
                   className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
                     viewMode === "context" ? "bg-ink-900 text-bone-100" : canShowContext ? "text-ink-700 hover:bg-bone-50" : "text-ink-300 cursor-not-allowed"
                   }`}
@@ -339,26 +350,7 @@ export default function MassingTab() {
               </div>
               {!canShowContext && (
                 <div className="absolute top-12 right-2 max-w-[260px] bg-amber-50/95 border border-amber-200 px-3 py-2 text-[10.5px] text-amber-900 leading-snug shadow-sm">
-                  <div className="font-semibold uppercase tracking-[0.10em] text-[10px] mb-1">In context — requirements</div>
-                  <div className="flex items-center gap-1.5">
-                    <span className={hasGeoCoords ? "text-emerald-700" : "text-red-700"}>{hasGeoCoords ? "✓" : "✗"}</span>
-                    <span>
-                      lat / lon{hasGeoCoords ? `: ${project.latitude!.toFixed(4)}, ${project.longitude!.toFixed(4)}` : ` (set in Setup)`}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className={googleApiKey ? "text-emerald-700" : "text-red-700"}>{googleApiKey ? "✓" : "✗"}</span>
-                    <span>
-                      Google Maps API key
-                      {googleApiKey ? ` (${googleApiKey.slice(0, 8)}…)` : ""}
-                    </span>
-                  </div>
-                  {!googleApiKey && (
-                    <div className="mt-2 text-amber-800 text-[10px]">
-                      Add <code className="bg-amber-100 px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> in
-                      Netlify env vars then <strong>Trigger deploy → Clear cache and deploy site</strong>.
-                    </div>
-                  )}
+                  Set latitude / longitude in <strong>Setup</strong> to enable the in-context view.
                 </div>
               )}
             </div>

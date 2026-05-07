@@ -173,6 +173,10 @@ export interface Project {
   northHeadingDeg?: number;
   /** Optional manual ground-elevation override (m above WGS84 ellipsoid). When unset, the in-context viewer auto-fetches elevation from Open-Meteo. */
   groundElevationM?: number;
+  /** Per-OSM-way height overrides (m) for surrounding buildings in the In-context view */
+  nearbyHeightOverrides?: Record<string, number>;
+  /** OSM way ids of surrounding buildings the user wants hidden from the In-context view */
+  nearbyHidden?: string[];
 }
 
 export interface GarbageOverrides {

@@ -69,18 +69,22 @@ That's it — no plugin needed, no env vars.
 
 ## Urban-context 3D view
 
-The Massing tab has a *Studio / In context* toggle. The In-context view streams Google's Photorealistic 3D Tiles (the same data behind Google Earth) around the plot's coordinates and inserts the building in its real urban context.
+The Massing tab has a *Studio / In context* toggle. The In-context view drops the project building onto an Esri satellite tile composite and surrounds it with the neighbouring buildings extruded as **white volumes** from OpenStreetMap data.
 
-To enable it:
+**No API keys, no signups.** Both the satellite imagery (Esri World Imagery) and the building footprints (OSM Overpass) are public free services with attribution shown on the viewer.
 
-1. **Google Cloud project** with **Map Tiles API** enabled.
-2. Create an **API key**, restricted to your Netlify domain (HTTP referrer restriction) and limited to the Map Tiles API.
-3. **Netlify → Site configuration → Environment variables** add `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
-4. **Trigger a redeploy** so the variable is picked up at build time.
-5. In the app, fill **Latitude** and **Longitude** in Setup (and *North heading* if the plot's +Y axis isn't aligned to true north).
-6. Open Massing → click **In context**.
+To use it:
 
-Cost: Google's $200/month Maps Platform free credit covers normal internal feasibility use; after that ~$5 per 1k tile requests. The key is bundled at build time and protected from abuse by the HTTP-referrer restriction.
+1. Fill **Latitude** and **Longitude** in Setup. Optional **North heading** if the plot's +Y axis isn't aligned to true north.
+2. Open Massing → click **In context** in the top-right of the 3D viewer.
+3. **Click any white volume** (a surrounding building) to select it. A small editor appears on the top-left of the viewer where you can:
+   - Override its height — useful for masterplan plots that aren't built yet but you know the planned tower height.
+   - Hide it — useful when OSM has noise / parking shelters / etc. you don't want to see.
+   - Reset to OSM default at any time.
+
+Heights default to OSM's `height` tag (or `building:levels × 3.2 m`, fallback 9 m). Edits persist with the project.
+
+Limits: Esri's free tile usage and the Overpass API are rate-limited but sufficient for normal interactive use.
 
 ## Adding new normatives
 

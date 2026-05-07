@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
 
@@ -106,14 +107,40 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function NumInput({ value, onChange, step = 1, suffix }: { value: number; onChange: (v: number) => void; step?: number; suffix?: string }) {
+  const [text, setText] = useState<string>(Number.isFinite(value) ? String(value) : "0");
+  // Sync external value into internal text when it changes from outside
+  useEffect(() => {
+    const parsed = parseFloat(text);
+    if (Number.isFinite(value) && (!Number.isFinite(parsed) || parsed !== value)) {
+      setText(String(value));
+    }
+  }, [value]);  // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="relative">
       <input
-        type="number"
-        step={step}
+        type="text"
+        inputMode="decimal"
         className="cell-input pr-9"
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        value={text}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          // Allow empty string or a lone '-' / '.' as intermediate typing states.
+          if (raw === "" || raw === "-" || raw === "." || raw === "-.") return;
+          const n = parseFloat(raw);
+          if (Number.isFinite(n)) onChange(n);
+        }}
+        onBlur={() => {
+          const n = parseFloat(text);
+          if (!Number.isFinite(n)) {
+            setText(String(value));
+          } else {
+            // Re-normalise the displayed text to the parsed number
+            setText(String(n));
+            onChange(n);
+          }
+        }}
+        step={step}
       />
       {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-400">{suffix}</span>}
     </div>
