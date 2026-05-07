@@ -181,19 +181,39 @@ function FloorRing({
   hole?: Point[];
   emphasis: boolean;
 }) {
-  const color = emphasis ? "#1a2415" : "#33422e";
-  const width = emphasis ? 1.6 : 0.9;
-  const opacity = emphasis ? 0.85 : 0.55;
+  const color = emphasis ? "#0a0a0a" : "#2a3525";
+  const width = emphasis ? 2.6 : 1.4;
+  const opacity = emphasis ? 0.95 : 0.7;
   const ringPoints = (poly: Point[]): [number, number, number][] => {
     const r: [number, number, number][] = poly.map((p) => [p.x, y, -p.y] as [number, number, number]);
     r.push([poly[0].x, y, -poly[0].y]);
     return r;
   };
+  // depthTest:false + high renderOrder makes the rings draw on top of the
+  // building mesh, so floor markers don't disappear into the solid volume.
   return (
     <>
-      <Line points={ringPoints(polygon)} color={color} lineWidth={width} transparent opacity={opacity} />
+      <Line
+        points={ringPoints(polygon)}
+        color={color}
+        lineWidth={width}
+        transparent
+        opacity={opacity}
+        depthTest={false}
+        depthWrite={false}
+        renderOrder={2}
+      />
       {hole && hole.length >= 3 && (
-        <Line points={ringPoints(hole)} color={color} lineWidth={width} transparent opacity={opacity} />
+        <Line
+          points={ringPoints(hole)}
+          color={color}
+          lineWidth={width}
+          transparent
+          opacity={opacity}
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={2}
+        />
       )}
     </>
   );
