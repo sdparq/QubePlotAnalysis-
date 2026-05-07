@@ -69,19 +69,18 @@ That's it — no plugin needed, no env vars.
 
 ## Urban-context 3D view
 
-The Massing tab has a *Studio / In context* toggle. The In-context view drops the project building onto an Esri satellite tile composite and surrounds it with the neighbouring buildings extruded from OpenStreetMap data — like a SimCity-style block of the actual streetscape.
+The Massing tab has a *Studio / In context* toggle. The In-context view streams Google's Photorealistic 3D Tiles (the same data behind Google Earth) around the plot's coordinates and inserts the building in its real urban context.
 
-**No API keys, no signups.** Both the satellite imagery (Esri World Imagery) and the building footprints (OSM Overpass) are public free services with proper attribution shown on the viewer.
+To enable it:
 
-To use it:
+1. **Google Cloud project** with **Map Tiles API** enabled.
+2. Create an **API key**, restricted to your Netlify domain (HTTP referrer restriction) and limited to the Map Tiles API.
+3. **Netlify → Site configuration → Environment variables** add `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
+4. **Trigger a redeploy** so the variable is picked up at build time.
+5. In the app, fill **Latitude** and **Longitude** in Setup (and *North heading* if the plot's +Y axis isn't aligned to true north).
+6. Open Massing → click **In context**.
 
-1. Fill **Latitude** and **Longitude** in Setup (clic-derecho en Google Maps sobre el solar → primera línea son las coords).
-2. Optional **North heading** if the plot's +Y axis isn't aligned to true north.
-3. Open Massing → click **In context** in the top-right of the 3D viewer.
-
-The OSM building footprints are fetched within ~350 m of the plot. When OSM doesn't have a `height` or `building:levels` tag for a building it falls back to 9 m. Esri tiles cover Dubai with high detail.
-
-Limits: Esri's free tile usage and Overpass API are rate-limited but sufficient for normal interactive use. If you hit a rate cap, just wait a few seconds and reload.
+Cost: Google's $200/month Maps Platform free credit covers normal internal feasibility use; after that ~$5 per 1k tile requests. The key is bundled at build time and protected from abuse by the HTTP-referrer restriction.
 
 ## Adding new normatives
 

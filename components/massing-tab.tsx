@@ -164,12 +164,13 @@ export default function MassingTab() {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
-  // 3D viewer mode: studio (existing) vs in-context (Esri satellite + OSM)
+  // 3D viewer mode: studio (existing) vs in-context (Google Photorealistic 3D Tiles)
   const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
+  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
   const hasGeoCoords =
     typeof project.latitude === "number" && typeof project.longitude === "number"
       && project.latitude !== 0 && project.longitude !== 0;
-  const canShowContext = hasGeoCoords;
+  const canShowContext = hasGeoCoords && googleApiKey.length > 0;
 
   function exploreVariants() {
     const list = generateVariants({
@@ -306,6 +307,7 @@ export default function MassingTab() {
                   latitude={project.latitude!}
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}
+                  apiKey={googleApiKey}
                 />
               ) : (
                 <MassingScene
@@ -328,7 +330,7 @@ export default function MassingTab() {
                 <button
                   onClick={() => canShowContext && setViewMode("context")}
                   disabled={!canShowContext}
-                  title={!canShowContext ? "Set latitude / longitude in Setup" : ""}
+                  title={!canShowContext ? (hasGeoCoords ? "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Netlify and redeploy" : "Set latitude / longitude in Setup") : ""}
                   className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
                     viewMode === "context" ? "bg-ink-900 text-bone-100" : canShowContext ? "text-ink-700 hover:bg-bone-50" : "text-ink-300 cursor-not-allowed"
                   }`}
