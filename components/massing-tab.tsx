@@ -336,6 +336,30 @@ export default function MassingTab() {
                   }`}
                 >In context</button>
               </div>
+              {!canShowContext && (
+                <div className="absolute top-12 right-2 max-w-[260px] bg-amber-50/95 border border-amber-200 px-3 py-2 text-[10.5px] text-amber-900 leading-snug shadow-sm">
+                  <div className="font-semibold uppercase tracking-[0.10em] text-[10px] mb-1">In context — requirements</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={hasGeoCoords ? "text-emerald-700" : "text-red-700"}>{hasGeoCoords ? "✓" : "✗"}</span>
+                    <span>
+                      lat / lon{hasGeoCoords ? `: ${project.latitude!.toFixed(4)}, ${project.longitude!.toFixed(4)}` : ` (set in Setup)`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className={googleApiKey ? "text-emerald-700" : "text-red-700"}>{googleApiKey ? "✓" : "✗"}</span>
+                    <span>
+                      Google Maps API key
+                      {googleApiKey ? ` (${googleApiKey.slice(0, 8)}…)` : ""}
+                    </span>
+                  </div>
+                  {!googleApiKey && (
+                    <div className="mt-2 text-amber-800 text-[10px]">
+                      Add <code className="bg-amber-100 px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> in
+                      Netlify env vars then <strong>Trigger deploy → Clear cache and deploy site</strong>.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {project.parcel && (
