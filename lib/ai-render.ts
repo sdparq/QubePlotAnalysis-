@@ -1,19 +1,26 @@
 /**
- * Image-to-image rendering of the 3D massing viewer.
+ * Image-to-image rendering of the 3D massing viewer through Google Gemini.
+ * Preserves the massing layout from the input image and re-renders it as a
+ * stylised axonometric architectural scheme.
  *
- * Two engines:
- *   - Google Gemini 2.5 Flash Image (image-to-image, preserves the layout).
- *     Requires an AI Studio API key (free tier covers image generation).
- *   - Pollinations / FLUX (text-to-image, no key, fully free, but the
- *     resulting massing is generative — doesn't reflect the input).
+ * Tries several known image-generation model names in cascade — different AI
+ * Studio accounts/regions expose different sets of preview/GA models, so we
+ * fall back through 2.5 → 2.0 until one accepts the request.
  */
 
 export interface AiRenderResult {
   imageDataUrl: string;
   textNote?: string;
+  modelUsed?: string;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-image-preview";
+const FALLBACK_MODELS = [
+  "gemini-2.5-flash-image",
+  "gemini-2.5-flash-image-preview",
+  "gemini-2.0-flash-preview-image-generation",
+  "gemini-2.0-flash-exp-image-generation",
+  "gemini-2.0-flash-exp",
+];
 
 export const DEFAULT_SCHEME_PROMPT = `Render this 3D massing study as a clean architectural axonometric scheme in the style of Bjarke Ingels Group (BIG).
 
@@ -39,14 +46,13 @@ Aesthetic: clean axonometric architectural diagram, flat shading, thin clean out
 
 Output a single image with the same aspect ratio and orientation as the input.`;
 
-export async function renderSchemeWithGemini(
+async function callGeminiOnce(
   apiKey: string,
-  inputPngDataUrl: string,
-  prompt: string = DEFAULT_SCHEME_PROMPT,
+  base64: string,
+  prompt: string,
+  model: string,
   signal?: AbortSignal,
-  model: string = DEFAULT_GEMINI_MODEL,
 ): Promise<AiRenderResult> {
-  const base64 = inputPngDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [
@@ -70,7 +76,9 @@ export async function renderSchemeWithGemini(
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`Gemini ${res.status}: ${txt.slice(0, 300)}`);
+    const err = new Error(`Gemini ${res.status}: ${txt.slice(0, 300)}`);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
   const data = (await res.json()) as {
     candidates?: Array<{
@@ -93,29 +101,33 @@ export async function renderSchemeWithGemini(
       "Gemini did not return an image." + (textNote ? ` Model said: ${textNote.slice(0, 200)}` : ""),
     );
   }
-  return { imageDataUrl, textNote };
+  return { imageDataUrl, textNote, modelUsed: model };
 }
 
-/**
- * Free, no-key text-to-image fallback through pollinations.ai (FLUX model).
- * Returns a generated image but does NOT preserve the input layout — Pollinations
- * doesn't accept arbitrary inline image inputs.
- */
-export async function renderSchemeWithPollinations(
+export async function renderSchemeWithGemini(
+  apiKey: string,
+  inputPngDataUrl: string,
   prompt: string = DEFAULT_SCHEME_PROMPT,
   signal?: AbortSignal,
 ): Promise<AiRenderResult> {
-  const seed = Math.floor(Math.random() * 1_000_000);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=960&model=flux&nologo=true&enhance=true&seed=${seed}`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) {
-    throw new Error(`Pollinations ${res.status}: ${res.statusText}`);
+  const base64 = inputPngDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
+  let lastError: Error | null = null;
+  for (const model of FALLBACK_MODELS) {
+    try {
+      return await callGeminiOnce(apiKey, base64, prompt, model, signal);
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const status = (err as Error & { status?: number }).status;
+      // Only fall through on "model not available" errors. Anything else
+      // (auth, quota, server error, image-not-returned) is fatal.
+      if (status === 404 || /not found|NOT_FOUND|not supported/i.test(err.message)) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
   }
-  const blob = await res.blob();
-  return await new Promise<AiRenderResult>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({ imageDataUrl: String(reader.result) });
-    reader.onerror = () => reject(new Error("Failed to read Pollinations image"));
-    reader.readAsDataURL(blob);
-  });
+  throw new Error(
+    `No image-generation model is available for this API key. Last error:\n${lastError?.message ?? "unknown"}\n\nTried: ${FALLBACK_MODELS.join(", ")}.\nVerify your key has access to a Gemini image-gen model at aistudio.google.com.`,
+  );
 }
