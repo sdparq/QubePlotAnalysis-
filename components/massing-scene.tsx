@@ -51,13 +51,21 @@ export default function MassingScene(props: SceneProps) {
     [volumes]
   );
 
-  const floorLines = useMemo(() => {
-    if (!primaryFootprint || primaryFootprint.length < 3 || topY <= 0 || floorHeight <= 0) return [];
-    const lines: number[] = [];
-    const n = Math.max(1, Math.floor(topY / floorHeight));
-    for (let i = 1; i < n; i++) lines.push(i * floorHeight);
-    return lines;
-  }, [primaryFootprint, topY, floorHeight]);
+  const floorRings = useMemo(() => {
+    if (floorHeight <= 0 || volumes.length === 0) return [];
+    const out: { y: number; polygon: Point[]; hole?: Point[]; emphasis: boolean }[] = [];
+    for (const v of volumes) {
+      // Floor levels inside this volume, excluding top and bottom (those are mesh edges)
+      const startFloor = Math.floor(v.fromY / floorHeight) + 1;
+      const endFloor = Math.ceil(v.toY / floorHeight) - 1;
+      for (let f = startFloor; f <= endFloor; f++) {
+        const y = f * floorHeight;
+        if (y <= v.fromY + 1e-3 || y >= v.toY - 1e-3) continue;
+        out.push({ y, polygon: v.polygon, hole: v.hole, emphasis: f % 5 === 0 });
+      }
+    }
+    return out;
+  }, [volumes, floorHeight]);
 
   return (
     <Canvas
@@ -142,16 +150,9 @@ export default function MassingScene(props: SceneProps) {
         );
       })}
 
-      {/* Floor-level wireframe rings on the primary footprint */}
-      {primaryFootprint && primaryFootprint.length >= 3 && floorLines.map((y, i) => (
-        <Line
-          key={`fl-${i}`}
-          points={closedPoints(primaryFootprint, 0).map(([x, _, z]) => [x, y, z] as [number, number, number])}
-          color="#33422e"
-          lineWidth={0.8}
-          transparent
-          opacity={0.45}
-        />
+      {/* Floor-level rings around each volume — emphasised every 5 floors */}
+      {floorRings.map((r, i) => (
+        <FloorRing key={`fr-${i}`} y={r.y} polygon={r.polygon} hole={r.hole} emphasis={r.emphasis} />
       ))}
 
       {showFrontMarker && <FrontMarker plot={plot} />}
@@ -166,6 +167,35 @@ export default function MassingScene(props: SceneProps) {
         maxDistance={maxDim * 5}
       />
     </Canvas>
+  );
+}
+
+function FloorRing({
+  y,
+  polygon,
+  hole,
+  emphasis,
+}: {
+  y: number;
+  polygon: Point[];
+  hole?: Point[];
+  emphasis: boolean;
+}) {
+  const color = emphasis ? "#1a2415" : "#33422e";
+  const width = emphasis ? 1.6 : 0.9;
+  const opacity = emphasis ? 0.85 : 0.55;
+  const ringPoints = (poly: Point[]): [number, number, number][] => {
+    const r: [number, number, number][] = poly.map((p) => [p.x, y, -p.y] as [number, number, number]);
+    r.push([poly[0].x, y, -poly[0].y]);
+    return r;
+  };
+  return (
+    <>
+      <Line points={ringPoints(polygon)} color={color} lineWidth={width} transparent opacity={opacity} />
+      {hole && hole.length >= 3 && (
+        <Line points={ringPoints(hole)} color={color} lineWidth={width} transparent opacity={opacity} />
+      )}
+    </>
   );
 }
 
