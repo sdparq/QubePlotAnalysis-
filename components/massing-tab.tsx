@@ -32,6 +32,18 @@ const MassingScene = dynamic(() => import("./massing-scene"), {
   ),
 });
 
+const MassingContextScene = dynamic(() => import("./massing-context-scene"), {
+  ssr: false,
+  loading: () => (
+    <div className="aspect-[4/3] border border-ink-200 bg-bone-100 flex items-center justify-center">
+      <div className="text-center">
+        <div className="mx-auto w-8 h-8 border-2 border-qube-500 border-t-transparent rounded-full animate-spin mb-3" />
+        <div className="text-xs text-ink-500 uppercase tracking-[0.18em]">Loading 3D Tiles…</div>
+      </div>
+    </div>
+  ),
+});
+
 export default function MassingTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
@@ -151,6 +163,14 @@ export default function MassingTab() {
   // Variants
   const [variants, setVariants] = useState<Variant[]>([]);
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
+
+  // 3D viewer mode: studio (existing) vs in-context (Google 3D Tiles)
+  const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
+  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const hasGeoCoords =
+    typeof project.latitude === "number" && typeof project.longitude === "number"
+      && project.latitude !== 0 && project.longitude !== 0;
+  const canShowContext = hasGeoCoords && googleApiKey.length > 0;
 
   function exploreVariants() {
     const list = generateVariants({
@@ -275,16 +295,47 @@ export default function MassingTab() {
 
         <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
           <div className="grid gap-4 content-start">
-            <div className="aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
-              <MassingScene
-                plot={plotPoly}
-                buildable={buildablePoly}
-                volumes={massing.volumes}
-                primaryFootprint={massing.primaryFootprint}
-                floorHeight={project.floorHeight}
-                showFrontMarker={mode === "rectangular"}
-                edgeColors={edgeColors}
-              />
+            <div className="relative aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
+              {viewMode === "context" && canShowContext ? (
+                <MassingContextScene
+                  plot={plotPoly}
+                  buildable={buildablePoly}
+                  volumes={massing.volumes}
+                  primaryFootprint={massing.primaryFootprint}
+                  floorHeight={project.floorHeight}
+                  edgeColors={edgeColors}
+                  latitude={project.latitude!}
+                  longitude={project.longitude!}
+                  northHeadingDeg={project.northHeadingDeg ?? 0}
+                  apiKey={googleApiKey}
+                />
+              ) : (
+                <MassingScene
+                  plot={plotPoly}
+                  buildable={buildablePoly}
+                  volumes={massing.volumes}
+                  primaryFootprint={massing.primaryFootprint}
+                  floorHeight={project.floorHeight}
+                  showFrontMarker={mode === "rectangular"}
+                  edgeColors={edgeColors}
+                />
+              )}
+              <div className="absolute top-2 right-2 inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
+                <button
+                  onClick={() => setViewMode("studio")}
+                  className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                    viewMode === "studio" ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
+                  }`}
+                >Studio</button>
+                <button
+                  onClick={() => canShowContext && setViewMode("context")}
+                  disabled={!canShowContext}
+                  title={!canShowContext ? (hasGeoCoords ? "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Netlify" : "Set latitude / longitude in Setup") : ""}
+                  className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                    viewMode === "context" ? "bg-ink-900 text-bone-100" : canShowContext ? "text-ink-700 hover:bg-bone-50" : "text-ink-300 cursor-not-allowed"
+                  }`}
+                >In context</button>
+              </div>
             </div>
 
             {project.parcel && (

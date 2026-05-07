@@ -166,6 +166,11 @@ export interface Project {
   garbage?: GarbageOverrides;
   /** Real-estate economic analysis configuration. */
   economic?: EconomicConfig;
+  /** Geographic location of the plot, used for the Photorealistic 3D Tiles in-context view. */
+  latitude?: number;
+  longitude?: number;
+  /** Heading of the plot's local +y axis relative to true north, in degrees clockwise. 0 = +y points north. */
+  northHeadingDeg?: number;
 }
 
 export interface GarbageOverrides {
