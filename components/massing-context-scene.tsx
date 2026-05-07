@@ -31,13 +31,13 @@ export interface ContextSceneProps {
   /** OSM way ids hidden from the scene */
   nearbyHidden?: string[];
   /** Map style to use for the basemap */
-  mapStyle?: "topo" | "satellite" | "schematic";
+  mapStyle?: "topo" | "satellite" | "schematic" | "scheme";
   /** User-defined extra neighbours */
   customNeighbors?: CustomNeighbor[];
   /** Persist user edits */
   onSetHeight?: (osmId: string, height: number) => void;
   onToggleHide?: (osmId: string, hide: boolean) => void;
-  onSetMapStyle?: (style: "topo" | "satellite" | "schematic") => void;
+  onSetMapStyle?: (style: "topo" | "satellite" | "schematic" | "scheme") => void;
   onSetBuildingOffset?: (x: number, z: number) => void;
   onAddCustomNeighbor?: (centerX: number, centerZ: number) => string;
   onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
@@ -47,7 +47,7 @@ export interface ContextSceneProps {
   onShuffleTowers?: (minH: number, maxH: number) => void;
 }
 
-type MapStyle = "topo" | "satellite" | "schematic";
+type MapStyle = "topo" | "satellite" | "schematic" | "scheme";
 
 function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
   if (style === "satellite") {
@@ -196,6 +196,22 @@ export default function MassingContextScene(props: ContextSceneProps) {
     let cancelled = false;
     setGround(null);
     setGroundError(null);
+    if (mapStyle === "scheme") {
+      // Synthetic flat sand-coloured ground — no tile fetch.
+      const sizeM = 2 * contextRadiusM;
+      const c = document.createElement("canvas");
+      c.width = 16; c.height = 16;
+      const cx = c.getContext("2d");
+      if (cx) {
+        cx.fillStyle = "#ece4d2";
+        cx.fillRect(0, 0, 16, 16);
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.needsUpdate = true;
+      setGround({ texture: tex, sizeM, planeX: 0, planeZ: 0 });
+      return () => { cancelled = true; };
+    }
     loadContextTiles(latitude, longitude, contextRadiusM, mapStyle)
       .then((g) => { if (!cancelled) setGround(g); })
       .catch((e: Error) => { if (!cancelled) setGroundError(e.message); });
@@ -222,6 +238,39 @@ export default function MassingContextScene(props: ContextSceneProps) {
     fetchOSM();
     return () => { cancelled = true; };
   }, [latitude, longitude, contextRadiusM]);
+
+  // OSM highways (only fetched in scheme mode)
+  const [osmHighways, setOsmHighways] = useState<Point[][]>([]);
+  useEffect(() => {
+    if (mapStyle !== "scheme") { setOsmHighways([]); return; }
+    let cancelled = false;
+    async function fetchHighways() {
+      try {
+        const radius = Math.round(contextRadiusM);
+        const query = `[out:json][timeout:25];way["highway"](around:${radius},${latitude},${longitude});(._;>;);out;`;
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`OSM highway fetch ${res.status}`);
+        const data = (await res.json()) as { elements: OsmElement[] };
+        if (cancelled) return;
+        setOsmHighways(parseOsmLines(data.elements, latitude, longitude));
+      } catch {
+        if (!cancelled) setOsmHighways([]);
+      }
+    }
+    fetchHighways();
+    return () => { cancelled = true; };
+  }, [latitude, longitude, contextRadiusM, mapStyle]);
+
+  const trees = useMemo(() => {
+    if (mapStyle !== "scheme") return [] as { x: number; z: number; scale: number }[];
+    return generateTrees(osmHighways);
+  }, [mapStyle, osmHighways]);
+
+  const windowTex = useMemo(() => {
+    if (mapStyle !== "scheme") return null;
+    return makeWindowTexture(floorHeight);
+  }, [mapStyle, floorHeight]);
 
   const hidden = useMemo(() => new Set(nearbyHidden), [nearbyHidden]);
   type Selection = { kind: "osm"; id: string } | { kind: "custom"; id: string } | null;
@@ -255,7 +304,12 @@ export default function MassingContextScene(props: ContextSceneProps) {
           far: maxDim * 400,
           zoom: 1,
         }}
-        style={{ background: "#bccbd6" }}
+        style={{
+          background:
+            mapStyle === "scheme"
+              ? "linear-gradient(180deg, #f3e8cc 0%, #e6d3a3 100%)"
+              : "#bccbd6",
+        }}
         dpr={[1, 2]}
         onPointerMissed={() => setSelection(null)}
       >
@@ -314,6 +368,18 @@ export default function MassingContextScene(props: ContextSceneProps) {
           />
         ))}
 
+        {/* Scheme mode: highways drawn as light grey ribbons */}
+        {mapStyle === "scheme" && osmHighways.map((line, i) => {
+          if (line.length < 2) return null;
+          const pts: [number, number, number][] = line.map((p) => [p.x, 0.05, -p.y]);
+          return <Line key={`hw-${i}`} points={pts} color="#cfc6b3" lineWidth={5} />;
+        })}
+
+        {/* Scheme mode: trees scattered along highways */}
+        {mapStyle === "scheme" && trees.map((t, i) => (
+          <SchemeTree key={`tr-${i}`} x={t.x} z={t.z} scale={t.scale} />
+        ))}
+
         {selectedObject && (
           <TransformControls
             object={selectedObject}
@@ -369,8 +435,17 @@ export default function MassingContextScene(props: ContextSceneProps) {
                 receiveShadow
               >
                 <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-                <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
-                <Edges color="#33422e" threshold={1} />
+                {mapStyle === "scheme" ? (
+                  <meshStandardMaterial
+                    color="#d8c39a"
+                    map={windowTex ?? undefined}
+                    roughness={0.78}
+                    metalness={0}
+                  />
+                ) : (
+                  <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
+                )}
+                <Edges color={mapStyle === "scheme" ? "#3a2f1c" : "#33422e"} threshold={1} />
               </mesh>
             );
           })}
@@ -435,14 +510,14 @@ export default function MassingContextScene(props: ContextSceneProps) {
       {!selectedOsm && !selectedCustom && ground && (
         <div className="absolute top-2 left-2 grid gap-2 max-w-[260px]">
           <div className="inline-flex border border-ink-200 bg-white/95 shadow-sm">
-            {(["topo", "satellite", "schematic"] as MapStyle[]).map((s) => (
+            {(["topo", "satellite", "schematic", "scheme"] as MapStyle[]).map((s) => (
               <button
                 key={s}
                 onClick={() => onSetMapStyle?.(s)}
                 className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
                   mapStyle === s ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
                 }`}
-              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : "Schematic"}</button>
+              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : s === "schematic" ? "Map" : "Scheme"}</button>
             ))}
           </div>
 
@@ -900,4 +975,134 @@ function parseOsm(elements: OsmElement[], originLat: number, originLng: number):
     });
   }
   return buildings;
+}
+
+/* ---------- Scheme-mode helpers ---------- */
+
+function parseOsmLines(elements: OsmElement[], originLat: number, originLng: number): Point[][] {
+  const nodeMap = new Map<number, OsmNode>();
+  for (const el of elements) if (el.type === "node") nodeMap.set(el.id, el);
+  const lines: Point[][] = [];
+  for (const el of elements) {
+    if (el.type !== "way" || !el.tags?.highway) continue;
+    const path: Point[] = [];
+    for (const nid of el.nodes) {
+      const n = nodeMap.get(nid);
+      if (!n) continue;
+      const xy = latLngToLocalXY(n.lat, n.lon, originLat, originLng);
+      path.push({ x: xy.x, y: xy.y });
+    }
+    if (path.length >= 2) lines.push(path);
+  }
+  return lines;
+}
+
+function generateTrees(highways: Point[][]): { x: number; z: number; scale: number }[] {
+  const trees: { x: number; z: number; scale: number }[] = [];
+  const spacing = 14; // metres along the road
+  const sideOffset = 4.5;
+  let counter = 0;
+  for (const line of highways) {
+    if (line.length < 2) continue;
+    let leftover = 0;
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i];
+      const b = line[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) continue;
+      const tx = dx / len;
+      const ty = dy / len;
+      // Perpendicular (in OSM-local x,y plane).
+      const px = -ty;
+      const py = tx;
+      let d = leftover;
+      while (d <= len) {
+        const t = d / len;
+        const cx = a.x + dx * t;
+        const cy = a.y + dy * t;
+        // Pseudo-random but deterministic-ish through counter — alternate sides + jitter.
+        counter += 1;
+        const r = pseudoRand(counter);
+        const side = r < 0.5 ? -1 : 1;
+        const jitter = 0.5 + r * 1.5;
+        const wx = cx + px * (sideOffset + jitter) * side;
+        const wy = cy + py * (sideOffset + jitter) * side;
+        const scale = 0.85 + pseudoRand(counter * 7919) * 0.4;
+        trees.push({ x: wx, z: -wy, scale });
+        d += spacing + (pseudoRand(counter * 31) * 6 - 3);
+      }
+      leftover = d - len;
+    }
+  }
+  // Cap to avoid extreme counts
+  if (trees.length > 800) trees.length = 800;
+  return trees;
+}
+
+function pseudoRand(seed: number): number {
+  const x = Math.sin(seed) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function SchemeTree({ x, z, scale }: { x: number; z: number; scale: number }) {
+  const trunkH = 2.4 * scale;
+  const crownR = 1.5 * scale;
+  const crownH = 3.2 * scale;
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, trunkH / 2, 0]} castShadow>
+        <cylinderGeometry args={[0.18 * scale, 0.28 * scale, trunkH, 6]} />
+        <meshStandardMaterial color="#8a6a44" roughness={1} />
+      </mesh>
+      <mesh position={[0, trunkH + crownH / 2, 0]} castShadow>
+        <coneGeometry args={[crownR, crownH, 8]} />
+        <meshStandardMaterial color="#7a8e58" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+function makeWindowTexture(floorHeight: number): THREE.Texture {
+  const tileWm = 2.5;       // one window bay = 2.5 m wide
+  const tileHm = Math.max(2, floorHeight); // one floor tall
+  const pxPerM = 48;
+  const w = Math.round(pxPerM * tileWm);
+  const h = Math.round(pxPerM * tileHm);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    // Wall colour
+    ctx.fillStyle = "#d8c39a";
+    ctx.fillRect(0, 0, w, h);
+    // Floor slab line at the bottom of the cell
+    ctx.fillStyle = "#7d6643";
+    ctx.fillRect(0, h - 3, w, 3);
+    // Window
+    const wW = Math.round(w * 0.62);
+    const wH = Math.round(h * 0.55);
+    const wx = Math.round((w - wW) / 2);
+    const wy = Math.round((h - wH) / 2 - h * 0.08);
+    ctx.fillStyle = "#3a4a55";
+    ctx.fillRect(wx, wy, wW, wH);
+    // Mullion (vertical divider)
+    ctx.fillStyle = "#d8c39a";
+    ctx.fillRect(wx + Math.round(wW / 2) - 1, wy, 2, wH);
+    // Sill
+    ctx.fillStyle = "#a48f6d";
+    ctx.fillRect(wx, wy + wH, wW, 2);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // ExtrudeGeometry's default UVs use raw (x, y) world coords on caps and
+  // (along-edge length, depth) on side walls — both effectively in metres,
+  // so 1 / tileSize gives the right tile density.
+  tex.repeat.set(1 / tileWm, 1 / tileHm);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
