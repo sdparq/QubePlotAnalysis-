@@ -22,8 +22,15 @@ const FALLBACK_MODELS = [
   "gemini-2.0-flash-exp",
 ];
 
-export const DEFAULT_SCHEME_PROMPT = `Create an architectural axonometric diagram based strictly on the provided axonometric geometry. Flat vector illustration style, Adobe Illustrator look. Soft pastel color palette (light greens, beige, light blue, grey). Simple solid volumes, no textures, no realism. Clean outlines, thin consistent strokes. Diagrammatic urban axonometry with simplified buildings, trees as circular symbols, soft landscape shapes, dashed annotation lines, icons and labels. Professional architecture presentation board style, clear hierarchy, white background, minimal shadows, schematic and readable.
-Do not change geometry or proportions, only apply graphic style. No anotations`;
+export const DEFAULT_SCHEME_PROMPT = `Create an architectural axonometric diagram based strictly on the provided axonometric geometry. Flat vector illustration style, Adobe Illustrator look. Soft pastel color palette (light greens, beige, light blue, grey). Simple solid volumes, no textures, no realism. Clean outlines, thin consistent strokes. Diagrammatic urban axonometry with simplified buildings, trees as circular symbols, soft landscape shapes, professional architecture presentation board style, clear hierarchy, white background, minimal shadows, schematic and readable.
+
+OUR PROJECT (the green / highlighted volume): redraw it as a residential building with a clear residential facade rhythm — regular bays of windows with recessed balconies / loggias punched into the facade (visible insets where the volume is carved back floor by floor). Keep the silhouette and total height exactly as in the input. Use a soft pastel green / sage tone for the body, slightly darker for the recessed balcony interiors.
+
+If a podium / base step is visible at the bottom of our volume, treat it as an amenity podium with a small differentiating roofscape on top: a rectangular swimming pool drawn in light blue, surrounded by sun-lounger dots, a couple of pergolas or shaded patches in soft green, and small tree symbols. The podium walls themselves stay flat-coloured in a slightly warmer beige to read as a different programme.
+
+SURROUNDINGS: keep the white neighbouring volumes as flat pastel-white blocks with thin outlines, but enrich the public realm — generous vegetation scattered along the streets and between buildings (dense clusters of circular tree symbols in two or three soft greens), small parks / planted strips, hedges drawn as soft rounded shapes, a few stylised cars on the roads, sidewalks hinted in light grey. Add a light atmospheric feel: soft cast shadows under each volume, subtle gradient on the ground, gentle ambient palette.
+
+Do not change geometry or proportions of any volume, only apply graphic style. No annotations, no labels, no text.`;
 
 async function callGeminiOnce(
   apiKey: string,
