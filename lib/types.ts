@@ -182,6 +182,32 @@ export interface Project {
   /** Manual building XZ offset in metres (east/north) for fine alignment with the basemap. */
   contextOffsetXM?: number;
   contextOffsetZM?: number;
+  /** Manually defined neighbouring buildings (for plots not yet in OSM) */
+  customNeighbors?: CustomNeighbor[];
+}
+
+/** A user-drawn neighbouring building rendered as one box (podium) plus an optional tower on top. */
+export interface CustomNeighbor {
+  id: string;
+  name?: string;
+  /** World XZ position of the podium centre, in metres. */
+  centerX: number;
+  centerZ: number;
+  /** Rotation of the building around +Y axis, degrees. 0 = aligned with world axes. */
+  rotationDeg: number;
+  /** Podium / base box dimensions (m). */
+  widthM: number;
+  depthM: number;
+  heightM: number;
+  /** Optional tower box stacked on top of the podium. */
+  tower?: {
+    widthM: number;
+    depthM: number;
+    heightM: number;
+    /** Tower offset from podium centre, in the building's own rotated frame (m). */
+    offsetXM?: number;
+    offsetZM?: number;
+  };
 }
 
 export interface GarbageOverrides {

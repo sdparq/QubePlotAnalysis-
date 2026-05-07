@@ -312,6 +312,7 @@ export default function MassingTab() {
                   mapStyle={project.contextMapStyle ?? "topo"}
                   nearbyHeightOverrides={project.nearbyHeightOverrides}
                   nearbyHidden={project.nearbyHidden}
+                  customNeighbors={project.customNeighbors}
                   onSetHeight={(id, h) => {
                     const next = { ...(project.nearbyHeightOverrides ?? {}) };
                     next[id] = h;
@@ -325,6 +326,30 @@ export default function MassingTab() {
                   }}
                   onSetMapStyle={(s) => patch({ contextMapStyle: s })}
                   onSetBuildingOffset={(x, z) => patch({ contextOffsetXM: x, contextOffsetZM: z })}
+                  onAddCustomNeighbor={(centerX, centerZ) => {
+                    const id = `cn-${Date.now()}`;
+                    const next = [...(project.customNeighbors ?? []), {
+                      id,
+                      centerX: Number(centerX.toFixed(2)),
+                      centerZ: Number(centerZ.toFixed(2)),
+                      rotationDeg: 0,
+                      widthM: 30,
+                      depthM: 30,
+                      heightM: 18,
+                    }];
+                    patch({ customNeighbors: next });
+                    return id;
+                  }}
+                  onUpdateCustomNeighbor={(id, partial) => {
+                    const next = (project.customNeighbors ?? []).map((n) =>
+                      n.id === id ? { ...n, ...partial } : n
+                    );
+                    patch({ customNeighbors: next });
+                  }}
+                  onDeleteCustomNeighbor={(id) => {
+                    const next = (project.customNeighbors ?? []).filter((n) => n.id !== id);
+                    patch({ customNeighbors: next });
+                  }}
                 />
               ) : (
                 <MassingScene

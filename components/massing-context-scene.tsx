@@ -6,6 +6,7 @@ import * as THREE from "three";
 import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
+import type { CustomNeighbor } from "@/lib/types";
 
 export interface ContextSceneProps {
   plot: Point[];
@@ -31,11 +32,16 @@ export interface ContextSceneProps {
   nearbyHidden?: string[];
   /** Map style to use for the basemap */
   mapStyle?: "topo" | "satellite" | "schematic";
+  /** User-defined extra neighbours */
+  customNeighbors?: CustomNeighbor[];
   /** Persist user edits */
   onSetHeight?: (osmId: string, height: number) => void;
   onToggleHide?: (osmId: string, hide: boolean) => void;
   onSetMapStyle?: (style: "topo" | "satellite" | "schematic") => void;
   onSetBuildingOffset?: (x: number, z: number) => void;
+  onAddCustomNeighbor?: (centerX: number, centerZ: number) => string;
+  onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
+  onDeleteCustomNeighbor?: (id: string) => void;
 }
 
 type MapStyle = "topo" | "satellite" | "schematic";
@@ -154,9 +160,12 @@ export default function MassingContextScene(props: ContextSceneProps) {
     nearbyHeightOverrides = {},
     nearbyHidden = [],
     mapStyle = "topo",
+    customNeighbors = [],
     onSetHeight, onToggleHide, onSetMapStyle, onSetBuildingOffset,
+    onAddCustomNeighbor, onUpdateCustomNeighbor, onDeleteCustomNeighbor,
   } = props;
   const [placeMode, setPlaceMode] = useState(false);
+  const [addNeighbourMode, setAddNeighbourMode] = useState(false);
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
@@ -197,8 +206,12 @@ export default function MassingContextScene(props: ContextSceneProps) {
   }, [latitude, longitude, contextRadiusM]);
 
   const hidden = useMemo(() => new Set(nearbyHidden), [nearbyHidden]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = osmBuildings.find((b) => b.id === selectedId) ?? null;
+  type Selection = { kind: "osm"; id: string } | { kind: "custom"; id: string } | null;
+  const [selection, setSelection] = useState<Selection>(null);
+  const selectedOsm =
+    selection?.kind === "osm" ? osmBuildings.find((b) => b.id === selection.id) ?? null : null;
+  const selectedCustom =
+    selection?.kind === "custom" ? customNeighbors.find((n) => n.id === selection.id) ?? null : null;
 
   return (
     <div className="relative w-full h-full">
@@ -212,7 +225,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
         }}
         style={{ background: "#bccbd6" }}
         dpr={[1, 2]}
-        onPointerMissed={() => setSelectedId(null)}
+        onPointerMissed={() => setSelection(null)}
       >
         <ambientLight intensity={0.8} />
         <directionalLight position={[300, 500, 200]} intensity={0.85} castShadow />
@@ -223,10 +236,19 @@ export default function MassingContextScene(props: ContextSceneProps) {
             position={[ground.planeX, 0, ground.planeZ]}
             receiveShadow
             onClick={(e) => {
-              if (!placeMode || !onSetBuildingOffset) return;
-              e.stopPropagation();
-              onSetBuildingOffset(e.point.x, e.point.z);
-              setPlaceMode(false);
+              if (placeMode && onSetBuildingOffset) {
+                e.stopPropagation();
+                onSetBuildingOffset(e.point.x, e.point.z);
+                setPlaceMode(false);
+                return;
+              }
+              if (addNeighbourMode && onAddCustomNeighbor) {
+                e.stopPropagation();
+                const newId = onAddCustomNeighbor(e.point.x, e.point.z);
+                setAddNeighbourMode(false);
+                setSelection({ kind: "custom", id: newId });
+                return;
+              }
             }}
           >
             <planeGeometry args={[ground.sizeM, ground.sizeM]} />
@@ -234,7 +256,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
           </mesh>
         )}
 
-        {/* Surrounding white volumes */}
+        {/* Surrounding white volumes from OSM */}
         {osmBuildings.map((b) => {
           if (hidden.has(b.id)) return null;
           const h = nearbyHeightOverrides[b.id] ?? b.defaultHeight;
@@ -243,11 +265,21 @@ export default function MassingContextScene(props: ContextSceneProps) {
               key={b.id}
               polygon={b.polygon}
               height={h}
-              isSelected={selectedId === b.id}
-              onSelect={() => setSelectedId(b.id)}
+              isSelected={selection?.kind === "osm" && selection.id === b.id}
+              onSelect={() => setSelection({ kind: "osm", id: b.id })}
             />
           );
         })}
+
+        {/* Manually defined neighbours */}
+        {customNeighbors.map((n) => (
+          <CustomNeighborMesh
+            key={n.id}
+            neighbor={n}
+            isSelected={selection?.kind === "custom" && selection.id === n.id}
+            onSelect={() => setSelection({ kind: "custom", id: n.id })}
+          />
+        ))}
 
         {/* Project building */}
         <group
@@ -350,7 +382,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
       )}
 
       {/* Map style + position controls (top-left, only when no building is selected) */}
-      {!selected && ground && (
+      {!selectedOsm && !selectedCustom && ground && (
         <div className="absolute top-2 left-2 grid gap-2 max-w-[260px]">
           <div className="inline-flex border border-ink-200 bg-white/95 shadow-sm">
             {(["topo", "satellite", "schematic"] as MapStyle[]).map((s) => (
@@ -413,19 +445,29 @@ export default function MassingContextScene(props: ContextSceneProps) {
           )}
 
           <div className="px-2 py-1 bg-white/85 text-[10px] text-ink-700 border border-ink-200">
-            {osmBuildings.length} surrounding buildings · click any to edit its height
+            {osmBuildings.length + customNeighbors.length} surrounding buildings · click any to edit
           </div>
+          {onAddCustomNeighbor && (
+            <button
+              className={`px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                addNeighbourMode ? "bg-qube-500 text-white" : "border border-ink-300 bg-white/95 text-ink-800 hover:bg-bone-50"
+              }`}
+              onClick={() => setAddNeighbourMode((p) => !p)}
+            >
+              {addNeighbourMode ? "Click on map to place…" : "+ Add neighbour"}
+            </button>
+          )}
         </div>
       )}
 
-      {/* Selection editor */}
-      {selected && (
+      {/* OSM-building editor */}
+      {selectedOsm && (
         <div className="absolute top-2 left-2 max-w-[280px] bg-white/95 border border-ink-200 shadow-md p-3 grid gap-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="eyebrow text-ink-500">Selected · OSM {selected.id.replace(/^osm-/, "")}</span>
+            <span className="eyebrow text-ink-500">OSM · {selectedOsm.id.replace(/^osm-/, "")}</span>
             <button
               className="text-ink-400 hover:text-ink-700 text-[14px] leading-none"
-              onClick={() => setSelectedId(null)}
+              onClick={() => setSelection(null)}
               title="Deselect"
             >×</button>
           </div>
@@ -436,30 +478,121 @@ export default function MassingContextScene(props: ContextSceneProps) {
               step={0.5}
               min={0}
               className="cell-input text-right"
-              value={Number((nearbyHeightOverrides[selected.id] ?? selected.defaultHeight).toFixed(1))}
+              value={Number((nearbyHeightOverrides[selectedOsm.id] ?? selectedOsm.defaultHeight).toFixed(1))}
               onChange={(e) => {
                 const n = parseFloat(e.target.value);
-                if (Number.isFinite(n) && n >= 0 && onSetHeight) onSetHeight(selected.id, n);
+                if (Number.isFinite(n) && n >= 0 && onSetHeight) onSetHeight(selectedOsm.id, n);
               }}
             />
           </label>
           <div className="text-[10.5px] text-ink-500">
-            OSM default: {selected.defaultHeight.toFixed(1)} m
-            {nearbyHeightOverrides[selected.id] !== undefined && (
+            OSM default: {selectedOsm.defaultHeight.toFixed(1)} m
+            {nearbyHeightOverrides[selectedOsm.id] !== undefined && (
               <button
                 className="ml-2 text-qube-700 hover:text-qube-900 underline"
-                onClick={() => onSetHeight?.(selected.id, selected.defaultHeight)}
+                onClick={() => onSetHeight?.(selectedOsm.id, selectedOsm.defaultHeight)}
               >reset</button>
             )}
           </div>
           <div className="flex items-center gap-2">
             <button
               className="btn btn-secondary btn-xs"
-              onClick={() => onToggleHide?.(selected.id, !hidden.has(selected.id))}
+              onClick={() => onToggleHide?.(selectedOsm.id, !hidden.has(selectedOsm.id))}
             >
-              {hidden.has(selected.id) ? "Show" : "Hide"}
+              {hidden.has(selectedOsm.id) ? "Show" : "Hide"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Custom-neighbour editor */}
+      {selectedCustom && onUpdateCustomNeighbor && onDeleteCustomNeighbor && (
+        <div className="absolute top-2 left-2 max-w-[300px] bg-white/95 border border-ink-200 shadow-md p-3 grid gap-2 max-h-[calc(100%-1rem)] overflow-y-auto">
+          <div className="flex items-center justify-between gap-2">
+            <span className="eyebrow text-ink-500">Custom · {selectedCustom.id.replace(/^cn-/, "")}</span>
+            <button
+              className="text-ink-400 hover:text-ink-700 text-[14px] leading-none"
+              onClick={() => setSelection(null)}
+              title="Deselect"
+            >×</button>
+          </div>
+          <label className="grid gap-1">
+            <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Name</span>
+            <input
+              className="cell-input"
+              placeholder="optional"
+              value={selectedCustom.name ?? ""}
+              onChange={(e) => onUpdateCustomNeighbor(selectedCustom.id, { name: e.target.value })}
+            />
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            <NumField label="X" value={selectedCustom.centerX} step={0.5}
+              onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { centerX: v })} />
+            <NumField label="Z" value={selectedCustom.centerZ} step={0.5}
+              onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { centerZ: v })} />
+            <NumField label="Rot°" value={selectedCustom.rotationDeg} step={5}
+              onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { rotationDeg: v })} />
+          </div>
+          <div className="border-t border-ink-100 pt-2">
+            <div className="eyebrow text-ink-500 text-[10px] mb-1">Podium</div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <NumField label="W" value={selectedCustom.widthM} step={1} min={1}
+                onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { widthM: Math.max(1, v) })} />
+              <NumField label="D" value={selectedCustom.depthM} step={1} min={1}
+                onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { depthM: Math.max(1, v) })} />
+              <NumField label="H" value={selectedCustom.heightM} step={0.5} min={1}
+                onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { heightM: Math.max(1, v) })} />
+            </div>
+          </div>
+          <div className="border-t border-ink-100 pt-2">
+            <div className="eyebrow text-ink-500 text-[10px] mb-1 flex items-center justify-between">
+              <span>Tower {selectedCustom.tower ? "" : "(none)"}</span>
+              {selectedCustom.tower ? (
+                <button
+                  className="text-[10px] text-red-700 hover:text-red-900 underline"
+                  onClick={() => onUpdateCustomNeighbor(selectedCustom.id, { tower: undefined })}
+                >Remove</button>
+              ) : (
+                <button
+                  className="text-[10px] text-qube-700 hover:text-qube-900 underline"
+                  onClick={() => onUpdateCustomNeighbor(selectedCustom.id, { tower: {
+                    widthM: Math.max(8, selectedCustom.widthM * 0.45),
+                    depthM: Math.max(8, selectedCustom.depthM * 0.45),
+                    heightM: 30,
+                    offsetXM: 0,
+                    offsetZM: 0,
+                  }})}
+                >Add tower</button>
+              )}
+            </div>
+            {selectedCustom.tower && (
+              <>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <NumField label="W" value={selectedCustom.tower.widthM} step={1} min={1}
+                    onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { tower: { ...selectedCustom.tower!, widthM: Math.max(1, v) } })} />
+                  <NumField label="D" value={selectedCustom.tower.depthM} step={1} min={1}
+                    onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { tower: { ...selectedCustom.tower!, depthM: Math.max(1, v) } })} />
+                  <NumField label="H" value={selectedCustom.tower.heightM} step={0.5} min={1}
+                    onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { tower: { ...selectedCustom.tower!, heightM: Math.max(1, v) } })} />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                  <NumField label="Offset X" value={selectedCustom.tower.offsetXM ?? 0} step={0.5}
+                    onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { tower: { ...selectedCustom.tower!, offsetXM: v } })} />
+                  <NumField label="Offset Z" value={selectedCustom.tower.offsetZM ?? 0} step={0.5}
+                    onChange={(v) => onUpdateCustomNeighbor(selectedCustom.id, { tower: { ...selectedCustom.tower!, offsetZM: v } })} />
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            className="btn btn-danger btn-xs justify-self-start"
+            onClick={() => {
+              if (confirm("Delete this neighbour?")) {
+                onDeleteCustomNeighbor(selectedCustom.id);
+                setSelection(null);
+              }
+            }}
+          >Delete</button>
         </div>
       )}
 
@@ -505,6 +638,63 @@ function OsmBuildingMesh({
       />
       <Edges color={isSelected ? "#a17e4c" : "#aeada6"} threshold={1} />
     </mesh>
+  );
+}
+
+function CustomNeighborMesh({
+  neighbor, isSelected, onSelect,
+}: { neighbor: CustomNeighbor; isSelected: boolean; onSelect: () => void }) {
+  const { centerX, centerZ, rotationDeg, widthM, depthM, heightM, tower } = neighbor;
+  const rotRad = (rotationDeg * Math.PI) / 180;
+  const baseColor = isSelected ? "#fdf6e3" : "#f3f1ec";
+  const edgeColorStr = isSelected ? "#a17e4c" : "#aeada6";
+  const emissive = isSelected ? new THREE.Color("#a17e4c") : new THREE.Color("#000000");
+  return (
+    <group position={[centerX, 0, centerZ]} rotation={[0, rotRad, 0]}>
+      <mesh
+        position={[0, heightM / 2, 0]}
+        castShadow
+        receiveShadow
+        onPointerDown={(e) => { e.stopPropagation(); onSelect(); }}
+      >
+        <boxGeometry args={[widthM, heightM, depthM]} />
+        <meshStandardMaterial color={baseColor} roughness={0.85} metalness={0.05} emissive={emissive} emissiveIntensity={isSelected ? 0.18 : 0} />
+        <Edges color={edgeColorStr} threshold={1} />
+      </mesh>
+      {tower && (
+        <mesh
+          position={[tower.offsetXM ?? 0, heightM + tower.heightM / 2, tower.offsetZM ?? 0]}
+          castShadow
+          receiveShadow
+          onPointerDown={(e) => { e.stopPropagation(); onSelect(); }}
+        >
+          <boxGeometry args={[tower.widthM, tower.heightM, tower.depthM]} />
+          <meshStandardMaterial color={baseColor} roughness={0.85} metalness={0.05} emissive={emissive} emissiveIntensity={isSelected ? 0.18 : 0} />
+          <Edges color={edgeColorStr} threshold={1} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function NumField({
+  label, value, onChange, step = 1, min,
+}: { label: string; value: number; onChange: (v: number) => void; step?: number; min?: number }) {
+  return (
+    <label className="grid gap-0.5">
+      <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">{label}</span>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        className="cell-input text-right !py-1 !px-1.5 !text-[11px]"
+        value={Number.isFinite(value) ? Number(value.toFixed(1)) : 0}
+        onChange={(e) => {
+          const n = parseFloat(e.target.value);
+          if (Number.isFinite(n)) onChange(n);
+        }}
+      />
+    </label>
   );
 }
 
