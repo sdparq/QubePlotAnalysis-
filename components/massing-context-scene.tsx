@@ -189,6 +189,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const [aiRendering, setAiRendering] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string; modelUsed?: string } | null>(null);
+  const [aiPrompt, setAiPrompt] = useState<string>(DEFAULT_SCHEME_PROMPT);
 
   const persistKey = useCallback((k: string) => {
     setApiKey(k);
@@ -211,14 +212,14 @@ export default function MassingContextScene(props: ContextSceneProps) {
     setAiRendering(true);
     setAiError(null);
     try {
-      const out = await renderSchemeWithGemini(apiKey, png, DEFAULT_SCHEME_PROMPT);
+      const out = await renderSchemeWithGemini(apiKey, png, aiPrompt.trim() || DEFAULT_SCHEME_PROMPT);
       setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote, modelUsed: out.modelUsed });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : String(e));
     } finally {
       setAiRendering(false);
     }
-  }, [apiKey, captureCanvasPng]);
+  }, [apiKey, aiPrompt, captureCanvasPng]);
 
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
@@ -553,8 +554,25 @@ export default function MassingContextScene(props: ContextSceneProps) {
             </button>
           )}
 
-          <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
+          <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5 w-[260px]">
             <span className="eyebrow text-ink-500 text-[10px]">AI scheme render</span>
+            <label className="grid gap-1">
+              <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">Prompt</span>
+              <textarea
+                className="cell-input !text-[10.5px] !leading-snug !py-1.5 !px-1.5 font-mono"
+                rows={6}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                spellCheck={false}
+              />
+              {aiPrompt !== DEFAULT_SCHEME_PROMPT && (
+                <button
+                  className="text-[10px] text-qube-700 hover:text-qube-900 underline justify-self-start"
+                  onClick={() => setAiPrompt(DEFAULT_SCHEME_PROMPT)}
+                  title="Restore the default prompt"
+                >Reset to default</button>
+              )}
+            </label>
             <button
               className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
               onClick={handleGeminiRender}

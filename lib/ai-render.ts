@@ -22,29 +22,8 @@ const FALLBACK_MODELS = [
   "gemini-2.0-flash-exp",
 ];
 
-export const DEFAULT_SCHEME_PROMPT = `Render this 3D massing study as a clean architectural axonometric scheme in the style of Bjarke Ingels Group (BIG).
-
-CRITICAL: Preserve EXACTLY the camera angle, building positions, building heights, and outlines of every massing element shown in the input image. Do not move, rotate, scale or invent new buildings. The white blocks must stay as white blocks in the same positions. The greenish/highlighted block in the centre is OUR project building.
-
-Surrounding white volumes: keep them as flat matte pure-white extruded volumes with thin black outlines. No windows, no texture, no surface detail. Render them as physical massing-model blocks — abstract.
-
-OUR project building (the greenish one): re-render it as a residential building with:
-- Soft warm beige plaster walls (around #d8c39a)
-- A regular grid of square / rectangular windows with dark blue-grey glass — one window per ~2.5 m of facade width and one row per floor
-- A subtle floor-slab line between each floor
-- A few small balconies with thin white parapets distributed along the facade
-- A flat or slightly stepped roof in a slightly darker tone, optional small parapet
-- The EXACT same silhouette, height and footprint as in the input — do not change its shape
-
-Ground plane: flat light sand colour (~#ece4d2). Roads / streets in light grey.
-
-Add small symbolic trees (cone-shaped, dark green) along the streets. Add a couple of stylised cars on roads. Keep these tiny and abstract — diagram symbols, not photoreal.
-
-Sky: soft clear gradient from cream at horizon to muted sky-blue at top.
-
-Aesthetic: clean axonometric architectural diagram, flat shading, thin clean outlines, no text, no labels, no people, no dramatic lighting. Tasteful BIG-style presentation diagram.
-
-Output a single image with the same aspect ratio and orientation as the input.`;
+export const DEFAULT_SCHEME_PROMPT = `Create an architectural axonometric diagram based strictly on the provided axonometric geometry. Flat vector illustration style, Adobe Illustrator look. Soft pastel color palette (light greens, beige, light blue, grey). Simple solid volumes, no textures, no realism. Clean outlines, thin consistent strokes. Diagrammatic urban axonometry with simplified buildings, trees as circular symbols, soft landscape shapes, dashed annotation lines, icons and labels. Professional architecture presentation board style, clear hierarchy, white background, minimal shadows, schematic and readable.
+Do not change geometry or proportions, only apply graphic style. No anotations`;
 
 async function callGeminiOnce(
   apiKey: string,
