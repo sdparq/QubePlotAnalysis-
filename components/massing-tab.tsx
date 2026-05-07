@@ -307,6 +307,9 @@ export default function MassingTab() {
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}
                   buildingYOffsetM={project.groundElevationM ?? 0}
+                  buildingXOffsetM={project.contextOffsetXM ?? 0}
+                  buildingZOffsetM={project.contextOffsetZM ?? 0}
+                  mapStyle={project.contextMapStyle ?? "topo"}
                   nearbyHeightOverrides={project.nearbyHeightOverrides}
                   nearbyHidden={project.nearbyHidden}
                   onSetHeight={(id, h) => {
@@ -320,6 +323,8 @@ export default function MassingTab() {
                     else cur.delete(id);
                     patch({ nearbyHidden: Array.from(cur) });
                   }}
+                  onSetMapStyle={(s) => patch({ contextMapStyle: s })}
+                  onSetBuildingOffset={(x, z) => patch({ contextOffsetXM: x, contextOffsetZM: z })}
                 />
               ) : (
                 <MassingScene

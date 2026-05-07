@@ -18,17 +18,37 @@ export interface ContextSceneProps {
   longitude: number;
   /** Heading of plot's +Y axis relative to true north, degrees clockwise */
   northHeadingDeg: number;
-  /** Y offset (m) applied to the project building. Useful to push it up/down for fine alignment with the satellite ground. */
+  /** Y offset (m) applied to the project building. Useful to push it up/down for fine alignment with the basemap. */
   buildingYOffsetM?: number;
-  /** Half-side of the satellite imagery footprint in metres. Auto-picks zoom. */
+  /** XZ offset (m) applied to the project building so it lands exactly on its plot in the basemap. */
+  buildingXOffsetM?: number;
+  buildingZOffsetM?: number;
+  /** Half-side of the basemap footprint in metres. Auto-picks zoom. */
   contextRadiusM?: number;
   /** OSM way id → custom height (m). Replaces OSM-derived default. */
   nearbyHeightOverrides?: Record<string, number>;
   /** OSM way ids hidden from the scene */
   nearbyHidden?: string[];
+  /** Map style to use for the basemap */
+  mapStyle?: "topo" | "satellite" | "schematic";
   /** Persist user edits */
   onSetHeight?: (osmId: string, height: number) => void;
   onToggleHide?: (osmId: string, hide: boolean) => void;
+  onSetMapStyle?: (style: "topo" | "satellite" | "schematic") => void;
+  onSetBuildingOffset?: (x: number, z: number) => void;
+}
+
+type MapStyle = "topo" | "satellite" | "schematic";
+
+function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
+  if (style === "satellite") {
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  }
+  if (style === "schematic") {
+    return `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
+  }
+  // topo
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`;
 }
 
 /* ---------- Web Mercator helpers ---------- */
@@ -65,7 +85,7 @@ interface ContextGround {
   planeZ: number;
 }
 
-async function loadEsriContext(lat: number, lon: number, contextRadiusM: number): Promise<ContextGround> {
+async function loadContextTiles(lat: number, lon: number, contextRadiusM: number, style: MapStyle): Promise<ContextGround> {
   const targetSizeM = 2 * contextRadiusM;
   const z = Math.max(
     13,
@@ -83,21 +103,27 @@ async function loadEsriContext(lat: number, lon: number, contextRadiusM: number)
   canvas.height = grid * TILE_PX;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
+  // Off-white fill in case any tile fails to load (for cleaner schematic look)
+  ctx.fillStyle = style === "schematic" ? "#f5f4ee" : "#dadcd8";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   const tasks: Promise<void>[] = [];
   for (let dy = 0; dy < grid; dy++) {
     for (let dx = 0; dx < grid; dx++) {
       const tx = startTileX + dx;
       const ty = startTileY + dy;
-      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
+      const url = tileUrl(style, z, tx, ty);
       tasks.push(
-        new Promise<void>((resolve, reject) => {
+        new Promise<void>((resolve) => {
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.onload = () => {
             ctx.drawImage(img, dx * TILE_PX, dy * TILE_PX);
             resolve();
           };
-          img.onerror = () => reject(new Error(`Tile fetch failed: ${url}`));
+          img.onerror = () => {
+            // Resolve anyway; a missing tile leaves the fill colour, which is acceptable for a schematic look.
+            resolve();
+          };
           img.src = url;
         })
       );
@@ -123,11 +149,14 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const {
     plot, volumes, floorHeight, edgeColors,
     latitude, longitude, northHeadingDeg, buildingYOffsetM = 0,
+    buildingXOffsetM = 0, buildingZOffsetM = 0,
     contextRadiusM = 350,
     nearbyHeightOverrides = {},
     nearbyHidden = [],
-    onSetHeight, onToggleHide,
+    mapStyle = "topo",
+    onSetHeight, onToggleHide, onSetMapStyle, onSetBuildingOffset,
   } = props;
+  const [placeMode, setPlaceMode] = useState(false);
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
@@ -140,11 +169,11 @@ export default function MassingContextScene(props: ContextSceneProps) {
     let cancelled = false;
     setGround(null);
     setGroundError(null);
-    loadEsriContext(latitude, longitude, contextRadiusM)
+    loadContextTiles(latitude, longitude, contextRadiusM, mapStyle)
       .then((g) => { if (!cancelled) setGround(g); })
       .catch((e: Error) => { if (!cancelled) setGroundError(e.message); });
     return () => { cancelled = true; };
-  }, [latitude, longitude, contextRadiusM]);
+  }, [latitude, longitude, contextRadiusM, mapStyle]);
 
   const [osmBuildings, setOsmBuildings] = useState<OsmBuilding[]>([]);
   useEffect(() => {
@@ -189,7 +218,17 @@ export default function MassingContextScene(props: ContextSceneProps) {
         <directionalLight position={[300, 500, 200]} intensity={0.85} castShadow />
 
         {ground && (
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ground.planeX, 0, ground.planeZ]} receiveShadow>
+          <mesh
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[ground.planeX, 0, ground.planeZ]}
+            receiveShadow
+            onClick={(e) => {
+              if (!placeMode || !onSetBuildingOffset) return;
+              e.stopPropagation();
+              onSetBuildingOffset(e.point.x, e.point.z);
+              setPlaceMode(false);
+            }}
+          >
             <planeGeometry args={[ground.sizeM, ground.sizeM]} />
             <meshStandardMaterial map={ground.texture} roughness={1} metalness={0} />
           </mesh>
@@ -211,7 +250,10 @@ export default function MassingContextScene(props: ContextSceneProps) {
         })}
 
         {/* Project building */}
-        <group rotation={[0, -headingRad, 0]} position={[0, buildingYOffsetM, 0]}>
+        <group
+          rotation={[0, -headingRad, 0]}
+          position={[buildingXOffsetM, buildingYOffsetM, buildingZOffsetM]}
+        >
           {edgeColors && edgeColors.length === plot.length ? (
             plot.map((p, i) => {
               const next = plot[(i + 1) % plot.length];
@@ -298,7 +340,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
 
       {!ground && !groundError && (
         <div className="absolute top-2 left-2 px-2 py-1 bg-white/85 text-[10.5px] uppercase tracking-[0.10em] text-ink-700 border border-ink-200">
-          Loading satellite tiles…
+          Loading basemap tiles…
         </div>
       )}
       {groundError && (
@@ -307,10 +349,74 @@ export default function MassingContextScene(props: ContextSceneProps) {
         </div>
       )}
 
-      {/* Status badge: count + 'click a building to edit' */}
-      <div className="absolute top-2 left-2 px-2 py-1 bg-white/85 text-[10.5px] text-ink-700 border border-ink-200" style={{ display: ground && !selected ? "block" : "none" }}>
-        {osmBuildings.length} surrounding buildings · click any to edit its height
-      </div>
+      {/* Map style + position controls (top-left, only when no building is selected) */}
+      {!selected && ground && (
+        <div className="absolute top-2 left-2 grid gap-2 max-w-[260px]">
+          <div className="inline-flex border border-ink-200 bg-white/95 shadow-sm">
+            {(["topo", "satellite", "schematic"] as MapStyle[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => onSetMapStyle?.(s)}
+                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                  mapStyle === s ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
+                }`}
+              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : "Schematic"}</button>
+            ))}
+          </div>
+
+          {onSetBuildingOffset && (
+            <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="eyebrow text-ink-500 text-[10px]">Building position</span>
+                <button
+                  className={`px-2 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                    placeMode ? "bg-qube-500 text-white" : "border border-ink-300 text-ink-700 hover:bg-bone-50"
+                  }`}
+                  onClick={() => setPlaceMode((p) => !p)}
+                >{placeMode ? "Click on map…" : "Click to place"}</button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <label className="grid gap-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">X (m)</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    className="cell-input text-right !py-1 !px-1.5 !text-[11px]"
+                    value={buildingXOffsetM.toFixed(1)}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      if (Number.isFinite(n)) onSetBuildingOffset(n, buildingZOffsetM);
+                    }}
+                  />
+                </label>
+                <label className="grid gap-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">Z (m)</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    className="cell-input text-right !py-1 !px-1.5 !text-[11px]"
+                    value={buildingZOffsetM.toFixed(1)}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      if (Number.isFinite(n)) onSetBuildingOffset(buildingXOffsetM, n);
+                    }}
+                  />
+                </label>
+              </div>
+              {(buildingXOffsetM !== 0 || buildingZOffsetM !== 0) && (
+                <button
+                  className="text-[10px] text-qube-700 hover:text-qube-900 underline justify-self-start"
+                  onClick={() => onSetBuildingOffset(0, 0)}
+                >Reset to lat/lon</button>
+              )}
+            </div>
+          )}
+
+          <div className="px-2 py-1 bg-white/85 text-[10px] text-ink-700 border border-ink-200">
+            {osmBuildings.length} surrounding buildings · click any to edit its height
+          </div>
+        </div>
+      )}
 
       {/* Selection editor */}
       {selected && (
