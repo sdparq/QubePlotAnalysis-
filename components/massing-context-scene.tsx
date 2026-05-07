@@ -7,7 +7,7 @@ import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import type { CustomNeighbor } from "@/lib/types";
-import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT } from "@/lib/ai-render";
+import { renderSchemeWithGemini, renderSchemeWithPollinations, DEFAULT_SCHEME_PROMPT } from "@/lib/ai-render";
 
 export interface ContextSceneProps {
   plot: Point[];
@@ -186,10 +186,9 @@ export default function MassingContextScene(props: ContextSceneProps) {
     if (saved) setApiKey(saved);
   }, []);
   const [keyDialog, setKeyDialog] = useState<{ open: boolean; draft: string }>({ open: false, draft: "" });
-  const [aiRendering, setAiRendering] = useState(false);
+  const [aiRendering, setAiRendering] = useState<null | "gemini" | "pollinations">(null);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string } | null>(null);
-  const [aiPrompt, setAiPrompt] = useState<string>(DEFAULT_SCHEME_PROMPT);
+  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string; engine: "gemini" | "pollinations" } | null>(null);
 
   const persistKey = useCallback((k: string) => {
     setApiKey(k);
@@ -202,24 +201,37 @@ export default function MassingContextScene(props: ContextSceneProps) {
     try { return c.toDataURL("image/png"); } catch { return null; }
   }, []);
 
-  const handleAiRender = useCallback(async () => {
+  const handleGeminiRender = useCallback(async () => {
     if (!apiKey) {
       setKeyDialog({ open: true, draft: "" });
       return;
     }
     const png = captureCanvasPng();
     if (!png) { setAiError("Could not capture the viewer canvas."); return; }
-    setAiRendering(true);
+    setAiRendering("gemini");
     setAiError(null);
     try {
-      const out = await renderSchemeWithGemini(apiKey, png, aiPrompt);
-      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote });
+      const out = await renderSchemeWithGemini(apiKey, png, DEFAULT_SCHEME_PROMPT);
+      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote, engine: "gemini" });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : String(e));
     } finally {
-      setAiRendering(false);
+      setAiRendering(null);
     }
-  }, [apiKey, aiPrompt, captureCanvasPng]);
+  }, [apiKey, captureCanvasPng]);
+
+  const handlePollinationsRender = useCallback(async () => {
+    setAiRendering("pollinations");
+    setAiError(null);
+    try {
+      const out = await renderSchemeWithPollinations(DEFAULT_SCHEME_PROMPT);
+      setAiResult({ imageDataUrl: out.imageDataUrl, engine: "pollinations" });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiRendering(null);
+    }
+  }, []);
 
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
@@ -555,23 +567,31 @@ export default function MassingContextScene(props: ContextSceneProps) {
           )}
 
           <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
-            <span className="eyebrow text-ink-500 text-[10px]">AI render (Gemini)</span>
+            <span className="eyebrow text-ink-500 text-[10px]">AI scheme render</span>
             <button
               className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
-              onClick={handleAiRender}
-              disabled={aiRendering}
-              title="Capture the viewer and re-render it as a BIG-style scheme using Google AI Studio"
+              onClick={handleGeminiRender}
+              disabled={aiRendering !== null}
+              title="Capture the viewer and re-render it via Google Gemini (preserves the massing layout). Free tier from aistudio.google.com."
             >
-              {aiRendering ? "Rendering…" : "✦ Render scheme"}
+              {aiRendering === "gemini" ? "Rendering…" : "✦ Gemini (image-to-image)"}
+            </button>
+            <button
+              className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white text-ink-800 hover:bg-bone-50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+              onClick={handlePollinationsRender}
+              disabled={aiRendering !== null}
+              title="100% free, no key. Generates a BIG-style scheme from text only — does NOT preserve your massing."
+            >
+              {aiRendering === "pollinations" ? "Rendering…" : "Pollinations (free)"}
             </button>
             <button
               className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
               onClick={() => setKeyDialog({ open: true, draft: apiKey })}
             >
-              {apiKey ? "Replace API key" : "Set API key"}
+              {apiKey ? "Replace Gemini key" : "Set Gemini key"}
             </button>
             {aiError && (
-              <div className="text-[10px] text-red-700 leading-snug max-w-[220px]">{aiError}</div>
+              <div className="text-[10px] text-red-700 leading-snug max-w-[240px] whitespace-pre-wrap">{aiError}</div>
             )}
           </div>
           {onShuffleTowers && customNeighbors.some((n) => n.tower) && (
@@ -799,13 +819,22 @@ export default function MassingContextScene(props: ContextSceneProps) {
               <div className="eyebrow text-ink-500">Google AI Studio</div>
               <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini API key</h3>
               <p className="text-[11.5px] text-ink-500 mt-1 leading-snug">
-                Stored only in your browser (localStorage). Get a free key at{" "}
+                Get a free key at{" "}
                 <a
                   href="https://aistudio.google.com/app/apikey"
                   target="_blank"
                   rel="noreferrer"
                   className="text-qube-700 hover:text-qube-900 underline"
-                >aistudio.google.com</a>.
+                >aistudio.google.com/app/apikey</a>{" "}
+                (free tier includes image generation, ~10 req/min). Make sure
+                you create the key from <strong>AI Studio</strong>, not Google
+                Cloud Console — those keys don&apos;t include image gen on the
+                free tier. Stored only in your browser.
+              </p>
+              <p className="text-[11.5px] text-ink-500 mt-1.5 leading-snug">
+                Don&apos;t want a key? Use the{" "}
+                <strong>Pollinations (free)</strong> button — no signup, no
+                key, but it doesn&apos;t preserve your massing.
               </p>
             </div>
             <input
@@ -857,18 +886,26 @@ export default function MassingContextScene(props: ContextSceneProps) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="eyebrow text-ink-500">AI scheme render</div>
-                <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini output</h3>
+                <h3 className="text-[15px] font-medium text-ink-900 mt-1">
+                  {aiResult.engine === "gemini" ? "Gemini output" : "Pollinations output"}
+                </h3>
+                {aiResult.engine === "pollinations" && (
+                  <p className="text-[11px] text-amber-800 mt-1 leading-snug">
+                    Pollinations is text-to-image only — the massing won&apos;t match your input.
+                    For accurate layout use Gemini.
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <a
-                  download="qube-scheme.png"
+                  download={`qube-scheme-${aiResult.engine}.png`}
                   href={aiResult.imageDataUrl}
                   className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] border border-ink-300 text-ink-800 hover:bg-bone-50"
                 >Download PNG</a>
                 <button
                   className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
-                  disabled={aiRendering}
-                  onClick={handleAiRender}
+                  disabled={aiRendering !== null}
+                  onClick={() => aiResult.engine === "gemini" ? handleGeminiRender() : handlePollinationsRender()}
                 >Re-render</button>
                 <button
                   className="text-ink-400 hover:text-ink-700 text-[18px] leading-none px-2"
@@ -879,24 +916,11 @@ export default function MassingContextScene(props: ContextSceneProps) {
             </div>
             <div className="border border-ink-200 bg-bone-50 flex items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={aiResult.imageDataUrl} alt="Gemini scheme render" className="max-w-full h-auto" />
+              <img src={aiResult.imageDataUrl} alt="AI scheme render" className="max-w-full h-auto" />
             </div>
             {aiResult.note && (
               <p className="text-[11px] text-ink-500 leading-snug whitespace-pre-wrap">{aiResult.note}</p>
             )}
-            <details className="text-[11px] text-ink-700">
-              <summary className="cursor-pointer text-ink-500 uppercase tracking-[0.10em] text-[10.5px]">Edit prompt</summary>
-              <textarea
-                className="cell-input mt-2 w-full font-mono text-[11px] leading-snug"
-                rows={10}
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-              />
-              <button
-                className="mt-1 text-[10.5px] text-qube-700 hover:text-qube-900 underline"
-                onClick={() => setAiPrompt(DEFAULT_SCHEME_PROMPT)}
-              >Reset to default</button>
-            </details>
           </div>
         </div>
       )}
@@ -905,7 +929,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
         <div className="absolute inset-0 z-20 bg-ink-900/35 flex items-center justify-center pointer-events-none">
           <div className="bg-white px-4 py-3 border border-ink-200 shadow-md text-[12px] text-ink-700 grid gap-2 justify-items-center">
             <div className="w-6 h-6 border-2 border-qube-500 border-t-transparent rounded-full animate-spin" />
-            <span>Rendering with Gemini…</span>
+            <span>Rendering with {aiRendering === "gemini" ? "Gemini" : "Pollinations"}…</span>
           </div>
         </div>
       )}
