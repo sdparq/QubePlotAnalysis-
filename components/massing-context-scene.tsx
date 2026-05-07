@@ -44,7 +44,7 @@ export interface ContextSceneProps {
   onDeleteCustomNeighbor?: (id: string) => void;
   onDuplicateCustomNeighbor?: (id: string) => string;
   /** Randomise tower heights and positions across all neighbours. */
-  onShuffleTowers?: () => void;
+  onShuffleTowers?: (minH: number, maxH: number) => void;
 }
 
 type MapStyle = "topo" | "satellite" | "schematic";
@@ -173,6 +173,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate");
   const [isDragging, setIsDragging] = useState(false);
   const [neighborObjects, setNeighborObjects] = useState<Map<string, THREE.Group>>(new Map());
+  const [shuffleMinH, setShuffleMinH] = useState(25);
+  const [shuffleMaxH, setShuffleMaxH] = useState(110);
 
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
@@ -505,13 +507,50 @@ export default function MassingContextScene(props: ContextSceneProps) {
             </button>
           )}
           {onShuffleTowers && customNeighbors.some((n) => n.tower) && (
-            <button
-              className="px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white/95 text-ink-800 hover:bg-bone-50 transition-colors"
-              onClick={onShuffleTowers}
-              title="Randomise tower heights and offsets within their podiums"
-            >
-              ⤲ Shuffle towers
-            </button>
+            <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
+              <span className="eyebrow text-ink-500 text-[10px]">Shuffle towers</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <label className="grid gap-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">Min H (m)</span>
+                  <input
+                    type="number"
+                    step={1}
+                    min={0}
+                    className="cell-input text-right !py-1 !px-1.5 !text-[11px]"
+                    value={shuffleMinH}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      if (Number.isFinite(n) && n >= 0) setShuffleMinH(n);
+                    }}
+                  />
+                </label>
+                <label className="grid gap-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">Max H (m)</span>
+                  <input
+                    type="number"
+                    step={1}
+                    min={0}
+                    className="cell-input text-right !py-1 !px-1.5 !text-[11px]"
+                    value={shuffleMaxH}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      if (Number.isFinite(n) && n >= 0) setShuffleMaxH(n);
+                    }}
+                  />
+                </label>
+              </div>
+              <button
+                className="px-2.5 py-1 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white text-ink-800 hover:bg-bone-50 transition-colors"
+                onClick={() => {
+                  const lo = Math.min(shuffleMinH, shuffleMaxH);
+                  const hi = Math.max(shuffleMinH, shuffleMaxH);
+                  onShuffleTowers(lo, hi);
+                }}
+                title="Randomise tower heights and offsets within their podiums"
+              >
+                ⤲ Shuffle towers
+              </button>
+            </div>
           )}
         </div>
       )}
