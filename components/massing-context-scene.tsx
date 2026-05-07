@@ -1,7 +1,7 @@
 "use client";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Edges, Line } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { TilesRenderer } from "3d-tiles-renderer";
 import { GoogleCloudAuthPlugin, ReorientationPlugin, TilesFadePlugin } from "3d-tiles-renderer/plugins";
@@ -22,17 +22,60 @@ export interface ContextSceneProps {
   northHeadingDeg: number;
   /** Google Cloud Map Tiles API key */
   apiKey: string;
+  /** Manual override (m above WGS84 ellipsoid). When undefined, fetched from Open-Meteo. */
+  groundElevationM?: number;
 }
 
 export default function MassingContextScene(props: ContextSceneProps) {
   const {
     plot, volumes, floorHeight, edgeColors,
-    latitude, longitude, northHeadingDeg, apiKey,
+    latitude, longitude, northHeadingDeg, apiKey, groundElevationM,
   } = props;
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
   const camDist = Math.max(maxDim * 1.6, 200);
   const headingRad = (northHeadingDeg * Math.PI) / 180;
+
+  // Auto-fetch elevation from Open-Meteo unless an override is provided
+  const [autoElevation, setAutoElevation] = useState<number | null>(
+    groundElevationM != null ? groundElevationM : null
+  );
+  const [elevationSource, setElevationSource] = useState<"override" | "auto" | "loading" | "fallback">(
+    groundElevationM != null ? "override" : "loading"
+  );
+  useEffect(() => {
+    if (groundElevationM != null) {
+      setAutoElevation(groundElevationM);
+      setElevationSource("override");
+      return;
+    }
+    let cancelled = false;
+    setElevationSource("loading");
+    fetch(`https://api.open-meteo.com/v1/elevation?latitude=${latitude}&longitude=${longitude}`)
+      .then((r) => r.json())
+      .then((data: { elevation?: number[] }) => {
+        if (cancelled) return;
+        const e = data?.elevation?.[0];
+        if (typeof e === "number" && Number.isFinite(e)) {
+          setAutoElevation(e);
+          setElevationSource("auto");
+        } else {
+          setAutoElevation(0);
+          setElevationSource("fallback");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAutoElevation(0);
+          setElevationSource("fallback");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [latitude, longitude, groundElevationM]);
+
+  const effectiveElevation = autoElevation ?? 0;
 
   return (
     <div className="relative w-full h-full">
@@ -50,7 +93,9 @@ export default function MassingContextScene(props: ContextSceneProps) {
         <ambientLight intensity={0.55} />
         <directionalLight position={[200, 400, 250]} intensity={0.9} castShadow />
 
-        {apiKey && <GoogleTiles apiKey={apiKey} latitude={latitude} longitude={longitude} />}
+        {apiKey && autoElevation !== null && (
+          <GoogleTiles apiKey={apiKey} latitude={latitude} longitude={longitude} elevation={effectiveElevation} />
+        )}
 
         {/* Building (rotated to align with true north) */}
         <group rotation={[0, -headingRad, 0]}>
@@ -143,6 +188,16 @@ export default function MassingContextScene(props: ContextSceneProps) {
           Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Netlify and redeploy.
         </div>
       )}
+      <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-white/85 text-[10px] text-ink-700 border border-ink-200">
+        Ground elevation:{" "}
+        {elevationSource === "loading" && "fetching…"}
+        {elevationSource !== "loading" && (
+          <strong className="text-ink-900 tabular-nums">{effectiveElevation.toFixed(1)} m</strong>
+        )}
+        {elevationSource === "auto" && <span className="text-ink-500"> · auto (Open-Meteo)</span>}
+        {elevationSource === "override" && <span className="text-ink-500"> · manual override</span>}
+        {elevationSource === "fallback" && <span className="text-amber-700"> · fallback (set manually in Setup)</span>}
+      </div>
       <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-white/85 text-[9px] text-ink-700 border border-ink-200">
         © Google · Photorealistic 3D Tiles
       </div>
@@ -154,10 +209,12 @@ function GoogleTiles({
   apiKey,
   latitude,
   longitude,
+  elevation,
 }: {
   apiKey: string;
   latitude: number;
   longitude: number;
+  elevation: number;
 }) {
   const { camera, gl, scene } = useThree();
   const tilesRef = useRef<TilesRenderer | null>(null);
@@ -169,7 +226,7 @@ function GoogleTiles({
       new ReorientationPlugin({
         lat: (latitude * Math.PI) / 180,
         lon: (longitude * Math.PI) / 180,
-        height: 0,
+        height: elevation,
         up: "+y",
         recenter: true,
       })
@@ -190,7 +247,7 @@ function GoogleTiles({
       }
       tilesRef.current = null;
     };
-  }, [apiKey, latitude, longitude, camera, gl, scene]);
+  }, [apiKey, latitude, longitude, elevation, camera, gl, scene]);
 
   useFrame(() => {
     const t = tilesRef.current;

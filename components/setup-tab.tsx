@@ -65,6 +65,13 @@ export default function SetupTab() {
               onChange={(v) => patch({ northHeadingDeg: v })}
             />
           </Field>
+          <Field label="Ground elevation override (m)">
+            <NumInput
+              value={project.groundElevationM ?? 0}
+              step={1}
+              onChange={(v) => patch({ groundElevationM: v !== 0 ? v : undefined })}
+            />
+          </Field>
         </div>
         <p className="text-[11px] text-ink-500 mt-3">
           Target GFA powers the percentage input mode in Common Areas (leave 0 if you prefer m²). Latitude / longitude

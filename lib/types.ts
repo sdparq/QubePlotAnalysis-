@@ -171,6 +171,8 @@ export interface Project {
   longitude?: number;
   /** Heading of the plot's local +y axis relative to true north, in degrees clockwise. 0 = +y points north. */
   northHeadingDeg?: number;
+  /** Optional manual ground-elevation override (m above WGS84 ellipsoid). When unset, the in-context viewer auto-fetches elevation from Open-Meteo. */
+  groundElevationM?: number;
 }
 
 export interface GarbageOverrides {

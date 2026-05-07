@@ -308,6 +308,7 @@ export default function MassingTab() {
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}
                   apiKey={googleApiKey}
+                  groundElevationM={project.groundElevationM}
                 />
               ) : (
                 <MassingScene
