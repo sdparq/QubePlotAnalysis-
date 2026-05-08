@@ -175,7 +175,7 @@ function fibonacciHemisphere(n: number): Vec3[] {
 /*                            Facade panel sampling                           */
 /* -------------------------------------------------------------------------- */
 
-const NORMAL_OFFSET_M = 0.25;
+const NORMAL_OFFSET_M = 0.6;
 
 /**
  * Walk every external edge of every project volume and place panels of

@@ -138,19 +138,15 @@ function PanelInstances({
     const m = meshRef.current;
     const dummy = new THREE.Object3D();
     const c = new THREE.Color();
+    const planeForward = new THREE.Vector3(0, 0, 1);
+    const normalVec = new THREE.Vector3();
     for (let i = 0; i < panelValues.length; i++) {
       const { panel, value } = panelValues[i];
-      // Render the panel as a unit plane scaled to panel dimensions, oriented so
-      // its +Z axis matches the panel's outward normal.
       dummy.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
-      dummy.lookAt(
-        panel.pos.x + panel.normal.x,
-        panel.pos.y + panel.normal.y,
-        panel.pos.z + panel.normal.z,
-      );
-      // Plane geometry by default lies in XY (width × height). lookAt aligns +Z to
-      // the normal — perfect.
-      dummy.scale.set(panel.widthM * 0.92, panel.heightM * 0.92, 1);
+      normalVec.set(panel.normal.x, panel.normal.y, panel.normal.z).normalize();
+      // Align the plane's +Z (its front face normal) with the panel's outward normal.
+      dummy.quaternion.setFromUnitVectors(planeForward, normalVec);
+      dummy.scale.set(panel.widthM * 0.95, panel.heightM * 0.95, 1);
       dummy.updateMatrix();
       m.setMatrixAt(i, dummy.matrix);
       mapToColour(value, scheme, c);
@@ -160,9 +156,13 @@ function PanelInstances({
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }, [panelValues, scheme]);
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, panelValues.length]} castShadow>
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, panelValues.length]}
+      frustumCulled={false}
+    >
       <planeGeometry args={[1, 1]} />
-      <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.6} metalness={0} />
+      <meshBasicMaterial vertexColors side={THREE.DoubleSide} toneMapped={false} />
     </instancedMesh>
   );
 }
