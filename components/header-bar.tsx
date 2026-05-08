@@ -43,13 +43,13 @@ export default function HeaderBar() {
               viewBox="0 0 100 100"
               className="w-9 h-9"
               fill="none"
-              stroke="#137e34"
-              strokeWidth={11}
-              strokeLinejoin="round"
-              strokeLinecap="round"
+              stroke="#0f7a35"
+              strokeWidth={12}
+              strokeLinejoin="miter"
+              strokeMiterlimit={4}
               aria-label="QUBE logo"
             >
-              <path d="M 14 8 L 64 8 L 92 36 L 92 86 A 6 6 0 0 1 86 92 L 14 92 A 6 6 0 0 1 8 86 L 8 14 A 6 6 0 0 1 14 8 Z" />
+              <path d="M 8 8 L 58 8 L 92 42 L 92 92 L 8 92 Z" />
             </svg>
             <div className="leading-tight">
               <div className="wordmark text-bone-100 text-[16px]">QUBE</div>
