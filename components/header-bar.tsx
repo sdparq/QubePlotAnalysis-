@@ -40,8 +40,8 @@ export default function HeaderBar() {
         <div className="flex items-center gap-5 min-w-0">
           <div className="flex items-center gap-3">
             <svg
-              viewBox="0 0 120 90"
-              className="w-11 h-8"
+              viewBox="0 0 100 100"
+              className="w-9 h-9"
               fill="none"
               stroke="#0f7a35"
               strokeWidth={11}
@@ -49,7 +49,7 @@ export default function HeaderBar() {
               strokeMiterlimit={4}
               aria-label="QUBE logo"
             >
-              <path d="M 8 8 L 82 8 L 112 38 L 112 82 L 38 82 L 8 52 Z" />
+              <path d="M 8 8 L 72 8 L 92 28 L 92 92 L 28 92 L 8 72 Z" />
             </svg>
             <div className="leading-tight">
               <div className="wordmark text-bone-100 text-[16px]">QUBE</div>
