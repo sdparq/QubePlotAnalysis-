@@ -1,4 +1,5 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useCallback, useMemo, useState } from "react";
 import { useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
@@ -21,6 +22,15 @@ import {
   type ViewQualityResult,
 } from "@/lib/building-physics";
 import { fetchOsmBuildings } from "@/lib/osm";
+
+const PhysicsScene = dynamic(() => import("./physics-scene"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[320px] border border-ink-200 bg-bone-100 flex items-center justify-center">
+      <div className="text-[11px] text-ink-500 uppercase tracking-[0.18em]">Loading 3D viewer…</div>
+    </div>
+  ),
+});
 
 export default function PhysicsTab() {
   const project = useProject();
@@ -95,9 +105,10 @@ export default function PhysicsTab() {
       <div className="card">
         <h2 className="section-title">Building physics · indicative</h2>
         <p className="section-sub">
-          First-order analyses inspired by OMRT&apos;s deliverables — sky exposure, view to a
-          landmark and PV potential. All run client-side from the current massing and the OSM
-          neighbours; results are indicative for early-stage massing studies.
+          Sky exposure, view to a landmark and PV potential — all computed client-side from
+          the current massing and the OSM neighbours. Each analysis paints the building&apos;s
+          façades with its own colour map so you can spot weak / strong areas at a glance.
+          Indicative figures, intended for early-stage massing studies.
         </p>
       </div>
 
@@ -226,6 +237,13 @@ function SkyExposureCard({
               sub={`${neighboursUsed} neighbours used as occluders`} />
           </div>
 
+          <div className="border border-ink-200 mb-4">
+            <div className="aspect-[16/9] bg-bone-50">
+              <PhysicsScene volumes={volumes} panelValues={result.panelValues} scheme="viridis" />
+            </div>
+            <ColorRamp scheme="viridis" leftLabel="0 % sky" rightLabel="100 % sky" />
+          </div>
+
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <div className="eyebrow text-ink-500 mb-2 text-[10.5px]">By orientation</div>
@@ -347,6 +365,13 @@ function ViewQualityCard({
             ))}
           </div>
 
+          <div className="border border-ink-200 mb-4">
+            <div className="aspect-[16/9] bg-bone-50">
+              <PhysicsScene volumes={volumes} panelValues={result.panelValues} scheme="view" />
+            </div>
+            <ColorRamp scheme="view" leftLabel="No view" rightLabel="Full view" />
+          </div>
+
           <div>
             <div className="eyebrow text-ink-500 mb-2 text-[10.5px]">By orientation</div>
             <table className="w-full text-[12px] tabular-nums">
@@ -392,8 +417,8 @@ function PVCard({
   const [includeFacades, setIncludeFacades] = useState(true);
   const [facadeUtil, setFacadeUtil] = useState(0.30);
 
+  const panels = useMemo(() => sampleFacadePanels(volumes, 6), [volumes]);
   const result: PVResult = useMemo(() => {
-    const panels = sampleFacadePanels(volumes, 6);
     return computePVPotential(volumes, panels, {
       annualGHI,
       panelEfficiency: efficiency,
@@ -402,7 +427,7 @@ function PVCard({
       includeFacades,
       facadeUtilization: facadeUtil,
     });
-  }, [volumes, annualGHI, efficiency, pr, roofUtil, includeFacades, facadeUtil]);
+  }, [volumes, panels, annualGHI, efficiency, pr, roofUtil, includeFacades, facadeUtil]);
 
   // Indicative residential demand at ~80 kWh/m²/yr × GFA (Dubai cooling-dominated, A-rated).
   const indicativeDemand = gfa * 80;
@@ -444,6 +469,18 @@ function PVCard({
           good={coverage >= 0.25}
           bad={coverage > 1}
         />
+      </div>
+
+      <div className="border border-ink-200 mt-4">
+        <div className="aspect-[16/9] bg-bone-50">
+          <PhysicsScene volumes={volumes} panelsForOrientation={panels} scheme="south-arc" />
+        </div>
+        <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
+          <span className="inline-block w-3 h-3" style={{ background: "#e7b14a" }} />
+          South arc (PV-eligible)
+          <span className="inline-block w-3 h-3 ml-3" style={{ background: "#b6b1a4" }} />
+          Other orientations
+        </div>
       </div>
 
       <p className="text-[10.5px] text-ink-500 mt-3 leading-relaxed">
@@ -531,6 +568,28 @@ function LatLngField({
         }}
       />
     </label>
+  );
+}
+
+function ColorRamp({
+  scheme,
+  leftLabel,
+  rightLabel,
+}: {
+  scheme: "viridis" | "view";
+  leftLabel: string;
+  rightLabel: string;
+}) {
+  const gradient =
+    scheme === "viridis"
+      ? "linear-gradient(90deg, #45007e, #3a52a4, #218e8c, #5cb863, #fce824)"
+      : "linear-gradient(90deg, #d92f2f, #e8c734, #4ea84e)";
+  return (
+    <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
+      <span className="text-ink-500">{leftLabel}</span>
+      <div className="flex-1 h-2.5 border border-ink-200" style={{ background: gradient }} />
+      <span className="text-ink-500">{rightLabel}</span>
+    </div>
   );
 }
 

@@ -1,0 +1,269 @@
+"use client";
+import { Canvas } from "@react-three/fiber";
+import { Edges, OrbitControls } from "@react-three/drei";
+import { useEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
+import type { Volume } from "@/lib/massing";
+import type { PanelValue, FacadePanel } from "@/lib/building-physics";
+import { polygonBBox } from "@/lib/geom";
+
+export type ColorScheme = "viridis" | "south-arc" | "view";
+
+interface PhysicsSceneProps {
+  volumes: Volume[];
+  panelValues?: PanelValue[];
+  /** When `panelValues` is omitted, draw every panel coloured by its
+   *  compass orientation (used by the PV card). */
+  panelsForOrientation?: FacadePanel[];
+  scheme: ColorScheme;
+}
+
+export default function PhysicsScene({
+  volumes,
+  panelValues,
+  panelsForOrientation,
+  scheme,
+}: PhysicsSceneProps) {
+  // Camera target & distance based on the building's extent
+  const stats = useMemo(() => {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, top = 0;
+    for (const v of volumes) {
+      const bb = polygonBBox(v.polygon);
+      if (bb.minX < x0) x0 = bb.minX;
+      if (bb.maxX > x1) x1 = bb.maxX;
+      // shape Y → world -Z
+      if (-bb.maxY < z0) z0 = -bb.maxY;
+      if (-bb.minY > z1) z1 = -bb.minY;
+      if (v.toY > top) top = v.toY;
+    }
+    if (!Number.isFinite(x0)) { x0 = -50; x1 = 50; z0 = -50; z1 = 50; top = 30; }
+    const cx = (x0 + x1) / 2;
+    const cz = (z0 + z1) / 2;
+    const span = Math.max(x1 - x0, z1 - z0, top, 30);
+    return { cx, cz, top, span };
+  }, [volumes]);
+
+  const camDist = stats.span * 1.3;
+
+  return (
+    <Canvas
+      orthographic
+      shadows
+      camera={{
+        position: [stats.cx + camDist * 0.6, camDist * 0.7, stats.cz + camDist],
+        near: 0.1,
+        far: stats.span * 60,
+        zoom: 1,
+      }}
+      style={{ background: "#f4f1e8" }}
+      dpr={[1, 2]}
+    >
+      <ambientLight intensity={0.85} />
+      <directionalLight position={[200, 320, 140]} intensity={0.6} />
+
+      {/* Ground plate for context */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[stats.cx, -0.1, stats.cz]}
+        receiveShadow
+      >
+        <planeGeometry args={[stats.span * 3, stats.span * 3]} />
+        <meshStandardMaterial color="#ece5d2" roughness={1} />
+      </mesh>
+
+      {/* Project building — neutral grey so coloured panels stand out */}
+      {volumes.map((v, i) => (
+        <VolumeMesh key={i} volume={v} />
+      ))}
+
+      {/* Heatmap panels */}
+      {panelValues && panelValues.length > 0 && (
+        <PanelInstances panelValues={panelValues} scheme={scheme} />
+      )}
+
+      {/* Orientation panels (PV) */}
+      {panelsForOrientation && panelsForOrientation.length > 0 && (
+        <OrientationPanels panels={panelsForOrientation} />
+      )}
+
+      <OrbitControls
+        target={[stats.cx, stats.top / 3, stats.cz]}
+        enablePan
+        enableZoom
+        enableRotate
+        maxPolarAngle={Math.PI / 2 - 0.02}
+        minZoom={0.2}
+        maxZoom={6}
+      />
+    </Canvas>
+  );
+}
+
+function VolumeMesh({ volume }: { volume: Volume }) {
+  const shape = useMemo(() => {
+    if (volume.polygon.length < 3) return null;
+    const s = new THREE.Shape();
+    s.moveTo(volume.polygon[0].x, volume.polygon[0].y);
+    for (let i = 1; i < volume.polygon.length; i++) {
+      s.lineTo(volume.polygon[i].x, volume.polygon[i].y);
+    }
+    s.closePath();
+    if (volume.hole && volume.hole.length >= 3) {
+      const reversed = volume.hole.slice().reverse();
+      const path = new THREE.Path();
+      path.moveTo(reversed[0].x, reversed[0].y);
+      for (let i = 1; i < reversed.length; i++) path.lineTo(reversed[i].x, reversed[i].y);
+      path.closePath();
+      s.holes.push(path);
+    }
+    return s;
+  }, [volume.polygon, volume.hole]);
+  const depth = volume.toY - volume.fromY;
+  if (!shape || depth <= 0) return null;
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, volume.fromY, 0]}
+      castShadow
+      receiveShadow
+    >
+      <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
+      <meshStandardMaterial color="#dad5c4" roughness={0.95} metalness={0} />
+      <Edges color="#5a5750" threshold={1} />
+    </mesh>
+  );
+}
+
+function PanelInstances({
+  panelValues,
+  scheme,
+}: {
+  panelValues: PanelValue[];
+  scheme: ColorScheme;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const dummy = new THREE.Object3D();
+    const c = new THREE.Color();
+    for (let i = 0; i < panelValues.length; i++) {
+      const { panel, value } = panelValues[i];
+      // Render the panel as a unit plane scaled to panel dimensions, oriented so
+      // its +Z axis matches the panel's outward normal.
+      dummy.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
+      dummy.lookAt(
+        panel.pos.x + panel.normal.x,
+        panel.pos.y + panel.normal.y,
+        panel.pos.z + panel.normal.z,
+      );
+      // Plane geometry by default lies in XY (width × height). lookAt aligns +Z to
+      // the normal — perfect.
+      dummy.scale.set(panel.widthM * 0.92, panel.heightM * 0.92, 1);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
+      mapToColour(value, scheme, c);
+      m.setColorAt(i, c);
+    }
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }, [panelValues, scheme]);
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, panelValues.length]} castShadow>
+      <planeGeometry args={[1, 1]} />
+      <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.6} metalness={0} />
+    </instancedMesh>
+  );
+}
+
+function OrientationPanels({ panels }: { panels: FacadePanel[] }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const dummy = new THREE.Object3D();
+    const c = new THREE.Color();
+    for (let i = 0; i < panels.length; i++) {
+      const panel = panels[i];
+      dummy.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
+      dummy.lookAt(
+        panel.pos.x + panel.normal.x,
+        panel.pos.y + panel.normal.y,
+        panel.pos.z + panel.normal.z,
+      );
+      dummy.scale.set(panel.widthM * 0.92, panel.heightM * 0.92, 1);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
+      mapToColour(0, "south-arc", c, panel.orientationDeg);
+      m.setColorAt(i, c);
+    }
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }, [panels]);
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, panels.length]}>
+      <planeGeometry args={[1, 1]} />
+      <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.6} metalness={0} />
+    </instancedMesh>
+  );
+}
+
+/* ---------- colour maps ---------- */
+
+function mapToColour(value: number, scheme: ColorScheme, out: THREE.Color, orientationDeg = 0) {
+  switch (scheme) {
+    case "viridis": {
+      // Five-stop ramp roughly following the viridis palette.
+      // 0 = dark purple → 1 = yellow.
+      const stops: [number, [number, number, number]][] = [
+        [0.0, [0.27, 0.00, 0.33]],
+        [0.25, [0.23, 0.32, 0.55]],
+        [0.50, [0.13, 0.57, 0.55]],
+        [0.75, [0.36, 0.79, 0.39]],
+        [1.0, [0.99, 0.91, 0.14]],
+      ];
+      const [r, g, b] = sampleStops(stops, clamp01(value));
+      out.setRGB(r, g, b);
+      return;
+    }
+    case "view": {
+      // Red (no view) → green (full view).
+      const stops: [number, [number, number, number]][] = [
+        [0.0, [0.85, 0.18, 0.18]],
+        [0.5, [0.93, 0.78, 0.20]],
+        [1.0, [0.32, 0.66, 0.32]],
+      ];
+      const [r, g, b] = sampleStops(stops, clamp01(value));
+      out.setRGB(r, g, b);
+      return;
+    }
+    case "south-arc": {
+      // Highlight the south-facing arc (PV-eligible).
+      const inSouthArc = orientationDeg >= 112.5 && orientationDeg <= 247.5;
+      if (inSouthArc) out.setHex(0xe7b14a);
+      else out.setHex(0xb6b1a4);
+      return;
+    }
+  }
+}
+
+function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
+
+function sampleStops(
+  stops: [number, [number, number, number]][],
+  t: number,
+): [number, number, number] {
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [t0, c0] = stops[i];
+    const [t1, c1] = stops[i + 1];
+    if (t >= t0 && t <= t1) {
+      const f = (t - t0) / (t1 - t0);
+      return [
+        c0[0] + (c1[0] - c0[0]) * f,
+        c0[1] + (c1[1] - c0[1]) * f,
+        c0[2] + (c1[2] - c0[2]) * f,
+      ];
+    }
+  }
+  return stops[stops.length - 1][1];
+}

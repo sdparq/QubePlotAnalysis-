@@ -44,6 +44,10 @@ export interface FacadePanel {
   normal: Vec3;
   /** Approximate panel area (m²) — used to weight aggregate stats. */
   areaM2: number;
+  /** Panel width along the wall edge (m). */
+  widthM: number;
+  /** Panel height along Y (m). */
+  heightM: number;
   /** Compass orientation derived from normal (0 = N, 90 = E, 180 = S, 270 = W). */
   orientationDeg: number;
 }
@@ -217,6 +221,8 @@ export function sampleFacadePanels(volumes: Volume[], panelSizeM: number): Facad
             pos: { x: worldX, y: cY, z: worldZ },
             normal: { x: nx, y: 0, z: nz },
             areaM2: dE * dY,
+            widthM: dE,
+            heightM: dY,
             orientationDeg: normalToCompassDeg(nx, nz),
           });
         }
@@ -253,6 +259,11 @@ export interface SkyExposureOptions {
   rayCount?: number;
 }
 
+export interface PanelValue {
+  panel: FacadePanel;
+  value: number;
+}
+
 export interface SkyExposureResult {
   averagePct: number;
   totalAreaM2: number;
@@ -261,6 +272,7 @@ export interface SkyExposureResult {
   pctAreaBelow20: number;
   byOrientation: { name: string; areaM2: number; avgPct: number }[];
   histogram: { bin: string; areaM2: number }[];
+  panelValues: PanelValue[];
 }
 
 const COMPASS_OCTANTS: { name: string; from: number; to: number }[] = [
@@ -296,6 +308,7 @@ export function computeSkyExposure(
   const byOrient = new Map<string, { area: number; weighted: number }>();
   const bins = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
   const histArea = new Array<number>(bins.length - 1).fill(0);
+  const panelValues: PanelValue[] = [];
   for (const panel of panels) {
     let eligible = 0;
     let unblocked = 0;
@@ -311,6 +324,7 @@ export function computeSkyExposure(
       if (!blocked) unblocked++;
     }
     const exposure = eligible > 0 ? unblocked / eligible : 0;
+    panelValues.push({ panel, value: exposure });
     totalArea += panel.areaM2;
     weightedSum += exposure * panel.areaM2;
     if (exposure < 0.25) areaBelow25 += panel.areaM2;
@@ -345,6 +359,7 @@ export function computeSkyExposure(
     pctAreaBelow20: totalArea > 0 ? areaBelow20 / totalArea : 0,
     byOrientation,
     histogram,
+    panelValues,
   };
 }
 
@@ -361,6 +376,7 @@ export interface ViewQualityResult {
   totalAreaM2: number;
   buckets: { label: string; areaM2: number; pct: number }[];
   byOrientation: { name: string; areaM2: number; avgPct: number }[];
+  panelValues: PanelValue[];
 }
 
 export function computeViewQuality(
@@ -384,6 +400,7 @@ export function computeViewQuality(
   const bucketBins = [0, 0.125, 0.25, 0.5, 1.001];
   const bucketLabels = ["<12.5%", "12.5–25%", "25–50%", ">50%"];
   const bucketArea = new Array<number>(4).fill(0);
+  const panelValues: PanelValue[] = [];
   for (const panel of panels) {
     let visible = 0;
     let total = 0;
@@ -405,6 +422,7 @@ export function computeViewQuality(
       if (!blocked) visible++;
     }
     const view = total > 0 ? visible / total : 0;
+    panelValues.push({ panel, value: view });
     totalArea += panel.areaM2;
     if (view > 0) withView += panel.areaM2 * view;
     const oct = octantOf(panel.orientationDeg);
@@ -437,6 +455,7 @@ export function computeViewQuality(
     totalAreaM2: totalArea,
     buckets,
     byOrientation,
+    panelValues,
   };
 }
 
