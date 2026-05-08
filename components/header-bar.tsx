@@ -39,9 +39,18 @@ export default function HeaderBar() {
       <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap min-w-0">
         <div className="flex items-center gap-5 min-w-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 border border-qube-400/60 flex items-center justify-center">
-              <div className="w-3 h-3 bg-qube-400" />
-            </div>
+            <svg
+              viewBox="0 0 100 100"
+              className="w-9 h-9"
+              fill="none"
+              stroke="#137e34"
+              strokeWidth={11}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              aria-label="QUBE logo"
+            >
+              <path d="M 14 8 L 64 8 L 92 36 L 92 86 A 6 6 0 0 1 86 92 L 14 92 A 6 6 0 0 1 8 86 L 8 14 A 6 6 0 0 1 14 8 Z" />
+            </svg>
             <div className="leading-tight">
               <div className="wordmark text-bone-100 text-[16px]">QUBE</div>
               <div className="eyebrow text-bone-200/60 text-[9px] mt-0.5">Development</div>
