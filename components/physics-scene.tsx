@@ -136,6 +136,13 @@ function PanelInstances({
   useEffect(() => {
     if (!meshRef.current) return;
     const m = meshRef.current;
+    // Pre-initialise the instance colour buffer so setColorAt has somewhere to write.
+    if (!m.instanceColor || m.instanceColor.count !== panelValues.length) {
+      m.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(panelValues.length * 3),
+        3,
+      );
+    }
     const dummy = new THREE.Object3D();
     const c = new THREE.Color();
     const planeForward = new THREE.Vector3(0, 0, 1);
@@ -144,7 +151,7 @@ function PanelInstances({
       const { panel, value } = panelValues[i];
       dummy.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
       normalVec.set(panel.normal.x, panel.normal.y, panel.normal.z).normalize();
-      // Align the plane's +Z (its front face normal) with the panel's outward normal.
+      // Align the plane's +Z (front face normal) with the panel's outward normal.
       dummy.quaternion.setFromUnitVectors(planeForward, normalVec);
       dummy.scale.set(panel.widthM * 0.95, panel.heightM * 0.95, 1);
       dummy.updateMatrix();
@@ -153,16 +160,22 @@ function PanelInstances({
       m.setColorAt(i, c);
     }
     m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    m.instanceColor.needsUpdate = true;
   }, [panelValues, scheme]);
   return (
     <instancedMesh
       ref={meshRef}
+      // Force a remount when the panel count changes so InstancedMesh's internal
+      // buffers are sized correctly (args only run on construction).
+      key={`pi-${panelValues.length}`}
       args={[undefined, undefined, panelValues.length]}
       frustumCulled={false}
     >
       <planeGeometry args={[1, 1]} />
-      <meshBasicMaterial vertexColors side={THREE.DoubleSide} toneMapped={false} />
+      {/* No vertexColors prop — that would force the shader to expect a per-vertex
+          colour attribute on the geometry. We only want per-INSTANCE colour, which
+          three.js auto-enables when instanceColor is populated. */}
+      <meshBasicMaterial side={THREE.DoubleSide} toneMapped={false} />
     </instancedMesh>
   );
 }

@@ -109,19 +109,19 @@ export default function PhysicsTab() {
   return (
     <div className="grid gap-6">
       <div className="card">
-        <h2 className="section-title">Sol y vistas</h2>
+        <h2 className="section-title">Sun & views</h2>
         <p className="section-sub">
-          Visualiza directamente sobre el volumen <strong>cuánto sol</strong> recibe cada
-          fachada y <strong>qué se ve</strong> desde ella. Pinta el edificio con un mapa de
-          color para detectar de un vistazo las zonas mejores y peores.
+          See directly on the volume <strong>how much sun</strong> each façade gets and
+          <strong> what can be seen</strong> from it. The building is painted with a colour
+          map so you can spot the best and worst areas at a glance.
         </p>
       </div>
 
       {!hasGeo && (
         <div className="card border-amber-200 bg-amber-50">
           <p className="text-[12.5px] text-amber-900 leading-snug">
-            Para que estos análisis funcionen necesito la <strong>latitud y longitud</strong> del
-            plot. Rellénalas en la pestaña <em>Setup</em> y vuelve aquí.
+            These analyses need the project&apos;s <strong>latitude and longitude</strong>.
+            Set them in the <em>Setup</em> tab and come back.
           </p>
         </div>
       )}
@@ -187,7 +187,7 @@ function SunCard({
     setRunning(true);
     setError(null);
     try {
-      if (!hasGeo) throw new Error("Falta latitud/longitud en Setup.");
+      if (!hasGeo) throw new Error("Set the project's latitude/longitude in Setup first.");
       const obstacles = await buildObstacles();
       const panels = sampleFacadePanels(volumes, PANEL_SIZE_M);
       await new Promise((r) => setTimeout(r, 0));
@@ -208,7 +208,7 @@ function SunCard({
     setRunning(true);
     setError(null);
     try {
-      if (!hasGeo) throw new Error("Falta latitud/longitud en Setup.");
+      if (!hasGeo) throw new Error("Set the project's latitude/longitude in Setup first.");
       const obstacles = await buildObstacles();
       const panels = sampleFacadePanels(volumes, PANEL_SIZE_M);
       const date = new Date(`${dateStr}T00:00:00`);
@@ -231,11 +231,11 @@ function SunCard({
     <div className="card">
       <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
         <div>
-          <h3 className="text-[15px] font-medium text-ink-900">☀ Sol y sombras</h3>
+          <h3 className="text-[15px] font-medium text-ink-900">☀ Sun &amp; shadows</h3>
           <p className="text-[12px] text-ink-500 leading-snug max-w-xl mt-1">
             {mode === "annual"
-              ? "Cuánto sol recibe cada fachada a lo largo del año. Las zonas amarillas reciben más sol; las azules, menos."
-              : "Cómo cae la sombra a una fecha y hora concretas. Amarillo = al sol; azul oscuro = en sombra."}
+              ? "How much sunlight each façade gets over the year. Yellow areas catch a lot of sun; blue ones much less."
+              : "Where the shadow falls at a specific date and time. Yellow = sunlit; navy = in shadow."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -246,7 +246,7 @@ function SunCard({
                 mode === "annual" ? "bg-qube-500 text-white" : "text-ink-700 hover:bg-bone-200"
               }`}
             >
-              Durante el año
+              Over the year
             </button>
             <button
               onClick={() => setMode("moment")}
@@ -254,7 +254,7 @@ function SunCard({
                 mode === "moment" ? "bg-qube-500 text-white" : "text-ink-700 hover:bg-bone-200"
               }`}
             >
-              En un momento
+              At a moment
             </button>
           </div>
           <button
@@ -262,7 +262,7 @@ function SunCard({
             disabled={running}
             className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-ink-900 text-bone-100 hover:bg-ink-700 disabled:opacity-50 transition-colors"
           >
-            {running ? "Calculando…" : result ? "Recalcular" : "Calcular"}
+            {running ? "Computing…" : result ? "Re-run" : "Run"}
           </button>
         </div>
       </div>
@@ -270,7 +270,7 @@ function SunCard({
       {mode === "moment" && (
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end mb-4">
           <label className="grid gap-1">
-            <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Fecha y hora</span>
+            <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Date &amp; time</span>
             <div className="flex items-center gap-3">
               <input
                 type="date"
@@ -295,9 +295,9 @@ function SunCard({
           </label>
           <div className="flex flex-wrap gap-1">
             {[
-              { label: "Solsticio verano", date: "06-21" },
-              { label: "Solsticio invierno", date: "12-21" },
-              { label: "Equinoccio", date: "03-21" },
+              { label: "Summer solstice", date: "06-21" },
+              { label: "Winter solstice", date: "12-21" },
+              { label: "Equinox", date: "03-21" },
             ].map((p) => (
               <button
                 key={p.label}
@@ -321,42 +321,42 @@ function SunCard({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[12px] text-ink-500">
-              {running ? "Calculando…" : "Pulsa Calcular para ver el mapa de color en el volumen."}
+              {running ? "Computing…" : "Click Run to paint the volume with the colour map."}
             </div>
           )}
         </div>
         {mode === "annual" && annualResult && (
           <ColorRamp
             scheme="solar"
-            leftLabel="Poco sol"
-            rightLabel={`${fmt0(annualResult.maxHours)} h/año`}
+            leftLabel="Low sun"
+            rightLabel={`${fmt0(annualResult.maxHours)} h/year`}
           />
         )}
         {mode === "moment" && shadowResult && (
           <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
             <span className="inline-block w-3 h-3" style={{ background: "#f2c14e" }} />
-            Al sol
+            Sunlit
             <span className="inline-block w-3 h-3 ml-3" style={{ background: "#2c3e6b" }} />
-            En sombra
+            In shadow
           </div>
         )}
       </div>
 
       {mode === "annual" && annualResult && (
         <p className="text-[12px] text-ink-700 mt-3">
-          De media, cada fachada recibe <strong>{fmt0(annualResult.averageSunHours)} horas de sol al año</strong>.
-          La fachada más expuesta llega a {fmt0(annualResult.maxHours)} h/año.
+          On average, each square metre of façade gets <strong>{fmt0(annualResult.averageSunHours)} hours of direct sun per year</strong>.
+          The most exposed area reaches {fmt0(annualResult.maxHours)} h/year.
         </p>
       )}
       {mode === "moment" && shadowResult && (
         <p className="text-[12px] text-ink-700 mt-3">
           {shadowResult.sun ? (
             <>
-              En ese momento <strong>{fmtPct(shadowResult.litAreaPct)} de la fachada</strong> recibe sol directo.
-              El sol está a {shadowResult.sunElevationDeg.toFixed(0)}° de elevación, azimuth {shadowResult.sunAzimuthDeg.toFixed(0)}°.
+              At that moment <strong>{fmtPct(shadowResult.litAreaPct)} of the façade</strong> is in direct sun.
+              Sun elevation {shadowResult.sunElevationDeg.toFixed(0)}°, azimuth {shadowResult.sunAzimuthDeg.toFixed(0)}°.
             </>
           ) : (
-            <>El sol está bajo el horizonte a esa hora — toda la fachada queda en sombra.</>
+            <>The sun is below the horizon at that time — the whole façade is in shadow.</>
           )}
         </p>
       )}
@@ -392,9 +392,9 @@ function ViewsCard({
     setRunning(true);
     setError(null);
     try {
-      if (!hasGeo) throw new Error("Falta latitud/longitud del proyecto en Setup.");
+      if (!hasGeo) throw new Error("Set the project's latitude/longitude in Setup first.");
       if (typeof landmarkLat !== "number" || typeof landmarkLng !== "number") {
-        throw new Error("Introduce la latitud y longitud del punto de interés.");
+        throw new Error("Enter the landmark's latitude and longitude.");
       }
       const obstacles: Box[] = [...projectBoxes(volumes)];
       for (const cn of customNeighbors) obstacles.push(...customNeighborBoxes(cn));
@@ -416,11 +416,11 @@ function ViewsCard({
     <div className="card">
       <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
         <div>
-          <h3 className="text-[15px] font-medium text-ink-900">👁 Vistas desde la fachada</h3>
+          <h3 className="text-[15px] font-medium text-ink-900">👁 Views from the façade</h3>
           <p className="text-[12px] text-ink-500 leading-snug max-w-xl mt-1">
-            Marca un punto de interés (la costa, un parque, un hito) por sus coordenadas y el
-            mapa de color te enseña qué partes de la fachada lo ven sin obstáculos. Verde = vista
-            limpia. Rojo = bloqueado por otro edificio.
+            Pick a point of interest (the coast, a park, a landmark) by its coordinates and
+            the colour map shows which parts of the façade see it unobstructed. Green = clear
+            view. Red = blocked by another building.
           </p>
         </div>
         <button
@@ -428,15 +428,15 @@ function ViewsCard({
           disabled={running}
           className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-ink-900 text-bone-100 hover:bg-ink-700 disabled:opacity-50 transition-colors"
         >
-          {running ? "Calculando…" : result ? "Recalcular" : "Calcular"}
+          {running ? "Computing…" : result ? "Re-run" : "Run"}
         </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <LatLngField label="Latitud del punto" value={landmarkLat} onChange={setLandmarkLat} placeholder="25.260" />
-        <LatLngField label="Longitud del punto" value={landmarkLng} onChange={setLandmarkLng} placeholder="55.280" />
+        <LatLngField label="Landmark latitude" value={landmarkLat} onChange={setLandmarkLat} placeholder="25.260" />
+        <LatLngField label="Landmark longitude" value={landmarkLng} onChange={setLandmarkLng} placeholder="55.280" />
         <label className="grid gap-1">
-          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Altura del punto (m)</span>
+          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Landmark height (m)</span>
           <input
             type="number"
             step={5}
@@ -459,21 +459,21 @@ function ViewsCard({
             <PhysicsScene volumes={volumes} panelValues={result.panelValues} scheme="view" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[12px] text-ink-500">
-              {running ? "Calculando…" : "Mete las coordenadas y pulsa Calcular."}
+              {running ? "Computing…" : "Enter the coordinates and click Run."}
             </div>
           )}
         </div>
         {result && (
-          <ColorRamp scheme="view" leftLabel="Sin vista" rightLabel="Vista limpia" />
+          <ColorRamp scheme="view" leftLabel="No view" rightLabel="Clear view" />
         )}
       </div>
 
       {result && (
         <p className="text-[12px] text-ink-700 mt-3">
-          De media, <strong>{fmtPct(result.averageViewPct)} de la fachada</strong> ve el punto.
+          On average, <strong>{fmtPct(result.averageViewPct)} of the façade</strong> sees the landmark.
           {" "}
           {result.buckets[3] && result.buckets[3].pct > 0 && (
-            <>{fmtPct(result.buckets[3].pct)} disfruta de una vista muy abierta (&gt;50%).</>
+            <>{fmtPct(result.buckets[3].pct)} enjoys a wide-open view (&gt;50%).</>
           )}
         </p>
       )}
