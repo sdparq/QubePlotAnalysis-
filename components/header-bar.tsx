@@ -49,7 +49,7 @@ export default function HeaderBar() {
               strokeMiterlimit={4}
               aria-label="QUBE logo"
             >
-              <path d="M 8 8 L 58 8 L 92 42 L 92 92 L 8 92 Z" />
+              <path d="M 8 8 L 58 8 L 92 42 L 92 92 L 42 92 L 8 58 Z" />
             </svg>
             <div className="leading-tight">
               <div className="wordmark text-bone-100 text-[16px]">QUBE</div>
