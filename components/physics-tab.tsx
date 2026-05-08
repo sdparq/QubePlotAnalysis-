@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
 import { fmt0, fmtPct } from "@/lib/format";
@@ -515,19 +515,30 @@ function LatLngField({
   onChange: (v: number | "") => void;
   placeholder?: string;
 }) {
+  // Internal text state — lets the user type "25.", "25.2", "25,260" freely
+  // without React snapping the value back as the number is being typed.
+  const [text, setText] = useState<string>(typeof value === "number" ? String(value) : "");
+  // Re-sync text if the parent resets the value (e.g. via a "clear" button).
+  useEffect(() => {
+    const fromParent = typeof value === "number" ? String(value) : "";
+    const parsedLocal = parseFloat(text.replace(",", "."));
+    if (value !== parsedLocal && fromParent !== text) setText(fromParent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
   return (
     <label className="grid gap-1">
       <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">{label}</span>
       <input
-        type="number"
-        step={0.0001}
+        type="text"
+        inputMode="decimal"
         className="cell-input text-right font-mono text-[11px]"
         placeholder={placeholder}
-        value={value}
+        value={text}
         onChange={(e) => {
           const raw = e.target.value;
-          if (raw === "") return onChange("");
-          const n = parseFloat(raw);
+          setText(raw);
+          if (raw.trim() === "") return onChange("");
+          const n = parseFloat(raw.replace(",", "."));
           onChange(Number.isFinite(n) ? n : "");
         }}
       />
