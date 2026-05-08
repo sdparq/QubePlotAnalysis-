@@ -1,16 +1,17 @@
 /**
- * Indicative building-physics analyses inspired by OMRT's deliverable list:
+ * Indicative building-physics analyses for early-stage massing studies:
  *
  *   - Sky exposure (% of sky dome each façade panel sees, considering
  *     neighbouring buildings + self-shading from upper massing)
  *   - View quality on a landmark (% of façade with line-of-sight to a
  *     selected landmark point)
- *   - PV potential (kWp installable + annual yield from roof and south-
- *     facing façades, given project latitude)
+ *   - Annual sun exposure (hours per year of direct sunlight on each façade
+ *     panel, integrated across a sampled set of sun positions)
+ *   - Moment shadow (which façade panels are sunlit vs shaded at a chosen
+ *     date and solar hour)
  *
- * All analyses are first-order approximations meant for early-stage massing
- * studies. They run client-side with simple AABB ray tests — no raytracing,
- * no thermal/optical simulation.
+ * All analyses are first-order approximations. They run client-side with
+ * simple AABB ray tests — no raytracing, no thermal/optical simulation.
  *
  * Coordinate frame (world):
  *   X = east, Y = up, Z = south (positive Z points away from north).
@@ -460,103 +461,202 @@ export function computeViewQuality(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              PV potential                                  */
+/*                              Solar geometry                                */
 /* -------------------------------------------------------------------------- */
 
-export interface PVOptions {
-  /** Annual global horizontal irradiation, kWh/m²/yr. Defaults to a Dubai-like value. */
-  annualGHI?: number;
-  /** Panel rated efficiency (0..1). Modern monocrystalline silicon ~0.20-0.22. */
-  panelEfficiency?: number;
-  /** Performance ratio (0..1) — accounts for inverter, cabling, soiling, temperature. */
-  performanceRatio?: number;
-  /** Fraction of the gross roof area realistically usable for PV (after MEP, lifts, walkways). */
-  roofUtilization?: number;
-  /** Tilted-vs-horizontal yield correction for roof. Optimal tilt ~latitude → ~+5-8%. */
-  roofTiltFactor?: number;
-  /** Vertical-vs-horizontal yield ratio for south façade — typical ~0.65 for Dubai. */
-  facadeYieldRatio?: number;
-  /** Fraction of south-arc façade area realistically usable (after windows, balconies). */
-  facadeUtilization?: number;
-  /** Whether to include south-facing façades (S, SE, SW) on top of the roof. */
-  includeFacades?: boolean;
+/**
+ * Approximate sun direction from latitude, day-of-year and solar hour.
+ * Returns a unit vector pointing FROM the panel TOWARDS the sun in our world
+ * frame (X = east, Y = up, Z = south). Returns null when the sun is below the
+ * horizon.
+ *
+ * Note: solar hour is approximated as the user's local clock time; equation
+ * of time and longitude/timezone correction are skipped — results are
+ * indicative and good enough for early-stage shading studies.
+ */
+export function sunDirection(
+  latitudeDeg: number,
+  dayOfYear: number,
+  solarHour: number,
+): Vec3 | null {
+  const declRad = ((23.45 * Math.PI) / 180) * Math.sin((2 * Math.PI * (dayOfYear - 81)) / 365);
+  const latRad = (latitudeDeg * Math.PI) / 180;
+  const hourAngleRad = ((15 * (solarHour - 12)) * Math.PI) / 180;
+  const sinEl =
+    Math.sin(latRad) * Math.sin(declRad) +
+    Math.cos(latRad) * Math.cos(declRad) * Math.cos(hourAngleRad);
+  if (sinEl <= 0) return null;
+  const elevation = Math.asin(Math.max(-1, Math.min(1, sinEl)));
+  const cosEl = Math.cos(elevation);
+  // Azimuth measured clockwise from north.
+  const cosAz = (Math.sin(declRad) - Math.sin(elevation) * Math.sin(latRad)) / (cosEl * Math.cos(latRad));
+  let azimuth = Math.acos(Math.max(-1, Math.min(1, cosAz)));
+  if (hourAngleRad > 0) azimuth = 2 * Math.PI - azimuth;
+  // World axes: X east, Y up, Z south. North = -Z.
+  return {
+    x: cosEl * Math.sin(azimuth),
+    y: Math.sin(elevation),
+    z: -cosEl * Math.cos(azimuth),
+  };
 }
 
-export interface PVResult {
-  roof: { areaM2: number; usableM2: number; kWp: number; annualKWh: number };
-  facade: { areaM2: number; usableM2: number; kWp: number; annualKWh: number };
-  totalKWp: number;
-  totalAnnualKWh: number;
-  /** Panel power density (kWp / m² of usable surface). */
-  kWpPerM2: number;
-  parameters: Required<PVOptions>;
+export interface SolarOptions {
+  /** Sample N days across the year (default 12 = monthly). */
+  daysPerYear?: number;
+  /** Sample N hours per day (default 12 = bi-hourly). */
+  hoursPerDay?: number;
 }
 
-const DUBAI_DEFAULT_GHI = 2150;
-const PV_DEFAULTS: Required<PVOptions> = {
-  annualGHI: DUBAI_DEFAULT_GHI,
-  panelEfficiency: 0.21,
-  performanceRatio: 0.80,
-  roofUtilization: 0.55,
-  roofTiltFactor: 1.05,
-  facadeYieldRatio: 0.65,
-  facadeUtilization: 0.30,
-  includeFacades: true,
-};
+export interface SolarResult {
+  averageSunHours: number;
+  totalAreaM2: number;
+  byOrientation: { name: string; areaM2: number; avgHours: number }[];
+  panelValues: PanelValue[];
+  /** Sun hours of the most-exposed panel — used to normalise the heatmap. */
+  maxHours: number;
+  /** Total annual sun positions sampled (for diagnostics). */
+  positionsSampled: number;
+}
 
 /**
- * Take the project's volumes + facade panels and estimate PV potential.
- *
- * Roof area = top face area of every volume (sum of polygon areas — note this
- * over-counts when volumes overlap vertically; for residential massing this is
- * usually fine because the topmost volume defines the roof).
- *
- * Façade contribution = panels with compass orientation in the south arc
- * (135°–225° centred on south for the northern hemisphere).
+ * For each façade panel, count the number of hours per year of direct sunlight,
+ * given the project's latitude and the surrounding obstacles. Hours are scaled
+ * so that when sampling is coarse, the totals still reflect 365 days × 24 h.
  */
-export function computePVPotential(
-  volumes: Volume[],
+export function computeAnnualSolar(
   panels: FacadePanel[],
-  options: PVOptions = {},
-): PVResult {
-  const p = { ...PV_DEFAULTS, ...options };
-  // Roof — use the top of each volume. We compute the top of the topmost volume only,
-  // because in stacked massings the lower volumes' tops are partially covered by upper
-  // volumes' bases. For the indicative analysis we approximate by using the area of the
-  // single topmost volume.
-  const topY = volumes.reduce((m, v) => Math.max(m, v.toY), 0);
-  const roofArea = volumes
-    .filter((v) => Math.abs(v.toY - topY) < 0.5)
-    .reduce((s, v) => {
-      const polyArea = Math.abs(polygonArea(v.polygon));
-      const holeArea = v.hole ? Math.abs(polygonArea(v.hole)) : 0;
-      return s + Math.max(0, polyArea - holeArea);
-    }, 0);
-  const roofUsable = roofArea * p.roofUtilization;
-  const roofKWp = roofUsable * p.panelEfficiency;
-  const roofKWh = roofUsable * p.annualGHI * p.panelEfficiency * p.performanceRatio * p.roofTiltFactor;
-  // Façades — south arc only.
-  let facadeArea = 0;
-  if (p.includeFacades) {
-    for (const panel of panels) {
-      const o = panel.orientationDeg;
-      if (o >= 112.5 && o <= 247.5) facadeArea += panel.areaM2;
+  obstacles: Box[],
+  latitudeDeg: number,
+  options: SolarOptions = {},
+): SolarResult {
+  const days = options.daysPerYear ?? 12;
+  const hours = options.hoursPerDay ?? 12;
+  const sunDirs: Vec3[] = [];
+  for (let d = 0; d < days; d++) {
+    const dayOfYear = Math.round(15 + (d * 365) / days);
+    for (let h = 0; h < hours; h++) {
+      const solarHour = (24 / hours) * h + 24 / hours / 2;
+      const dir = sunDirection(latitudeDeg, dayOfYear, solarHour);
+      if (dir) sunDirs.push(dir);
     }
   }
-  const facadeUsable = facadeArea * p.facadeUtilization;
-  const facadeKWp = facadeUsable * p.panelEfficiency;
-  const facadeKWh = facadeUsable * p.annualGHI * p.panelEfficiency * p.performanceRatio * p.facadeYieldRatio;
-  const totalKWp = roofKWp + facadeKWp;
-  const totalKWh = roofKWh + facadeKWh;
-  const kWpPerM2 = roofUsable + facadeUsable > 0 ? totalKWp / (roofUsable + facadeUsable) : 0;
+  const hoursPerSample = (24 * 365) / (days * hours);
+  let totalArea = 0;
+  let weightedSum = 0;
+  let maxHours = 0;
+  const byOrient = new Map<string, { area: number; weighted: number }>();
+  const panelValues: PanelValue[] = [];
+  for (const panel of panels) {
+    let sunHours = 0;
+    for (const dir of sunDirs) {
+      const dot = dir.x * panel.normal.x + dir.z * panel.normal.z;
+      if (dot <= 0) continue;
+      let blocked = false;
+      for (const box of obstacles) {
+        if (rayHitsBox(panel.pos, dir, box)) { blocked = true; break; }
+      }
+      if (!blocked) sunHours += hoursPerSample;
+    }
+    if (sunHours > maxHours) maxHours = sunHours;
+    panelValues.push({ panel, value: sunHours });
+    totalArea += panel.areaM2;
+    weightedSum += sunHours * panel.areaM2;
+    const oct = octantOf(panel.orientationDeg);
+    const o = byOrient.get(oct) ?? { area: 0, weighted: 0 };
+    o.area += panel.areaM2;
+    o.weighted += sunHours * panel.areaM2;
+    byOrient.set(oct, o);
+  }
+  // Normalise per-panel values to 0..1 (relative to max) for the heatmap.
+  const normalised: PanelValue[] = panelValues.map((p) => ({
+    panel: p.panel,
+    value: maxHours > 0 ? p.value / maxHours : 0,
+  }));
   return {
-    roof: { areaM2: roofArea, usableM2: roofUsable, kWp: roofKWp, annualKWh: roofKWh },
-    facade: { areaM2: facadeArea, usableM2: facadeUsable, kWp: facadeKWp, annualKWh: facadeKWh },
-    totalKWp,
-    totalAnnualKWh: totalKWh,
-    kWpPerM2,
-    parameters: p,
+    averageSunHours: totalArea > 0 ? weightedSum / totalArea : 0,
+    totalAreaM2: totalArea,
+    byOrientation: COMPASS_OCTANTS.map((o) => {
+      const v = byOrient.get(o.name);
+      return {
+        name: o.name,
+        areaM2: v?.area ?? 0,
+        avgHours: v && v.area > 0 ? v.weighted / v.area : 0,
+      };
+    }).filter((x) => x.areaM2 > 0),
+    panelValues: normalised,
+    maxHours,
+    positionsSampled: sunDirs.length,
   };
+}
+
+export interface ShadowResult {
+  /** Fraction of total façade area in direct sunlight at the chosen moment. */
+  litAreaPct: number;
+  totalAreaM2: number;
+  /** Per-panel value: 1 = lit, 0 = shaded, NaN = sun below horizon. */
+  panelValues: PanelValue[];
+  /** Sun direction used (unit vector). null if the sun is below the horizon. */
+  sun: Vec3 | null;
+  /** Sun elevation in degrees (negative = below horizon). */
+  sunElevationDeg: number;
+  /** Sun azimuth in degrees (0 = N, clockwise). */
+  sunAzimuthDeg: number;
+}
+
+export function computeMomentShadow(
+  panels: FacadePanel[],
+  obstacles: Box[],
+  latitudeDeg: number,
+  dayOfYear: number,
+  solarHour: number,
+): ShadowResult {
+  const sun = sunDirection(latitudeDeg, dayOfYear, solarHour);
+  let totalArea = 0;
+  let lit = 0;
+  const panelValues: PanelValue[] = [];
+  for (const panel of panels) {
+    totalArea += panel.areaM2;
+    if (!sun) {
+      panelValues.push({ panel, value: 0 });
+      continue;
+    }
+    const dot = sun.x * panel.normal.x + sun.z * panel.normal.z;
+    if (dot <= 0) {
+      // Façade faces away from the sun.
+      panelValues.push({ panel, value: 0 });
+      continue;
+    }
+    let blocked = false;
+    for (const box of obstacles) {
+      if (rayHitsBox(panel.pos, sun, box)) { blocked = true; break; }
+    }
+    if (!blocked) {
+      panelValues.push({ panel, value: 1 });
+      lit += panel.areaM2;
+    } else {
+      panelValues.push({ panel, value: 0 });
+    }
+  }
+  let elevationDeg = 0;
+  let azimuthDeg = 0;
+  if (sun) {
+    elevationDeg = (Math.asin(Math.max(-1, Math.min(1, sun.y))) * 180) / Math.PI;
+    azimuthDeg = ((Math.atan2(sun.x, -sun.z) * 180) / Math.PI + 360) % 360;
+  }
+  return {
+    litAreaPct: totalArea > 0 ? lit / totalArea : 0,
+    totalAreaM2: totalArea,
+    panelValues,
+    sun,
+    sunElevationDeg: elevationDeg,
+    sunAzimuthDeg: azimuthDeg,
+  };
+}
+
+export function dayOfYearFromDate(date: Date): number {
+  const start = new Date(Date.UTC(date.getFullYear(), 0, 0));
+  const diff = date.getTime() - start.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
 /* -------------------------------------------------------------------------- */

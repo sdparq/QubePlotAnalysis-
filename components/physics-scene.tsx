@@ -4,24 +4,20 @@ import { Edges, OrbitControls } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Volume } from "@/lib/massing";
-import type { PanelValue, FacadePanel } from "@/lib/building-physics";
+import type { PanelValue } from "@/lib/building-physics";
 import { polygonBBox } from "@/lib/geom";
 
-export type ColorScheme = "viridis" | "south-arc" | "view";
+export type ColorScheme = "viridis" | "view" | "solar" | "shadow";
 
 interface PhysicsSceneProps {
   volumes: Volume[];
   panelValues?: PanelValue[];
-  /** When `panelValues` is omitted, draw every panel coloured by its
-   *  compass orientation (used by the PV card). */
-  panelsForOrientation?: FacadePanel[];
   scheme: ColorScheme;
 }
 
 export default function PhysicsScene({
   volumes,
   panelValues,
-  panelsForOrientation,
   scheme,
 }: PhysicsSceneProps) {
   // Camera target & distance based on the building's extent
@@ -79,11 +75,6 @@ export default function PhysicsScene({
       {/* Heatmap panels */}
       {panelValues && panelValues.length > 0 && (
         <PanelInstances panelValues={panelValues} scheme={scheme} />
-      )}
-
-      {/* Orientation panels (PV) */}
-      {panelsForOrientation && panelsForOrientation.length > 0 && (
-        <OrientationPanels panels={panelsForOrientation} />
       )}
 
       <OrbitControls
@@ -176,44 +167,11 @@ function PanelInstances({
   );
 }
 
-function OrientationPanels({ panels }: { panels: FacadePanel[] }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  useEffect(() => {
-    if (!meshRef.current) return;
-    const m = meshRef.current;
-    const dummy = new THREE.Object3D();
-    const c = new THREE.Color();
-    for (let i = 0; i < panels.length; i++) {
-      const panel = panels[i];
-      dummy.position.set(panel.pos.x, panel.pos.y, panel.pos.z);
-      dummy.lookAt(
-        panel.pos.x + panel.normal.x,
-        panel.pos.y + panel.normal.y,
-        panel.pos.z + panel.normal.z,
-      );
-      dummy.scale.set(panel.widthM * 0.92, panel.heightM * 0.92, 1);
-      dummy.updateMatrix();
-      m.setMatrixAt(i, dummy.matrix);
-      mapToColour(0, "south-arc", c, panel.orientationDeg);
-      m.setColorAt(i, c);
-    }
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
-  }, [panels]);
-  return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, panels.length]}>
-      <planeGeometry args={[1, 1]} />
-      <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={0.6} metalness={0} />
-    </instancedMesh>
-  );
-}
-
 /* ---------- colour maps ---------- */
 
-function mapToColour(value: number, scheme: ColorScheme, out: THREE.Color, orientationDeg = 0) {
+function mapToColour(value: number, scheme: ColorScheme, out: THREE.Color) {
   switch (scheme) {
     case "viridis": {
-      // Five-stop ramp roughly following the viridis palette.
       // 0 = dark purple → 1 = yellow.
       const stops: [number, [number, number, number]][] = [
         [0.0, [0.27, 0.00, 0.33]],
@@ -237,11 +195,23 @@ function mapToColour(value: number, scheme: ColorScheme, out: THREE.Color, orien
       out.setRGB(r, g, b);
       return;
     }
-    case "south-arc": {
-      // Highlight the south-facing arc (PV-eligible).
-      const inSouthArc = orientationDeg >= 112.5 && orientationDeg <= 247.5;
-      if (inSouthArc) out.setHex(0xe7b14a);
-      else out.setHex(0xb6b1a4);
+    case "solar": {
+      // Cool blue (low) → warm orange/yellow (high). Quasi-inferno ramp.
+      const stops: [number, [number, number, number]][] = [
+        [0.0, [0.05, 0.06, 0.30]],
+        [0.25, [0.40, 0.10, 0.50]],
+        [0.50, [0.79, 0.27, 0.40]],
+        [0.75, [0.96, 0.55, 0.20]],
+        [1.0, [0.99, 0.93, 0.55]],
+      ];
+      const [r, g, b] = sampleStops(stops, clamp01(value));
+      out.setRGB(r, g, b);
+      return;
+    }
+    case "shadow": {
+      // Binary: lit (warm yellow) vs shaded (deep navy).
+      if (value > 0.5) out.setHex(0xf2c14e);
+      else out.setHex(0x2c3e6b);
       return;
     }
   }

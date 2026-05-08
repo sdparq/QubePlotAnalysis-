@@ -7,18 +7,20 @@ import { fmt0, fmt2, fmtPct } from "@/lib/format";
 import { buildMassing } from "@/lib/massing";
 import { offsetPolygon, rectanglePlotPolygon, rectangleToPolygon, type Point } from "@/lib/geom";
 import {
-  computePVPotential,
+  computeAnnualSolar,
+  computeMomentShadow,
   computeSkyExposure,
   computeViewQuality,
   customNeighborBoxes,
+  dayOfYearFromDate,
   latLngToWorld,
   osmBuildingBox,
   projectBoxes,
   sampleFacadePanels,
   type Box,
-  type FacadePanel,
-  type PVResult,
+  type ShadowResult,
   type SkyExposureResult,
+  type SolarResult,
   type ViewQualityResult,
 } from "@/lib/building-physics";
 import { fetchOsmBuildings } from "@/lib/osm";
@@ -138,9 +140,20 @@ export default function PhysicsTab() {
         hasGeo={hasGeo}
       />
 
-      <PVCard
+      <AnnualSolarCard
         volumes={massing.volumes}
-        gfa={program.totalGFABuilding}
+        latitude={project.latitude ?? 0}
+        longitude={project.longitude ?? 0}
+        customNeighbors={project.customNeighbors ?? []}
+        hasGeo={hasGeo}
+      />
+
+      <ShadowStudyCard
+        volumes={massing.volumes}
+        latitude={project.latitude ?? 0}
+        longitude={project.longitude ?? 0}
+        customNeighbors={project.customNeighbors ?? []}
+        hasGeo={hasGeo}
       />
     </div>
   );
@@ -400,93 +413,264 @@ function ViewQualityCard({
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                  PV potential                              */
+/*                              Annual sun exposure                           */
 /* -------------------------------------------------------------------------- */
 
-function PVCard({
+function AnnualSolarCard({
   volumes,
-  gfa,
+  latitude,
+  longitude,
+  customNeighbors,
+  hasGeo,
 }: {
   volumes: ReturnType<typeof buildMassing>["volumes"];
-  gfa: number;
+  latitude: number;
+  longitude: number;
+  customNeighbors: NonNullable<ReturnType<typeof useProject>["customNeighbors"]>;
+  hasGeo: boolean;
 }) {
-  const [annualGHI, setAnnualGHI] = useState(2150);
-  const [efficiency, setEfficiency] = useState(0.21);
-  const [pr, setPr] = useState(0.80);
-  const [roofUtil, setRoofUtil] = useState(0.55);
-  const [includeFacades, setIncludeFacades] = useState(true);
-  const [facadeUtil, setFacadeUtil] = useState(0.30);
+  const [panelSize, setPanelSize] = useState(6);
+  const [days, setDays] = useState(12);
+  const [hours, setHours] = useState(12);
+  const [contextRadius, setContextRadius] = useState(350);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SolarResult | null>(null);
 
-  const panels = useMemo(() => sampleFacadePanels(volumes, 6), [volumes]);
-  const result: PVResult = useMemo(() => {
-    return computePVPotential(volumes, panels, {
-      annualGHI,
-      panelEfficiency: efficiency,
-      performanceRatio: pr,
-      roofUtilization: roofUtil,
-      includeFacades,
-      facadeUtilization: facadeUtil,
-    });
-  }, [volumes, panels, annualGHI, efficiency, pr, roofUtil, includeFacades, facadeUtil]);
-
-  // Indicative residential demand at ~80 kWh/m²/yr × GFA (Dubai cooling-dominated, A-rated).
-  const indicativeDemand = gfa * 80;
-  const coverage = indicativeDemand > 0 ? result.totalAnnualKWh / indicativeDemand : 0;
+  const run = useCallback(async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      if (!hasGeo) throw new Error("Set the project's latitude/longitude in Setup first.");
+      const obstacles: Box[] = [...projectBoxes(volumes)];
+      for (const cn of customNeighbors) obstacles.push(...customNeighborBoxes(cn));
+      const osm = await fetchOsmBuildings(latitude, longitude, contextRadius);
+      for (const b of osm) obstacles.push(osmBuildingBox(b.polygon, b.defaultHeight));
+      const panels = sampleFacadePanels(volumes, panelSize);
+      await new Promise((r) => setTimeout(r, 0));
+      const r = computeAnnualSolar(panels, obstacles, latitude, { daysPerYear: days, hoursPerDay: hours });
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  }, [volumes, latitude, longitude, customNeighbors, hasGeo, panelSize, contextRadius, days, hours]);
 
   return (
     <div className="card">
-      <div>
-        <h3 className="text-[15px] font-medium text-ink-900">PV potential</h3>
-        <p className="text-[12px] text-ink-500 leading-snug max-w-xl mt-1">
-          Roof and south-facing façade area × Dubai-default solar yield.
-          Live values — change the parameters and the totals update.
-        </p>
+      <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
+        <div>
+          <h3 className="text-[15px] font-medium text-ink-900">Annual sun exposure</h3>
+          <p className="text-[12px] text-ink-500 leading-snug max-w-xl mt-1">
+            Hours of direct sunlight per year on each façade panel — sun trajectories sampled
+            from the project&apos;s latitude, occluders from neighbours and self-shading. The
+            heatmap highlights overheating-prone façades and the best PV locations.
+          </p>
+        </div>
+        <button
+          onClick={run}
+          disabled={running}
+          className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 transition-colors"
+        >
+          {running ? "Running…" : result ? "Re-run" : "Run analysis"}
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4">
-        <SmallNumField label="Annual GHI (kWh/m²/yr)" value={annualGHI} step={50} min={500} max={3000} onChange={setAnnualGHI} hint="~2150 for Dubai." />
-        <SmallNumField label="Panel efficiency" value={efficiency} step={0.01} min={0.10} max={0.30} onChange={setEfficiency} hint="0.21 = monocrystalline." float />
-        <SmallNumField label="Performance ratio" value={pr} step={0.01} min={0.5} max={0.95} onChange={setPr} hint="Inverter, soiling, temp." float />
-        <SmallNumField label="Roof utilisation" value={roofUtil} step={0.05} min={0} max={1} onChange={setRoofUtil} hint="After MEP / walkways." float />
-        <SmallNumField label="Façade utilisation" value={facadeUtil} step={0.05} min={0} max={1} onChange={setFacadeUtil} hint="After windows / balconies." float />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <SmallNumField label="Panel size (m)" value={panelSize} step={1} min={2} max={20} onChange={setPanelSize} hint="Lower = finer, slower." />
+        <SmallNumField label="Days / year" value={days} step={4} min={4} max={48} onChange={setDays} hint="12 = monthly." />
+        <SmallNumField label="Hours / day" value={hours} step={2} min={4} max={24} onChange={setHours} hint="12 = bi-hourly." />
+        <SmallNumField label="OSM radius (m)" value={contextRadius} step={50} min={100} max={1500} onChange={setContextRadius} />
+      </div>
+
+      {error && <div className="text-[12px] text-red-700 mb-3">{error}</div>}
+
+      {result && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Stat label="Average sun hours / yr" value={`${fmt0(result.averageSunHours)} h`} good={result.averageSunHours > 1500} />
+            <Stat label="Most-exposed panel" value={`${fmt0(result.maxHours)} h`} sub="100% on heatmap" />
+            <Stat label="Sun positions sampled" value={`${result.positionsSampled}`} sub={`${days} days × ${hours} h`} />
+            <Stat label="Façade evaluated" value={`${fmt0(result.totalAreaM2)} m²`} />
+          </div>
+
+          <div className="border border-ink-200 mb-4">
+            <div className="aspect-[16/9] bg-bone-50">
+              <PhysicsScene volumes={volumes} panelValues={result.panelValues} scheme="solar" />
+            </div>
+            <ColorRamp scheme="solar" leftLabel="0 h / yr" rightLabel={`${fmt0(result.maxHours)} h / yr`} />
+          </div>
+
+          <div>
+            <div className="eyebrow text-ink-500 mb-2 text-[10.5px]">By orientation</div>
+            <table className="w-full text-[12px] tabular-nums">
+              <thead>
+                <tr className="border-b border-ink-200">
+                  <th className="text-left py-1 font-medium text-ink-500 text-[10.5px] uppercase tracking-[0.10em]">Orient.</th>
+                  <th className="text-right py-1 font-medium text-ink-500 text-[10.5px] uppercase tracking-[0.10em]">Area m²</th>
+                  <th className="text-right py-1 font-medium text-ink-500 text-[10.5px] uppercase tracking-[0.10em]">Avg h/yr</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.byOrientation.map((o) => (
+                  <tr key={o.name} className="border-b border-ink-100">
+                    <td className="py-1 text-ink-900">{o.name}</td>
+                    <td className="py-1 text-right text-ink-700">{fmt0(o.areaM2)}</td>
+                    <td className="py-1 text-right text-ink-900">{fmt0(o.avgHours)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                Shadow study                                */
+/* -------------------------------------------------------------------------- */
+
+function ShadowStudyCard({
+  volumes,
+  latitude,
+  longitude,
+  customNeighbors,
+  hasGeo,
+}: {
+  volumes: ReturnType<typeof buildMassing>["volumes"];
+  latitude: number;
+  longitude: number;
+  customNeighbors: NonNullable<ReturnType<typeof useProject>["customNeighbors"]>;
+  hasGeo: boolean;
+}) {
+  const today = new Date();
+  const [dateStr, setDateStr] = useState(`${today.getFullYear()}-06-21`); // summer solstice default
+  const [hour, setHour] = useState(12);
+  const [panelSize, setPanelSize] = useState(6);
+  const [contextRadius, setContextRadius] = useState(350);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ShadowResult | null>(null);
+
+  const run = useCallback(async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      if (!hasGeo) throw new Error("Set the project's latitude/longitude in Setup first.");
+      const obstacles: Box[] = [...projectBoxes(volumes)];
+      for (const cn of customNeighbors) obstacles.push(...customNeighborBoxes(cn));
+      const osm = await fetchOsmBuildings(latitude, longitude, contextRadius);
+      for (const b of osm) obstacles.push(osmBuildingBox(b.polygon, b.defaultHeight));
+      const panels = sampleFacadePanels(volumes, panelSize);
+      const date = new Date(`${dateStr}T00:00:00`);
+      const dayOfYear = dayOfYearFromDate(date);
+      await new Promise((r) => setTimeout(r, 0));
+      const r = computeMomentShadow(panels, obstacles, latitude, dayOfYear, hour);
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  }, [volumes, latitude, longitude, customNeighbors, hasGeo, dateStr, hour, panelSize, contextRadius]);
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
+        <div>
+          <h3 className="text-[15px] font-medium text-ink-900">Shadow study · point in time</h3>
+          <p className="text-[12px] text-ink-500 leading-snug max-w-xl mt-1">
+            Pick a date and a solar hour and the heatmap shows which façade panels are
+            sunlit (yellow) vs shaded (navy) at that exact moment, considering all
+            neighbours and the building&apos;s own self-shading.
+          </p>
+        </div>
+        <button
+          onClick={run}
+          disabled={running}
+          className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 transition-colors"
+        >
+          {running ? "Running…" : result ? "Re-run" : "Run analysis"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         <label className="grid gap-1">
-          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Include façades</span>
-          <button
-            onClick={() => setIncludeFacades((v) => !v)}
-            className={`px-2 py-1 text-[11px] uppercase tracking-[0.10em] border ${includeFacades ? "bg-qube-500 text-white border-qube-500" : "border-ink-300 text-ink-700 bg-white"}`}
-          >{includeFacades ? "On" : "Off"}</button>
+          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Date</span>
+          <input
+            type="date"
+            className="cell-input"
+            value={dateStr}
+            onChange={(e) => setDateStr(e.target.value)}
+          />
         </label>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-        <Stat label="Roof PV" value={`${fmt2(result.roof.kWp)} kWp`} sub={`${fmt0(result.roof.usableM2)} m² · ${fmt0(result.roof.annualKWh)} kWh/yr`} />
-        <Stat label="Façade PV" value={`${fmt2(result.facade.kWp)} kWp`} sub={`${fmt0(result.facade.usableM2)} m² · ${fmt0(result.facade.annualKWh)} kWh/yr`} />
-        <Stat label="Total installed" value={`${fmt2(result.totalKWp)} kWp`} sub={`${fmt0(result.totalAnnualKWh)} kWh/yr`} />
-        <Stat
-          label="Demand cover (indic.)"
-          value={fmtPct(coverage)}
-          sub={`vs ${fmt0(indicativeDemand)} kWh/yr (≈80 kWh/m² × GFA)`}
-          good={coverage >= 0.25}
-          bad={coverage > 1}
-        />
-      </div>
-
-      <div className="border border-ink-200 mt-4">
-        <div className="aspect-[16/9] bg-bone-50">
-          <PhysicsScene volumes={volumes} panelsForOrientation={panels} scheme="south-arc" />
+        <label className="grid gap-1">
+          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Solar hour</span>
+          <input
+            type="range"
+            min={4}
+            max={20}
+            step={0.5}
+            value={hour}
+            onChange={(e) => setHour(parseFloat(e.target.value))}
+            className="w-full accent-qube-500"
+          />
+          <span className="text-[11px] text-ink-700 tabular-nums">
+            {Math.floor(hour).toString().padStart(2, "0")}:{Math.round((hour % 1) * 60).toString().padStart(2, "0")}
+          </span>
+        </label>
+        <SmallNumField label="Panel size (m)" value={panelSize} step={1} min={2} max={20} onChange={setPanelSize} />
+        <SmallNumField label="OSM radius (m)" value={contextRadius} step={50} min={100} max={1500} onChange={setContextRadius} />
+        <div className="grid gap-1">
+          <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">Quick presets</span>
+          <div className="flex flex-wrap gap-1">
+            {[
+              { label: "Jun 21", date: "06-21" },
+              { label: "Dec 21", date: "12-21" },
+              { label: "Mar 21", date: "03-21" },
+            ].map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setDateStr(`${today.getFullYear()}-${p.date}`)}
+                className="px-2 py-0.5 text-[10px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 bg-white hover:bg-bone-50"
+              >{p.label}</button>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
-          <span className="inline-block w-3 h-3" style={{ background: "#e7b14a" }} />
-          South arc (PV-eligible)
-          <span className="inline-block w-3 h-3 ml-3" style={{ background: "#b6b1a4" }} />
-          Other orientations
-        </div>
       </div>
 
-      <p className="text-[10.5px] text-ink-500 mt-3 leading-relaxed">
-        Indicative — real yield depends on shading, orientation, mounting, and system losses.
-        For a final figure, run a PVsyst / SAM simulation.
-      </p>
+      {error && <div className="text-[12px] text-red-700 mb-3">{error}</div>}
+
+      {result && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Stat
+              label="Façade in direct sun"
+              value={result.sun ? fmtPct(result.litAreaPct) : "—"}
+              good={result.litAreaPct > 0.4}
+              sub={result.sun ? undefined : "Sun below horizon"}
+            />
+            <Stat label="Sun elevation" value={result.sun ? `${result.sunElevationDeg.toFixed(1)}°` : "—"} />
+            <Stat label="Sun azimuth" value={result.sun ? `${result.sunAzimuthDeg.toFixed(0)}°` : "—"} sub="Clockwise from N" />
+            <Stat label="Façade evaluated" value={`${fmt0(result.totalAreaM2)} m²`} />
+          </div>
+
+          <div className="border border-ink-200">
+            <div className="aspect-[16/9] bg-bone-50">
+              <PhysicsScene volumes={volumes} panelValues={result.panelValues} scheme="shadow" />
+            </div>
+            <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
+              <span className="inline-block w-3 h-3" style={{ background: "#f2c14e" }} />
+              Sunlit
+              <span className="inline-block w-3 h-3 ml-3" style={{ background: "#2c3e6b" }} />
+              Shaded
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -576,14 +760,16 @@ function ColorRamp({
   leftLabel,
   rightLabel,
 }: {
-  scheme: "viridis" | "view";
+  scheme: "viridis" | "view" | "solar";
   leftLabel: string;
   rightLabel: string;
 }) {
   const gradient =
     scheme === "viridis"
       ? "linear-gradient(90deg, #45007e, #3a52a4, #218e8c, #5cb863, #fce824)"
-      : "linear-gradient(90deg, #d92f2f, #e8c734, #4ea84e)";
+      : scheme === "solar"
+        ? "linear-gradient(90deg, #0d1052, #672980, #c94466, #f48c33, #fdee8c)"
+        : "linear-gradient(90deg, #d92f2f, #e8c734, #4ea84e)";
   return (
     <div className="flex items-center gap-3 px-3 py-2 border-t border-ink-200 text-[10.5px] text-ink-700">
       <span className="text-ink-500">{leftLabel}</span>
