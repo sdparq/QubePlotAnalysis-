@@ -3,6 +3,14 @@ import { useEffect, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
 
+const M2_TO_SQFT = 10.7639;
+
+function fmtSqft(m2: number): string {
+  if (!Number.isFinite(m2) || m2 === 0) return "—";
+  const sqft = m2 * M2_TO_SQFT;
+  return `${Math.round(sqft).toLocaleString("en-US")} sqft`;
+}
+
 export default function SetupTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
@@ -23,7 +31,7 @@ export default function SetupTab() {
               {DUBAI_ZONES.map((z) => <option key={z}>{z}</option>)}
             </select>
           </Field>
-          <Field label="Plot area (m²)">
+          <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
             <NumInput value={project.plotArea} onChange={(v) => patch({ plotArea: v })} />
           </Field>
           <Field label="Number of residential floors">
@@ -32,13 +40,13 @@ export default function SetupTab() {
           <Field label="Floor-to-floor height (m)">
             <NumInput value={project.floorHeight} step={0.1} onChange={(v) => patch({ floorHeight: v })} />
           </Field>
-          <Field label="Approx. shafts per unit (m²)">
+          <Field label="Approx. shafts per unit (m²)" hint={`≈ ${fmtSqft(project.shaftPerUnit)}`}>
             <NumInput value={project.shaftPerUnit} step={0.1} onChange={(v) => patch({ shaftPerUnit: v })} />
           </Field>
           <Field label="PRM parking %">
             <NumInput value={project.prmPercent * 100} step={0.5} onChange={(v) => patch({ prmPercent: v / 100 })} suffix="%" />
           </Field>
-          <Field label="Target GFA (m²)">
+          <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
             <NumInput
               value={project.targetGFA ?? 0}
               step={10}
@@ -79,29 +87,16 @@ export default function SetupTab() {
           unlock the In-context Massing view that streams Google Photorealistic 3D Tiles around the plot.
         </p>
       </div>
-
-      <div className="card">
-        <div className="mb-5">
-          <h2 className="section-title">Notes</h2>
-          <p className="section-sub">Free-form observations, issues, conclusions.</p>
-        </div>
-        <textarea
-          className="cell-input min-h-[140px] leading-relaxed"
-          rows={6}
-          value={project.notes}
-          onChange={(e) => patch({ notes: e.target.value })}
-          placeholder="e.g. Travel distance exceeds 61 m max — relocate parking layout..."
-        />
-      </div>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
     <label className="grid gap-2">
       <span className="eyebrow">{label}</span>
       {children}
+      {hint && <span className="text-[10.5px] text-ink-500 tabular-nums">{hint}</span>}
     </label>
   );
 }
