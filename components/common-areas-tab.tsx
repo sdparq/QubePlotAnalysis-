@@ -74,6 +74,21 @@ export default function CommonAreasTab() {
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            <label className="grid gap-1">
+              <span className="eyebrow text-ink-500 text-[10.5px]">Shafts per unit (m²)</span>
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                className="cell-input text-right w-24"
+                value={Number(project.shaftPerUnit.toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0) patch({ shaftPerUnit: n });
+                }}
+                title="Average BUA-only shaft area per residential unit (deducted from interior GFA)"
+              />
+            </label>
             <div className="inline-flex border border-ink-200 bg-bone-50">
               <button
                 onClick={() => !isPctMode || switchToAbsolute()}

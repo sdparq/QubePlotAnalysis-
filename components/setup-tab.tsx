@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
+import type { GfaBreakdown, GfaBreakdownItem, GfaUseCategory } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
 
@@ -10,6 +11,13 @@ function fmtSqft(m2: number): string {
   const sqft = m2 * M2_TO_SQFT;
   return `${Math.round(sqft).toLocaleString("en-US")} sqft`;
 }
+
+const GFA_CATEGORIES: { key: GfaUseCategory; label: string; hint: string }[] = [
+  { key: "residential", label: "Residential", hint: "Apartments, villas, serviced apartments." },
+  { key: "retail", label: "Retail", hint: "Shops, supermarkets, F&B." },
+  { key: "commercial", label: "Commercial / Office", hint: "Offices, co-working, clinics." },
+  { key: "hospitality", label: "Hospitality", hint: "Hotel keys, branded residence." },
+];
 
 export default function SetupTab() {
   const project = useProject();
@@ -39,12 +47,6 @@ export default function SetupTab() {
           </Field>
           <Field label="Floor-to-floor height (m)">
             <NumInput value={project.floorHeight} step={0.1} onChange={(v) => patch({ floorHeight: v })} />
-          </Field>
-          <Field label="Approx. shafts per unit (m²)" hint={`≈ ${fmtSqft(project.shaftPerUnit)}`}>
-            <NumInput value={project.shaftPerUnit} step={0.1} onChange={(v) => patch({ shaftPerUnit: v })} />
-          </Field>
-          <Field label="PRM parking %">
-            <NumInput value={project.prmPercent * 100} step={0.5} onChange={(v) => patch({ prmPercent: v / 100 })} suffix="%" />
           </Field>
           <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
             <NumInput
@@ -87,6 +89,186 @@ export default function SetupTab() {
           unlock the In-context Massing view that streams Google Photorealistic 3D Tiles around the plot.
         </p>
       </div>
+
+      <GfaBreakdownCard project={project} patch={patch} />
+    </div>
+  );
+}
+
+function GfaBreakdownCard({
+  project,
+  patch,
+}: {
+  project: ReturnType<typeof useProject>;
+  patch: (p: Partial<ReturnType<typeof useProject>>) => void;
+}) {
+  const total = project.targetGFA ?? 0;
+  const breakdown: GfaBreakdown = project.gfaBreakdown ?? {};
+
+  function getItem(key: GfaUseCategory): GfaBreakdownItem {
+    return breakdown[key] ?? { mode: "absolute", value: 0 };
+  }
+
+  function setItem(key: GfaUseCategory, partial: Partial<GfaBreakdownItem>) {
+    const next: GfaBreakdown = { ...breakdown };
+    const cur = getItem(key);
+    next[key] = { ...cur, ...partial };
+    patch({ gfaBreakdown: next });
+  }
+
+  function toggleMode(key: GfaUseCategory) {
+    const cur = getItem(key);
+    if (cur.mode === "absolute") {
+      // m² → % (only meaningful when there is a total)
+      const pct = total > 0 ? (cur.value / total) * 100 : 0;
+      setItem(key, { mode: "percent", value: Number(pct.toFixed(2)) });
+    } else {
+      const m2 = (cur.value / 100) * total;
+      setItem(key, { mode: "absolute", value: Number(m2.toFixed(2)) });
+    }
+  }
+
+  function effectiveM2(key: GfaUseCategory): number {
+    const item = getItem(key);
+    return item.mode === "absolute" ? item.value : (item.value / 100) * total;
+  }
+
+  function effectivePct(key: GfaUseCategory): number {
+    const item = getItem(key);
+    if (item.mode === "percent") return item.value;
+    return total > 0 ? (item.value / total) * 100 : 0;
+  }
+
+  const sumM2 = GFA_CATEGORIES.reduce((s, c) => s + effectiveM2(c.key), 0);
+  const sumPct = total > 0 ? (sumM2 / total) * 100 : 0;
+  const mismatch = total > 0 ? Math.abs(sumM2 - total) : 0;
+  const mismatchPct = total > 0 ? mismatch / total : 0;
+
+  function rebalanceTo100() {
+    if (total <= 0) return;
+    // Lock all percent entries that exist; redistribute the rest pro-rata across absolutes.
+    // Simplest: convert everything to absolute scaled so the sum matches the total.
+    if (sumM2 <= 0) return;
+    const factor = total / sumM2;
+    const next: GfaBreakdown = {};
+    for (const c of GFA_CATEGORIES) {
+      const m2 = effectiveM2(c.key);
+      if (m2 <= 0) continue;
+      next[c.key] = { mode: "absolute", value: Number((m2 * factor).toFixed(2)) };
+    }
+    patch({ gfaBreakdown: next });
+  }
+
+  return (
+    <div className="card">
+      <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="section-title">GFA breakdown</h2>
+          <p className="section-sub">
+            Split the Target GFA across uses. Each row can be entered either as an absolute
+            value in m² or as a percentage of the total — the other one is computed.
+          </p>
+        </div>
+        {total > 0 && (
+          <div className="flex items-center gap-3">
+            <div className="text-[11px] text-ink-500">
+              Reference Target GFA:{" "}
+              <strong className="text-ink-900 tabular-nums">
+                {total.toLocaleString("en-US")} m² · {fmtSqft(total)}
+              </strong>
+            </div>
+            {mismatchPct > 0.005 && sumM2 > 0 && (
+              <button
+                onClick={rebalanceTo100}
+                className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
+                title="Scale every row proportionally so the sum equals Target GFA"
+              >
+                Rebalance to 100%
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {total <= 0 && (
+        <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] mb-4 leading-snug">
+          Set a <strong>Target GFA</strong> above to enable the percentage input mode.
+          You can still enter absolute m² per use without it.
+        </div>
+      )}
+
+      <div className="border border-ink-200">
+        <div className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+          <div>Use</div>
+          <div className="text-right">Input</div>
+          <div className="text-center">Mode</div>
+          <div className="text-right">m²</div>
+          <div className="text-right">≈ sqft</div>
+          <div className="text-right">% of total</div>
+        </div>
+        {GFA_CATEGORIES.map((c) => {
+          const item = getItem(c.key);
+          const m2 = effectiveM2(c.key);
+          const pct = effectivePct(c.key);
+          return (
+            <div
+              key={c.key}
+              className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
+            >
+              <div>
+                <div className="text-ink-900">{c.label}</div>
+                <div className="text-[10.5px] text-ink-500 leading-snug">{c.hint}</div>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  step={item.mode === "absolute" ? 10 : 0.5}
+                  min={0}
+                  className="cell-input text-right pr-7"
+                  value={item.value || 0}
+                  onChange={(e) => {
+                    const n = parseFloat(e.target.value);
+                    setItem(c.key, { value: Number.isFinite(n) && n >= 0 ? n : 0 });
+                  }}
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-ink-400 pointer-events-none">
+                  {item.mode === "absolute" ? "m²" : "%"}
+                </span>
+              </div>
+              <div className="text-center">
+                <button
+                  onClick={() => toggleMode(c.key)}
+                  disabled={total <= 0 && item.mode === "absolute"}
+                  title={total <= 0 ? "Set Target GFA to enable percent mode" : "Switch input mode"}
+                  className="px-2 py-0.5 text-[10px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 hover:bg-bone-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  → {item.mode === "absolute" ? "%" : "m²"}
+                </button>
+              </div>
+              <div className="text-right text-ink-900">{m2 > 0 ? m2.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</div>
+              <div className="text-right text-ink-500">{fmtSqft(m2)}</div>
+              <div className="text-right text-ink-700">{pct > 0 ? `${pct.toFixed(1)}%` : "—"}</div>
+            </div>
+          );
+        })}
+        <div className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
+          <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total of uses</div>
+          <div></div>
+          <div></div>
+          <div className="text-right text-qube-800">{sumM2.toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+          <div className="text-right text-qube-700">{fmtSqft(sumM2)}</div>
+          <div className="text-right text-qube-800">{total > 0 ? `${sumPct.toFixed(1)}%` : "—"}</div>
+        </div>
+      </div>
+
+      {total > 0 && mismatchPct > 0.005 && sumM2 > 0 && (
+        <p className="text-[11.5px] mt-3 leading-snug text-amber-900">
+          The categories sum to <strong>{sumM2.toLocaleString("en-US", { maximumFractionDigits: 0 })} m²</strong>{" "}
+          ({sumPct.toFixed(1)}%) but Target GFA is{" "}
+          <strong>{total.toLocaleString("en-US")} m²</strong>. Adjust the rows or click
+          <em> Rebalance to 100%</em> above.
+        </p>
+      )}
     </div>
   );
 }

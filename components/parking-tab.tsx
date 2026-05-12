@@ -6,6 +6,7 @@ import type { OtherUse } from "@/lib/types";
 
 export default function ParkingTab() {
   const project = useProject();
+  const patch = useStore((s) => s.patch);
   const upsertP = useStore((s) => s.upsertParking);
   const removeP = useStore((s) => s.removeParking);
   const upsertU = useStore((s) => s.upsertOtherUse);
@@ -21,7 +22,27 @@ export default function ParkingTab() {
             <h2 className="section-title">Parking inventory</h2>
             <p className="section-sub">Spaces available by level (standard + PRM / accessible).</p>
           </div>
-          <button className="btn btn-primary" onClick={() => upsertP({ id: `pk-${Date.now()}`, name: "New level", standard: 0, prm: 0 })}>+ Add level</button>
+          <div className="flex items-center gap-4">
+            <label className="grid gap-1">
+              <span className="eyebrow text-ink-500 text-[10.5px]">PRM share of required</span>
+              <div className="relative">
+                <input
+                  type="number"
+                  step={0.5}
+                  min={0}
+                  max={100}
+                  className="cell-input text-right pr-9 w-28"
+                  value={Number((project.prmPercent * 100).toFixed(1))}
+                  onChange={(e) => {
+                    const n = parseFloat(e.target.value);
+                    if (Number.isFinite(n) && n >= 0) patch({ prmPercent: n / 100 });
+                  }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-ink-400 pointer-events-none">%</span>
+              </div>
+            </label>
+            <button className="btn btn-primary" onClick={() => upsertP({ id: `pk-${Date.now()}`, name: "New level", standard: 0, prm: 0 })}>+ Add level</button>
+          </div>
         </div>
         <div>
           <table className="tbl w-full table-fixed">

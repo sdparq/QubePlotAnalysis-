@@ -160,6 +160,9 @@ export interface Project {
   maxHeightM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
+  /** Optional split of the Target GFA across uses. Each entry can be entered
+   *  either as an absolute m² value or as a percentage of `targetGFA`. */
+  gfaBreakdown?: GfaBreakdown;
   /** How the user enters common area sizes. "absolute" = m² × floors (default); "percentage" = each row stores a fraction of targetGFA and the m² is derived. */
   commonAreasInputMode?: "absolute" | "percentage";
   /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
@@ -209,6 +212,16 @@ export interface CustomNeighbor {
     offsetZM?: number;
   };
 }
+
+export type GfaUseCategory = "residential" | "retail" | "commercial" | "hospitality";
+
+export interface GfaBreakdownItem {
+  /** "absolute" = `value` is in m². "percent" = `value` is in 0–100. */
+  mode: "absolute" | "percent";
+  value: number;
+}
+
+export type GfaBreakdown = Partial<Record<GfaUseCategory, GfaBreakdownItem>>;
 
 export interface GarbageOverrides {
   generationKgPer100sqmPerDay?: number;  // default 12 (Dubai DM)
