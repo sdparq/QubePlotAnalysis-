@@ -58,17 +58,29 @@ export default function TypologiesTab() {
   }
 
   function update(t: Typology, patch: Partial<Typology>) {
-    const next: Typology = { ...t, ...patch };
-    // If we know the class and the user changed the interior area, derive the
-    // balcony from the class's balcony % (Excel R98 — share of total sellable).
-    // The user can still override the balcony field afterwards.
-    if (detectedClass && patch.internalArea !== undefined) {
+    upsert({ ...t, ...patch });
+  }
+
+  /**
+   * The user enters the TOTAL sellable area (interior + balcony) — that's what
+   * the Excel matrix gives us per typology. We deduct the balcony using the
+   * class's `balconyPctOfNsa` (share of total sellable) and keep interior as
+   * the remainder. If no class is detected we just put everything in interior
+   * and leave balcony at 0 — the user can then override.
+   */
+  function setTotal(t: Typology, totalM2: number) {
+    if (!Number.isFinite(totalM2) || totalM2 < 0) totalM2 = 0;
+    let balcony = t.balconyArea;
+    let interior = t.internalArea;
+    if (detectedClass) {
       const share = library[detectedClass].balconyPctOfNsa;
-      if (share > 0 && share < 1 && next.internalArea > 0) {
-        next.balconyArea = Number(((next.internalArea * share) / (1 - share)).toFixed(1));
-      }
+      balcony = Number((totalM2 * share).toFixed(1));
+      interior = Number((totalM2 - balcony).toFixed(1));
+    } else {
+      interior = totalM2;
+      balcony = 0;
     }
-    upsert(next);
+    upsert({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
   /**
@@ -159,9 +171,11 @@ export default function TypologiesTab() {
               >Apply class {detectedClass} mix</button>
               <p className="text-[10.5px] text-ink-500 leading-snug">
                 Creates one typology per non-zero category using the class&apos;s
-                <strong> average</strong> sellable area. Editing <em>Interior</em> below
-                auto-recomputes <em>Balcony</em> at <strong>{(library[detectedClass].balconyPctOfNsa * 100).toFixed(1)}%</strong> of total
-                sellable (class {detectedClass} value from the matrix).
+                <strong> average</strong> sellable area. Below, edit <em>Total (m²)</em>
+                and the balcony is auto-deducted at{" "}
+                <strong>{(library[detectedClass].balconyPctOfNsa * 100).toFixed(1)}%</strong>{" "}
+                of total sellable (class {detectedClass} from the matrix).
+                Interior = Total − Balcony.
               </p>
             </div>
           </div>
@@ -195,16 +209,18 @@ export default function TypologiesTab() {
                 <tr>
                   <th>Name</th>
                   <th>Category</th>
-                  <th className="text-right">Interior (m²)</th>
-                  <th className="text-right">Balcony (m²)</th>
                   <th className="text-right">Total (m²)</th>
+                  <th className="text-right">Balcony (m²){detectedClass && ` · ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
+                  <th className="text-right">Interior (m²)</th>
                   <th className="text-right">Occupancy</th>
                   <th className="text-right">Parking / unit</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {project.typologies.map((t) => (
+                {project.typologies.map((t) => {
+                  const total = t.internalArea + t.balconyArea;
+                  return (
                   <tr key={t.id}>
                     <td className="cell-edit">
                       <input className="cell-input" value={t.name} onChange={(e) => update(t, { name: e.target.value })} />
@@ -222,14 +238,33 @@ export default function TypologiesTab() {
                       </select>
                     </td>
                     <td className="cell-edit">
-                      <input type="number" step={0.01} className="cell-input text-right"
-                        value={t.internalArea} onChange={(e) => update(t, { internalArea: parseFloat(e.target.value) || 0 })} />
+                      <input
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        className="cell-input text-right"
+                        value={Number(total.toFixed(2))}
+                        onChange={(e) => setTotal(t, parseFloat(e.target.value) || 0)}
+                        title="Total sellable (interior + balcony). Editing this auto-deducts balcony from the class %."
+                      />
                     </td>
                     <td className="cell-edit">
-                      <input type="number" step={0.01} className="cell-input text-right"
-                        value={t.balconyArea} onChange={(e) => update(t, { balconyArea: parseFloat(e.target.value) || 0 })} />
+                      <input
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        className="cell-input text-right"
+                        value={t.balconyArea}
+                        onChange={(e) => {
+                          const b = Math.max(0, parseFloat(e.target.value) || 0);
+                          // Editing balcony directly keeps Total constant by updating Interior.
+                          const newInterior = Math.max(0, total - b);
+                          update(t, { balconyArea: Number(b.toFixed(2)), internalArea: Number(newInterior.toFixed(2)) });
+                        }}
+                        title="Auto-deducted from Total at the class %. Edit to override."
+                      />
                     </td>
-                    <td className="text-right">{(t.internalArea + t.balconyArea).toFixed(2)}</td>
+                    <td className="text-right text-ink-700 tabular-nums">{t.internalArea.toFixed(2)}</td>
                     <td className="cell-edit">
                       <input type="number" step={0.1} className="cell-input text-right"
                         value={t.occupancy} onChange={(e) => update(t, { occupancy: parseFloat(e.target.value) || 0 })} />
@@ -242,7 +277,8 @@ export default function TypologiesTab() {
                       <button className="btn btn-danger btn-xs" onClick={() => { if (confirm(`Delete ${t.name}?`)) remove(t.id); }}>Delete</button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
