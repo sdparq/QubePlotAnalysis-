@@ -171,11 +171,10 @@ export default function TypologiesTab() {
               >Apply class {detectedClass} mix</button>
               <p className="text-[10.5px] text-ink-500 leading-snug">
                 Creates one typology per non-zero category using the class&apos;s
-                <strong> average</strong> sellable area. Below, edit <em>Total (m²)</em>
+                <strong> average</strong> sellable area. Below, edit <em>Total area</em>
                 and the balcony is auto-deducted at{" "}
                 <strong>{(library[detectedClass].balconyPctOfNsa * 100).toFixed(1)}%</strong>{" "}
-                of total sellable (class {detectedClass} from the matrix).
-                Interior = Total − Balcony.
+                of total (class {detectedClass} from the matrix).
               </p>
             </div>
           </div>
@@ -198,9 +197,8 @@ export default function TypologiesTab() {
               <colgroup>
                 <col />
                 <col style={{ width: 110 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 80 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 110 }} />
                 <col style={{ width: 90 }} />
                 <col style={{ width: 100 }} />
                 <col style={{ width: 80 }} />
@@ -209,9 +207,8 @@ export default function TypologiesTab() {
                 <tr>
                   <th>Name</th>
                   <th>Category</th>
-                  <th className="text-right">Total (m²)</th>
+                  <th className="text-right">Total area (m²)</th>
                   <th className="text-right">Balcony (m²){detectedClass && ` · ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
-                  <th className="text-right">Interior (m²)</th>
                   <th className="text-right">Occupancy</th>
                   <th className="text-right">Parking / unit</th>
                   <th></th>
@@ -264,7 +261,6 @@ export default function TypologiesTab() {
                         title="Auto-deducted from Total at the class %. Edit to override."
                       />
                     </td>
-                    <td className="text-right text-ink-700 tabular-nums">{t.internalArea.toFixed(2)}</td>
                     <td className="cell-edit">
                       <input type="number" step={0.1} className="cell-input text-right"
                         value={t.occupancy} onChange={(e) => update(t, { occupancy: parseFloat(e.target.value) || 0 })} />
