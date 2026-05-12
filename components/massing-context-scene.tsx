@@ -415,8 +415,19 @@ export default function MassingContextScene(props: ContextSceneProps) {
                 receiveShadow
               >
                 <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-                <meshStandardMaterial color="#647d57" roughness={0.55} metalness={0.1} />
-                <Edges color="#33422e" threshold={1} />
+                {(() => {
+                  const c = colourForVolumeKind(v.kind);
+                  return (
+                    <meshStandardMaterial
+                      color={c.fill}
+                      roughness={0.55}
+                      metalness={0.1}
+                      transparent={c.opacity < 1}
+                      opacity={c.opacity}
+                    />
+                  );
+                })()}
+                <Edges color={colourForVolumeKind(v.kind).edge} threshold={1} />
               </mesh>
             );
           })}
@@ -1097,5 +1108,19 @@ function parseOsm(elements: OsmElement[], originLat: number, originLng: number):
     });
   }
   return buildings;
+}
+
+function colourForVolumeKind(kind?: "tower" | "ground" | "podium" | "basement") {
+  switch (kind) {
+    case "ground":
+      return { fill: "#8a9a76", edge: "#3a4a30", opacity: 1 };
+    case "podium":
+      return { fill: "#a3b08a", edge: "#3a4a30", opacity: 1 };
+    case "basement":
+      return { fill: "#bdb9ad", edge: "#5a564c", opacity: 0.6 };
+    case "tower":
+    default:
+      return { fill: "#647d57", edge: "#33422e", opacity: 1 };
+  }
 }
 

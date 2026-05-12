@@ -26,6 +26,9 @@ export interface Volume {
   hole?: Point[];
   fromY: number;
   toY: number;
+  /** Optional tag — lets the renderer colour ground / podium / basement blocks
+   *  differently from the main tower. Defaults to "tower" when omitted. */
+  kind?: "tower" | "ground" | "podium" | "basement";
 }
 
 export interface MassingResult {

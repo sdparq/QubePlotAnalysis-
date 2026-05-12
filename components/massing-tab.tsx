@@ -93,7 +93,16 @@ export default function MassingTab() {
   const programFloorArea = project.numFloors > 0 ? program.totalGFABuilding / project.numFloors : 0;
   const effFloors = project.massingFloors ?? project.numFloors;
   const effFloorArea = project.massingFloorArea ?? programFloorArea;
-  const buildingHeight = effFloors * project.floorHeight;
+
+  // Floor breakdown — ground / podium / basement heights stack onto the tower.
+  const groundH = (project.ground?.count ?? 0) * (project.ground?.heightM ?? 0);
+  const podiumCount = project.podium?.count ?? 0;
+  const podiumH = podiumCount * (project.podium?.heightM ?? 0);
+  const basementCount = project.basements?.count ?? 0;
+  const basementH = basementCount * (project.basements?.heightM ?? 0);
+  const baseOffset = groundH + podiumH; // tower starts above the podium
+  const towerHeight = effFloors * project.floorHeight;
+  const buildingHeight = baseOffset + towerHeight;
 
   // Shape preset + parameters with sensible defaults
   const shape: MassingShape = project.massingShape ?? "block";
@@ -159,6 +168,34 @@ export default function MassingTab() {
   );
 
   const totalVolumeGFA = massing.totalGFA;
+
+  // Combine the tower (massing.volumes) with the breakdown extras —
+  //   - basements: extruded down from Y=0 using the plot polygon
+  //   - ground:    full buildable polygon at the base
+  //   - podium:    full buildable polygon on top of the ground floor
+  // The tower volumes returned by `buildMassing()` are shifted up by `baseOffset`
+  // so they sit on the podium.
+  const sceneVolumes = useMemo(() => {
+    const out: typeof massing.volumes = [];
+    if (basementH > 0 && plotPoly.length >= 3) {
+      out.push({ polygon: plotPoly, fromY: -basementH, toY: 0, kind: "basement" });
+    }
+    if (groundH > 0 && buildablePoly.length >= 3) {
+      out.push({ polygon: buildablePoly, fromY: 0, toY: groundH, kind: "ground" });
+    }
+    if (podiumH > 0 && buildablePoly.length >= 3) {
+      out.push({ polygon: buildablePoly, fromY: groundH, toY: groundH + podiumH, kind: "podium" });
+    }
+    for (const v of massing.volumes) {
+      out.push({
+        ...v,
+        fromY: v.fromY + baseOffset,
+        toY: v.toY + baseOffset,
+        kind: v.kind ?? "tower",
+      });
+    }
+    return out;
+  }, [massing.volumes, baseOffset, basementH, groundH, podiumH, plotPoly, buildablePoly]);
 
   // Variants
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -299,7 +336,7 @@ export default function MassingTab() {
                 <MassingContextScene
                   plot={plotPoly}
                   buildable={buildablePoly}
-                  volumes={massing.volumes}
+                  volumes={sceneVolumes}
                   primaryFootprint={massing.primaryFootprint}
                   floorHeight={project.floorHeight}
                   edgeColors={edgeColors}
@@ -389,7 +426,7 @@ export default function MassingTab() {
                 <MassingScene
                   plot={plotPoly}
                   buildable={buildablePoly}
-                  volumes={massing.volumes}
+                  volumes={sceneVolumes}
                   primaryFootprint={massing.primaryFootprint}
                   floorHeight={project.floorHeight}
                   showFrontMarker={mode === "rectangular"}
@@ -556,7 +593,25 @@ export default function MassingTab() {
               <span className="inline-block w-3 h-3 bg-[#bccab0] ml-3" />
               Buildable
               <span className="inline-block w-3 h-3 bg-[#647d57] ml-3" />
-              Building
+              Tower
+              {(groundH > 0) && (
+                <>
+                  <span className="inline-block w-3 h-3 bg-[#8a9a76] ml-3" />
+                  Ground
+                </>
+              )}
+              {(podiumH > 0) && (
+                <>
+                  <span className="inline-block w-3 h-3 bg-[#a3b08a] ml-3" />
+                  Podium
+                </>
+              )}
+              {(basementH > 0) && (
+                <>
+                  <span className="inline-block w-3 h-3 bg-[#bdb9ad] ml-3" />
+                  Basement
+                </>
+              )}
             </div>
           </div>
         </div>

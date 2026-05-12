@@ -135,6 +135,7 @@ export default function MassingScene(props: SceneProps) {
         const shape = volumeShapes[i];
         const depth = v.toY - v.fromY;
         if (!shape || depth <= 0) return null;
+        const colours = colourForKind(v.kind);
         return (
           <mesh
             key={i}
@@ -144,8 +145,14 @@ export default function MassingScene(props: SceneProps) {
             receiveShadow
           >
             <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-            <meshStandardMaterial color="#647d57" roughness={0.6} metalness={0.1} />
-            <Edges color="#33422e" threshold={1} />
+            <meshStandardMaterial
+              color={colours.fill}
+              roughness={0.6}
+              metalness={0.1}
+              transparent={colours.opacity < 1}
+              opacity={colours.opacity}
+            />
+            <Edges color={colours.edge} threshold={1} />
           </mesh>
         );
       })}
@@ -246,4 +253,18 @@ function FrontMarker({ plot }: { plot: Point[] }) {
       <meshBasicMaterial color="#647d57" />
     </mesh>
   );
+}
+
+function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {
+  switch (kind) {
+    case "ground":
+      return { fill: "#8a9a76", edge: "#3a4a30", opacity: 1 };
+    case "podium":
+      return { fill: "#a3b08a", edge: "#3a4a30", opacity: 1 };
+    case "basement":
+      return { fill: "#bdb9ad", edge: "#5a564c", opacity: 0.6 };
+    case "tower":
+    default:
+      return { fill: "#647d57", edge: "#33422e", opacity: 1 };
+  }
 }
