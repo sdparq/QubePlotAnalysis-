@@ -58,25 +58,37 @@ export default function TypologiesTab() {
   }
 
   function update(t: Typology, patch: Partial<Typology>) {
-    upsert({ ...t, ...patch });
+    const next: Typology = { ...t, ...patch };
+    // If we know the class and the user changed the interior area, derive the
+    // balcony from the class's balcony % (Excel R98 — share of total sellable).
+    // The user can still override the balcony field afterwards.
+    if (detectedClass && patch.internalArea !== undefined) {
+      const share = library[detectedClass].balconyPctOfNsa;
+      if (share > 0 && share < 1 && next.internalArea > 0) {
+        next.balconyArea = Number(((next.internalArea * share) / (1 - share)).toFixed(1));
+      }
+    }
+    upsert(next);
   }
 
   /**
    * Create one typology per non-zero category in the detected class.
-   * Areas come from the class's "min" average sellable (SqFt → m²), split
-   * between interior and balcony using `balconyPctOfNsa`.
+   * Areas come from the class's average sellable (mid-range, SqFt → m²),
+   * split between interior and balcony using `balconyPctOfNsa`. Iteration
+   * order follows TYPOLOGY_KEYS so Studio is first.
    */
   function applyClassMix(letter: ZoneClass) {
     const row = library[letter];
     const balconyShare = row.balconyPctOfNsa;
     const created: Typology[] = [];
-    for (const key of Object.keys(row.typologyMix) as TypologyKey[]) {
+    for (const key of (Object.keys(row.typologyMix) as TypologyKey[])) {
       const pct = row.typologyMix[key];
       if (pct < 0.005) continue;
       const cat = CATEGORY_FOR_TYPOLOGY_KEY[key];
       if (!cat) continue;
-      const [minSqft] = row.avgAreaSqft[key];
-      const totalM2 = minSqft / SQFT_PER_M2;
+      const [lo, hi] = row.avgAreaSqft[key];
+      const avgSqft = hi > 0 ? (lo + hi) / 2 : lo;
+      const totalM2 = avgSqft / SQFT_PER_M2;
       if (totalM2 <= 0) continue;
       const balconyM2 = totalM2 * balconyShare;
       const interiorM2 = totalM2 - balconyM2;
@@ -99,7 +111,6 @@ export default function TypologiesTab() {
         `Replace the existing ${project.typologies.length} typology(ies) with ${created.length} new ones from class ${letter}? The Program matrix will be cleared.`,
       );
       if (!ok) return;
-      // Remove existing ones first.
       for (const t of [...project.typologies]) remove(t.id);
     }
     for (const t of created) upsert(t);
@@ -125,7 +136,6 @@ export default function TypologiesTab() {
                 <tbody>
                   {(Object.keys(library[detectedClass].typologyMix) as TypologyKey[])
                     .filter((k) => library[detectedClass].typologyMix[k] > 0.001)
-                    .sort((a, b) => library[detectedClass].typologyMix[b] - library[detectedClass].typologyMix[a])
                     .map((k) => {
                       const pct = library[detectedClass].typologyMix[k];
                       const [lo, hi] = library[detectedClass].avgAreaSqft[k];
@@ -148,9 +158,10 @@ export default function TypologiesTab() {
                 onClick={() => applyClassMix(detectedClass)}
               >Apply class {detectedClass} mix</button>
               <p className="text-[10.5px] text-ink-500 leading-snug">
-                Creates one typology per non-zero category using the class&apos;s average
-                areas. Edit freely below — the percentages above are a starting point, not a
-                rule.
+                Creates one typology per non-zero category using the class&apos;s
+                <strong> average</strong> sellable area. Editing <em>Interior</em> below
+                auto-recomputes <em>Balcony</em> at <strong>{(library[detectedClass].balconyPctOfNsa * 100).toFixed(1)}%</strong> of total
+                sellable (class {detectedClass} value from the matrix).
               </p>
             </div>
           </div>

@@ -142,12 +142,11 @@ function DetectedClassCard({
   library: ReturnType<typeof useZoneLibrary>["library"];
 }) {
   const row = library[letter];
+  // Natural typology order so Studio is shown first.
   const mixEntries = TYPOLOGY_KEYS
     .map((k) => ({ key: k, pct: row.typologyMix[k] }))
-    .filter((m) => m.pct > 0.001)
-    .sort((a, b) => b.pct - a.pct);
+    .filter((m) => m.pct > 0.001);
   const summary = mixEntries
-    .slice(0, 5)
     .map((m) => `${(m.pct * 100).toFixed(0)}% ${TYPOLOGY_LABELS[m.key]}`)
     .join(" · ");
   return (
