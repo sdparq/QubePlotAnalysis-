@@ -1,8 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
 import type { FloorSection, GfaBreakdown, GfaBreakdownItem, GfaUseCategory } from "@/lib/types";
+import { useZoneLibrary } from "@/lib/use-zone-library";
+import {
+  ALL_CLASS_LETTERS,
+  TYPOLOGY_KEYS,
+  TYPOLOGY_LABELS,
+  allZoneNames,
+  classForZone,
+  type ZoneClass,
+  type TypologyKey,
+} from "@/lib/zone-classes";
 
 interface FloorSectionDef {
   key: "basements" | "ground" | "podium" | "typeFloors";
@@ -37,6 +47,20 @@ const GFA_CATEGORIES: { key: GfaUseCategory; label: string; hint: string }[] = [
 export default function SetupTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
+  const { library } = useZoneLibrary();
+
+  // Union of legacy DUBAI_ZONES + every zone known to the class library, dedup.
+  const zoneOptions = useMemo(() => {
+    const set = new Set<string>([...DUBAI_ZONES, ...allZoneNames(library)]);
+    const arr = Array.from(set);
+    arr.sort((a, b) => a.localeCompare(b));
+    return arr;
+  }, [library]);
+
+  const detectedClass: ZoneClass | null = useMemo(
+    () => classForZone(project.zone, library),
+    [project.zone, library],
+  );
 
   return (
     <div className="grid gap-6">
@@ -49,9 +73,9 @@ export default function SetupTab() {
           <Field label="Project name">
             <input className="cell-input" value={project.name} onChange={(e) => patch({ name: e.target.value })} />
           </Field>
-          <Field label="Dubai zone">
+          <Field label="Dubai zone" hint={detectedClass ? `Class ${detectedClass} · ${library[detectedClass].name}` : "Unknown class"}>
             <select className="cell-input" value={project.zone} onChange={(e) => patch({ zone: e.target.value })}>
-              {DUBAI_ZONES.map((z) => <option key={z}>{z}</option>)}
+              {zoneOptions.map((z) => <option key={z}>{z}</option>)}
             </select>
           </Field>
           <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
@@ -99,9 +123,52 @@ export default function SetupTab() {
         </p>
       </div>
 
+      {detectedClass && (
+        <DetectedClassCard letter={detectedClass} library={library} />
+      )}
+
       <FloorBreakdownCard project={project} patch={patch} />
 
       <GfaBreakdownCard project={project} patch={patch} />
+    </div>
+  );
+}
+
+function DetectedClassCard({
+  letter,
+  library,
+}: {
+  letter: ZoneClass;
+  library: ReturnType<typeof useZoneLibrary>["library"];
+}) {
+  const row = library[letter];
+  const mixEntries = TYPOLOGY_KEYS
+    .map((k) => ({ key: k, pct: row.typologyMix[k] }))
+    .filter((m) => m.pct > 0.001)
+    .sort((a, b) => b.pct - a.pct);
+  const summary = mixEntries
+    .slice(0, 5)
+    .map((m) => `${(m.pct * 100).toFixed(0)}% ${TYPOLOGY_LABELS[m.key]}`)
+    .join(" · ");
+  return (
+    <div className="card bg-qube-50 border-qube-200">
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="text-[42px] font-light text-qube-700 tabular-nums leading-none">{letter}</div>
+        <div className="flex-1 min-w-[280px]">
+          <div className="eyebrow text-qube-800 text-[10px]">Detected class</div>
+          <div className="text-[16px] font-medium text-ink-900 mt-0.5">{row.name}</div>
+          <p className="text-[12px] text-ink-700 leading-snug mt-1">{row.description}</p>
+          <div className="mt-3">
+            <div className="eyebrow text-ink-500 text-[10px]">Recommended unit mix</div>
+            <div className="text-[12.5px] text-ink-900 tabular-nums mt-1">{summary}</div>
+            <div className="text-[10.5px] text-ink-500 mt-1.5">
+              You can apply this mix in <strong>Typologies</strong> · floor heights in this
+              class: ground {row.floorHeights.ground} m, podium {row.floorHeights.podium} m,
+              typical {row.floorHeights.typical} m · parking {row.parkingAreaPerCarSqft} sqft/car.
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

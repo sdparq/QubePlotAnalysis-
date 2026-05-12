@@ -1,6 +1,14 @@
 "use client";
+import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { Typology, UnitCategory } from "@/lib/types";
+import { useZoneLibrary } from "@/lib/use-zone-library";
+import {
+  classForZone,
+  TYPOLOGY_LABELS,
+  type TypologyKey,
+  type ZoneClass,
+} from "@/lib/zone-classes";
 
 const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penthouse"];
 
@@ -11,10 +19,31 @@ const DEFAULT_OCCUPANCY: Record<UnitCategory, number> = {
   Studio: 1.5, "1BR": 2, "2BR": 3, "3BR": 5, "4BR": 6, Penthouse: 6,
 };
 
+const SQFT_PER_M2 = 10.7639;
+
+// Map class-library keys to the project's existing UnitCategory enum.
+const CATEGORY_FOR_TYPOLOGY_KEY: Record<TypologyKey, UnitCategory | null> = {
+  studio: "Studio",
+  "1BR": "1BR",
+  "2BR": "2BR",
+  "3BR": "3BR",
+  "4BR": "4BR",
+  "5BR": null,    // not modelled today
+  "6BR": null,
+  "7BR": null,
+  penthouse: "Penthouse",
+};
+
 export default function TypologiesTab() {
   const project = useProject();
   const upsert = useStore((s) => s.upsertTypology);
   const remove = useStore((s) => s.removeTypology);
+  const { library } = useZoneLibrary();
+
+  const detectedClass: ZoneClass | null = useMemo(
+    () => classForZone(project.zone, library),
+    [project.zone, library],
+  );
 
   function addNew() {
     upsert({
@@ -32,8 +61,102 @@ export default function TypologiesTab() {
     upsert({ ...t, ...patch });
   }
 
+  /**
+   * Create one typology per non-zero category in the detected class.
+   * Areas come from the class's "min" average sellable (SqFt → m²), split
+   * between interior and balcony using `balconyPctOfNsa`.
+   */
+  function applyClassMix(letter: ZoneClass) {
+    const row = library[letter];
+    const balconyShare = row.balconyPctOfNsa;
+    const created: Typology[] = [];
+    for (const key of Object.keys(row.typologyMix) as TypologyKey[]) {
+      const pct = row.typologyMix[key];
+      if (pct < 0.005) continue;
+      const cat = CATEGORY_FOR_TYPOLOGY_KEY[key];
+      if (!cat) continue;
+      const [minSqft] = row.avgAreaSqft[key];
+      const totalM2 = minSqft / SQFT_PER_M2;
+      if (totalM2 <= 0) continue;
+      const balconyM2 = totalM2 * balconyShare;
+      const interiorM2 = totalM2 - balconyM2;
+      created.push({
+        id: `t-${key}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: `${TYPOLOGY_LABELS[key]} · class ${letter}`,
+        category: cat,
+        internalArea: Number(interiorM2.toFixed(1)),
+        balconyArea: Number(balconyM2.toFixed(1)),
+        occupancy: DEFAULT_OCCUPANCY[cat],
+        parkingPerUnit: DEFAULT_PARKING[cat],
+      });
+    }
+    if (created.length === 0) {
+      alert("This class has no positive mix entries to apply.");
+      return;
+    }
+    if (project.typologies.length > 0) {
+      const ok = confirm(
+        `Replace the existing ${project.typologies.length} typology(ies) with ${created.length} new ones from class ${letter}? The Program matrix will be cleared.`,
+      );
+      if (!ok) return;
+      // Remove existing ones first.
+      for (const t of [...project.typologies]) remove(t.id);
+    }
+    for (const t of created) upsert(t);
+  }
+
   return (
     <div className="grid gap-6">
+      {detectedClass && (
+        <div className="card bg-qube-50 border-qube-200">
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="text-[36px] font-light text-qube-700 tabular-nums leading-none">{detectedClass}</div>
+            <div className="flex-1 min-w-[260px]">
+              <div className="eyebrow text-qube-800 text-[10px]">Suggested mix for this zone</div>
+              <div className="text-[14px] font-medium text-ink-900 mt-0.5">{library[detectedClass].name}</div>
+              <table className="w-full mt-3 text-[12px] tabular-nums">
+                <thead>
+                  <tr className="text-[10.5px] uppercase tracking-[0.08em] text-ink-500">
+                    <th className="text-left py-1 font-medium">Typology</th>
+                    <th className="text-right py-1 font-medium">% of units</th>
+                    <th className="text-right py-1 font-medium">Avg area (min–max)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(Object.keys(library[detectedClass].typologyMix) as TypologyKey[])
+                    .filter((k) => library[detectedClass].typologyMix[k] > 0.001)
+                    .sort((a, b) => library[detectedClass].typologyMix[b] - library[detectedClass].typologyMix[a])
+                    .map((k) => {
+                      const pct = library[detectedClass].typologyMix[k];
+                      const [lo, hi] = library[detectedClass].avgAreaSqft[k];
+                      return (
+                        <tr key={k} className="border-t border-qube-200/60">
+                          <td className="py-1 text-ink-900">{TYPOLOGY_LABELS[k]}</td>
+                          <td className="text-right text-ink-900">{(pct * 100).toFixed(1)}%</td>
+                          <td className="text-right text-ink-600">
+                            {lo === hi ? `${lo.toLocaleString("en-US")}` : `${lo.toLocaleString("en-US")}–${hi.toLocaleString("en-US")}`} sqft
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid gap-2 min-w-[180px]">
+              <button
+                className="btn btn-primary"
+                onClick={() => applyClassMix(detectedClass)}
+              >Apply class {detectedClass} mix</button>
+              <p className="text-[10.5px] text-ink-500 leading-snug">
+                Creates one typology per non-zero category using the class&apos;s average
+                areas. Edit freely below — the percentages above are a starting point, not a
+                rule.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>

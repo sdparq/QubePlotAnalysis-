@@ -13,9 +13,11 @@ import MassingTab from "@/components/massing-tab";
 import PhysicsTab from "@/components/physics-tab";
 import EconomicTab from "@/components/economic-tab";
 import ResultsTab from "@/components/results-tab";
+import ZonesTab from "@/components/zones-tab";
 import HeaderBar from "@/components/header-bar";
 
 const TABS = [
+  { id: "zones", num: "L", label: "Class Library" },
   { id: "plot", num: "00", label: "Plot" },
   { id: "setup", num: "01", label: "Setup" },
   { id: "typologies", num: "02", label: "Typologies" },
@@ -68,6 +70,7 @@ export default function Page() {
       </nav>
       <main className="flex-1 w-full">
         <div className="max-w-7xl mx-auto px-6 py-8 min-w-0">
+          {tab === "zones" && <ZonesTab />}
           {tab === "plot" && <PlotTab />}
           {tab === "setup" && <SetupTab />}
           {tab === "typologies" && <TypologiesTab />}
