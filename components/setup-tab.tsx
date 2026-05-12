@@ -2,7 +2,22 @@
 import { useEffect, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { DUBAI_ZONES } from "@/lib/standards/dubai";
-import type { GfaBreakdown, GfaBreakdownItem, GfaUseCategory } from "@/lib/types";
+import type { FloorSection, GfaBreakdown, GfaBreakdownItem, GfaUseCategory } from "@/lib/types";
+
+interface FloorSectionDef {
+  key: "basements" | "ground" | "podium" | "typeFloors";
+  label: string;
+  defaultCount: number;
+  defaultHeight: number;
+  hint: string;
+}
+
+const FLOOR_SECTIONS: FloorSectionDef[] = [
+  { key: "basements", label: "Basements", defaultCount: 0, defaultHeight: 3.0, hint: "Below ground — usually parking, MEP." },
+  { key: "ground", label: "Ground floor", defaultCount: 1, defaultHeight: 4.5, hint: "Lobby, retail, drop-off." },
+  { key: "podium", label: "Podium", defaultCount: 0, defaultHeight: 4.0, hint: "Amenities, parking, retail above ground." },
+  { key: "typeFloors", label: "Type floors", defaultCount: 8, defaultHeight: 3.2, hint: "Residential typical floors — drive the Program matrix." },
+];
 
 const M2_TO_SQFT = 10.7639;
 
@@ -41,12 +56,6 @@ export default function SetupTab() {
           </Field>
           <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
             <NumInput value={project.plotArea} onChange={(v) => patch({ plotArea: v })} />
-          </Field>
-          <Field label="Number of residential floors">
-            <NumInput value={project.numFloors} onChange={(v) => patch({ numFloors: Math.max(1, Math.round(v)) })} />
-          </Field>
-          <Field label="Floor-to-floor height (m)">
-            <NumInput value={project.floorHeight} step={0.1} onChange={(v) => patch({ floorHeight: v })} />
           </Field>
           <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
             <NumInput
@@ -90,7 +99,130 @@ export default function SetupTab() {
         </p>
       </div>
 
+      <FloorBreakdownCard project={project} patch={patch} />
+
       <GfaBreakdownCard project={project} patch={patch} />
+    </div>
+  );
+}
+
+function FloorBreakdownCard({
+  project,
+  patch,
+}: {
+  project: ReturnType<typeof useProject>;
+  patch: (p: Partial<ReturnType<typeof useProject>>) => void;
+}) {
+  function get(key: FloorSectionDef["key"], def: FloorSectionDef): FloorSection {
+    const stored = project[key] as FloorSection | undefined;
+    if (stored) return stored;
+    // Defaults — for typeFloors fall back to the legacy fields so old projects
+    // keep their values.
+    if (key === "typeFloors") {
+      return { count: project.numFloors || def.defaultCount, heightM: project.floorHeight || def.defaultHeight };
+    }
+    return { count: def.defaultCount, heightM: def.defaultHeight };
+  }
+
+  function setSection(key: FloorSectionDef["key"], partial: Partial<FloorSection>) {
+    const def = FLOOR_SECTIONS.find((s) => s.key === key)!;
+    const cur = get(key, def);
+    const next: FloorSection = {
+      count: Math.max(0, Math.round(partial.count ?? cur.count)),
+      heightM: Math.max(0, partial.heightM ?? cur.heightM),
+    };
+    const updates: Partial<typeof project> = { [key]: next };
+    // Keep legacy fields in sync — typeFloors drives numFloors / floorHeight so
+    // the Program matrix and downstream calcs keep working.
+    if (key === "typeFloors") {
+      updates.numFloors = Math.max(1, next.count);
+      updates.floorHeight = next.heightM > 0 ? next.heightM : project.floorHeight;
+    }
+    patch(updates);
+  }
+
+  const totalAboveGround = FLOOR_SECTIONS
+    .filter((s) => s.key !== "basements")
+    .reduce((sum, s) => sum + get(s.key, s).count, 0);
+  const totalHeightAbove = FLOOR_SECTIONS
+    .filter((s) => s.key !== "basements")
+    .reduce((sum, s) => {
+      const sec = get(s.key, s);
+      return sum + sec.count * sec.heightM;
+    }, 0);
+  const basementSec = get("basements", FLOOR_SECTIONS[0]);
+
+  return (
+    <div className="card">
+      <div className="mb-5">
+        <h2 className="section-title">Floor breakdown</h2>
+        <p className="section-sub">
+          Tell the app how the building is stratified. Each section has its own number of
+          floors and floor-to-floor height. Type floors drive the residential Program matrix.
+        </p>
+      </div>
+
+      <div className="border border-ink-200">
+        <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+          <div>Section</div>
+          <div className="text-right">Floors</div>
+          <div className="text-right">Height (m)</div>
+          <div className="text-right">Total height</div>
+        </div>
+        {FLOOR_SECTIONS.map((def) => {
+          const sec = get(def.key, def);
+          const totalH = sec.count * sec.heightM;
+          return (
+            <div
+              key={def.key}
+              className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
+            >
+              <div>
+                <div className="text-ink-900">{def.label}</div>
+                <div className="text-[10.5px] text-ink-500 leading-snug">{def.hint}</div>
+              </div>
+              <input
+                type="number"
+                step={1}
+                min={0}
+                className="cell-input text-right"
+                value={sec.count}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  setSection(def.key, { count: Number.isFinite(n) ? n : 0 });
+                }}
+              />
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                className="cell-input text-right"
+                value={Number(sec.heightM.toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  setSection(def.key, { heightM: Number.isFinite(n) ? n : 0 });
+                }}
+              />
+              <div className="text-right text-ink-900">
+                {totalH > 0 ? `${totalH.toFixed(1)} m` : "—"}
+              </div>
+            </div>
+          );
+        })}
+        <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
+          <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">
+            Above ground (visible building)
+          </div>
+          <div className="text-right text-qube-800">{totalAboveGround}</div>
+          <div></div>
+          <div className="text-right text-qube-800">{totalHeightAbove.toFixed(1)} m</div>
+        </div>
+      </div>
+      <p className="text-[11px] text-ink-500 mt-3 leading-snug">
+        {basementSec.count > 0
+          ? `Plus ${basementSec.count} basement level(s) — ${(basementSec.count * basementSec.heightM).toFixed(1)} m below ground.`
+          : "No basements configured."}
+      </p>
     </div>
   );
 }

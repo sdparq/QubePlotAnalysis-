@@ -106,6 +106,15 @@ export interface Project {
   plotArea: number;
   numFloors: number;
   floorHeight: number;
+  /** Stratified floor breakdown — basements, ground, podium and type (residential)
+   *  floors. When set, `numFloors` and `floorHeight` are kept in sync with
+   *  `typeFloors.count` and `typeFloors.heightM` so the rest of the app keeps
+   *  working unchanged. The other sections only affect the Setup view and the
+   *  building total-height display for now. */
+  basements?: FloorSection;
+  ground?: FloorSection;
+  podium?: FloorSection;
+  typeFloors?: FloorSection;
   shaftPerUnit: number;
   prmPercent: number;
   typologies: Typology[];
@@ -211,6 +220,11 @@ export interface CustomNeighbor {
     offsetXM?: number;
     offsetZM?: number;
   };
+}
+
+export interface FloorSection {
+  count: number;
+  heightM: number;
 }
 
 export type GfaUseCategory = "residential" | "retail" | "commercial" | "hospitality";
