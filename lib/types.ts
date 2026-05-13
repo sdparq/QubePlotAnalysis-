@@ -175,6 +175,9 @@ export interface Project {
   /** Optional sub-breakdown of the Residential use (apartments / amenities /
    *  circulation / services), each with its own percentage and a GFA flag. */
   residentialBreakdown?: ResidentialBreakdown;
+  /** Hierarchical breakdown of common areas with editable sub-percentages and
+   *  GFA flags. When set it drives the flat `commonAreas` list automatically. */
+  commonAreasBreakdown?: CommonAreasBreakdown;
   /** How the user enters common area sizes. "absolute" = m² × floors (default); "percentage" = each row stores a fraction of targetGFA and the m² is derived. */
   commonAreasInputMode?: "absolute" | "percentage";
   /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
@@ -258,6 +261,48 @@ export const DEFAULT_RESIDENTIAL_BREAKDOWN: ResidentialBreakdown = {
   circulation:{ pct: 10, countsAsGFA: true },
   services:   { pct: 10, countsAsGFA: true },
 };
+
+export type CommonAreasGroup = "amenities" | "circulation" | "services";
+
+export interface CommonAreaSub {
+  id: string;
+  name: string;
+  /** Percentage of the parent group's BUA (0..100). */
+  pct: number;
+  countsAsGFA: boolean;
+}
+
+export interface CommonAreasBreakdown {
+  amenities: CommonAreaSub[];
+  circulation: CommonAreaSub[];
+  services: CommonAreaSub[];
+}
+
+export function defaultCommonAreasBreakdown(): CommonAreasBreakdown {
+  return {
+    amenities: [
+      { id: "ca-amen-gym",    name: "Gym",         pct: 25, countsAsGFA: true  },
+      { id: "ca-amen-pool",   name: "Pool",        pct: 20, countsAsGFA: false },
+      { id: "ca-amen-sauna",  name: "Sauna",       pct: 5,  countsAsGFA: true  },
+      { id: "ca-amen-padel",  name: "Padel court", pct: 15, countsAsGFA: false },
+      { id: "ca-amen-social", name: "Social area", pct: 15, countsAsGFA: true  },
+      { id: "ca-amen-kids",   name: "Kids area",   pct: 10, countsAsGFA: true  },
+      { id: "ca-amen-cowork", name: "Coworking",   pct: 10, countsAsGFA: true  },
+    ],
+    circulation: [
+      { id: "ca-circ-lobby",  name: "Lobbies",     pct: 30, countsAsGFA: true },
+      { id: "ca-circ-corr",   name: "Corridors",   pct: 35, countsAsGFA: true },
+      { id: "ca-circ-lift",   name: "Lift cores",  pct: 20, countsAsGFA: true },
+      { id: "ca-circ-stairs", name: "Stairs",      pct: 15, countsAsGFA: true },
+    ],
+    services: [
+      { id: "ca-serv-mep",    name: "MEP rooms",   pct: 30, countsAsGFA: true },
+      { id: "ca-serv-shafts", name: "Shafts",      pct: 35, countsAsGFA: true },
+      { id: "ca-serv-ducts",  name: "Ducts",       pct: 15, countsAsGFA: true },
+      { id: "ca-serv-plant",  name: "Plant rooms", pct: 20, countsAsGFA: true },
+    ],
+  };
+}
 
 export interface GarbageOverrides {
   generationKgPer100sqmPerDay?: number;  // default 12 (Dubai DM)
