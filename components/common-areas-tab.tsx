@@ -1,13 +1,38 @@
 "use client";
+import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt2, fmtPct } from "@/lib/format";
 import { computeProgram } from "@/lib/calc/program";
 import {
   commonAreaCategory,
   effectiveCommonAreaTotal,
+  DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
   type CommonAreaCategory,
 } from "@/lib/types";
+import {
+  DEFAULT_AMENITIES_SUBS,
+  DEFAULT_CIRCULATION_SUBS,
+  DEFAULT_SERVICES_SUBS,
+  generateRowsFromSubs,
+} from "@/lib/common-areas-defaults";
+
+/** Mirror the Program tab calc — total residential built area derived from the
+ *  Setup GFA breakdown (Residential GFA / sum-of-GFA-counted shares). */
+function computeResidentialBUA(project: ReturnType<typeof useProject>): number {
+  const item = project.gfaBreakdown?.residential;
+  if (!item) return 0;
+  const target = project.targetGFA ?? 0;
+  const residentialGFA = item.mode === "absolute" ? item.value : (item.value / 100) * target;
+  if (residentialGFA <= 0) return 0;
+  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+  let gfaShare = 0;
+  for (const v of Object.values(rb)) {
+    if (v.countsAsGFA) gfaShare += v.pct;
+  }
+  gfaShare /= 100;
+  return gfaShare > 0 ? residentialGFA / gfaShare : residentialGFA;
+}
 
 export default function CommonAreasTab() {
   const project = useProject();
@@ -18,6 +43,39 @@ export default function CommonAreasTab() {
 
   const isPctMode = project.commonAreasInputMode === "percentage";
   const targetGFA = project.targetGFA ?? 0;
+
+  // ── Setup-driven group totals ───────────────────────────────────────────
+  const residentialBUA = useMemo(() => computeResidentialBUA(project), [project]);
+  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+  const amenitiesBUA   = residentialBUA * (rb.amenities?.pct ?? 0) / 100;
+  const circulationBUA = residentialBUA * (rb.circulation?.pct ?? 0) / 100;
+  const servicesBUA    = residentialBUA * (rb.services?.pct ?? 0) / 100;
+
+  function generateFromSetup() {
+    if (residentialBUA <= 0) {
+      alert("Set the Residential GFA in Setup first (GFA breakdown → Residential).");
+      return;
+    }
+    if (project.commonAreas.length > 0) {
+      const ok = confirm(
+        `Replace the existing ${project.commonAreas.length} common-area row(s) with auto-generated rows from Setup?\n\n` +
+        `Amenities ${Math.round(amenitiesBUA).toLocaleString("en-US")} m² · Circulation ${Math.round(circulationBUA).toLocaleString("en-US")} m² · Services ${Math.round(servicesBUA).toLocaleString("en-US")} m²`,
+      );
+      if (!ok) return;
+      for (const c of [...project.commonAreas]) remove(c.id);
+    }
+    const wasPctMode = isPctMode;
+    if (wasPctMode) {
+      // Switch to absolute so the m² values land in the same scale as user input.
+      patch({ commonAreasInputMode: "absolute" });
+    }
+    const rows = [
+      ...generateRowsFromSubs("Amenities",   amenitiesBUA,   DEFAULT_AMENITIES_SUBS),
+      ...generateRowsFromSubs("Circulation", circulationBUA, DEFAULT_CIRCULATION_SUBS),
+      ...generateRowsFromSubs("Services",    servicesBUA,    DEFAULT_SERVICES_SUBS),
+    ];
+    for (const r of rows) upsert(r);
+  }
 
   function addNew() {
     upsert({
@@ -103,9 +161,31 @@ export default function CommonAreasTab() {
                 }`}
               >% of GFA</button>
             </div>
+            <button
+              className="btn btn-secondary"
+              onClick={generateFromSetup}
+              disabled={residentialBUA <= 0}
+              title={
+                residentialBUA <= 0
+                  ? "Set Residential GFA in Setup first"
+                  : `Auto-generate rows from Setup's residential breakdown · ${Math.round(amenitiesBUA + circulationBUA + servicesBUA).toLocaleString("en-US")} m² total`
+              }
+            >Generate from Setup</button>
             <button className="btn btn-primary" onClick={addNew}>+ Add element</button>
           </div>
         </div>
+
+        {residentialBUA > 0 && (
+          <p className="text-[11px] text-ink-500 leading-snug -mt-3 mb-4">
+            Driven by Setup: Amenities <strong className="text-ink-900">{Math.round(amenitiesBUA).toLocaleString("en-US")} m²</strong>{" "}
+            ({(rb.amenities?.pct ?? 0).toFixed(1)}% of residential) ·
+            Circulation <strong className="text-ink-900">{Math.round(circulationBUA).toLocaleString("en-US")} m²</strong>{" "}
+            ({(rb.circulation?.pct ?? 0).toFixed(1)}%) ·
+            Services <strong className="text-ink-900">{Math.round(servicesBUA).toLocaleString("en-US")} m²</strong>{" "}
+            ({(rb.services?.pct ?? 0).toFixed(1)}%). Click <em>Generate from Setup</em> to
+            populate the table with default subcategories (Gym · Pool · Sauna · Padel · Social · Kids · Coworking · Lobbies · Corridors · Lift cores · Stairs · MEP · Shafts · Ducts · Plant rooms).
+          </p>
+        )}
 
         {isPctMode && targetGFA <= 0 && (
           <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-sm mb-4">
