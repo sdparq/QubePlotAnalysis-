@@ -595,7 +595,7 @@ function NumInput({ value, onChange, step = 1, suffix }: { value: number; onChan
 const RESIDENTIAL_SUB_CATEGORIES: { key: ResidentialSubCategory; label: string; hint: string }[] = [
   { key: "apartments",  label: "Apartments",  hint: "Net residential — the units themselves." },
   { key: "amenities",   label: "Amenities",   hint: "Indoor gym, lobby, club room, etc." },
-  { key: "circulation", label: "Circulation", hint: "Lobbies, corridors, lift cores, stairs." },
+  { key: "circulation", label: "Circulation", hint: "Lobbies, corridors, stairs (lift cores in the Lifts tab)." },
   { key: "services",    label: "Services",    hint: "MEP, shafts, ducts, plant rooms." },
 ];
 
