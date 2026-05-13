@@ -15,8 +15,10 @@ const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penth
 const DEFAULT_PARKING: Record<UnitCategory, number> = {
   Studio: 1, "1BR": 1, "2BR": 1, "3BR": 2, "4BR": 2, Penthouse: 2,
 };
+// Default occupancy (persons / unit) per Dubai DCD residential standard, Table D.5.
+// +1 person for each additional bedroom or live-in housekeeper room.
 const DEFAULT_OCCUPANCY: Record<UnitCategory, number> = {
-  Studio: 1.5, "1BR": 2, "2BR": 3, "3BR": 5, "4BR": 6, Penthouse: 6,
+  Studio: 1.5, "1BR": 1.8, "2BR": 3, "3BR": 4, "4BR": 5, Penthouse: 6,
 };
 
 const SQFT_PER_M2 = 10.7639;
@@ -62,24 +64,35 @@ export default function TypologiesTab() {
   }
 
   /**
-   * The user enters the TOTAL sellable area (interior + balcony) — that's what
-   * the Excel matrix gives us per typology. We deduct the balcony using the
-   * class's `balconyPctOfNsa` (share of total sellable) and keep interior as
-   * the remainder. If no class is detected we just put everything in interior
-   * and leave balcony at 0 — the user can then override.
+   * The user enters the TOTAL sellable area (interior + balcony). We keep the
+   * typology's CURRENT balcony fraction stable: editing Total scales balcony
+   * and interior proportionally. If the typology hasn't been set up yet (its
+   * current balcony fraction is 0 AND interior is 0), we seed the balcony
+   * fraction from the detected class — otherwise leave it as 0%.
    */
   function setTotal(t: Typology, totalM2: number) {
     if (!Number.isFinite(totalM2) || totalM2 < 0) totalM2 = 0;
-    let balcony = t.balconyArea;
-    let interior = t.internalArea;
-    if (detectedClass) {
-      const share = library[detectedClass].balconyPctOfNsa;
-      balcony = Number((totalM2 * share).toFixed(1));
-      interior = Number((totalM2 - balcony).toFixed(1));
+    const oldTotal = t.internalArea + t.balconyArea;
+    let pct: number;
+    if (oldTotal > 0) {
+      pct = t.balconyArea / oldTotal;
+    } else if (detectedClass) {
+      pct = library[detectedClass].balconyPctOfNsa;
     } else {
-      interior = totalM2;
-      balcony = 0;
+      pct = 0;
     }
+    const balcony = Number((totalM2 * pct).toFixed(2));
+    const interior = Number((totalM2 - balcony).toFixed(2));
+    upsert({ ...t, internalArea: interior, balconyArea: balcony });
+  }
+
+  /** Edit balcony % directly; keep Total constant. */
+  function setBalconyPct(t: Typology, pctValue: number) {
+    if (!Number.isFinite(pctValue) || pctValue < 0) pctValue = 0;
+    if (pctValue > 100) pctValue = 100;
+    const total = t.internalArea + t.balconyArea;
+    const balcony = Number(((total * pctValue) / 100).toFixed(2));
+    const interior = Number((total - balcony).toFixed(2));
     upsert({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
@@ -208,7 +221,7 @@ export default function TypologiesTab() {
                   <th>Name</th>
                   <th>Category</th>
                   <th className="text-right">Total area (m²)</th>
-                  <th className="text-right">Balcony (m²){detectedClass && ` · ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
+                  <th className="text-right">Balcony %{detectedClass && ` · class ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
                   <th className="text-right">Occupancy</th>
                   <th className="text-right">Parking / unit</th>
                   <th></th>
@@ -246,20 +259,22 @@ export default function TypologiesTab() {
                       />
                     </td>
                     <td className="cell-edit">
-                      <input
-                        type="number"
-                        step={0.5}
-                        min={0}
-                        className="cell-input text-right"
-                        value={t.balconyArea}
-                        onChange={(e) => {
-                          const b = Math.max(0, parseFloat(e.target.value) || 0);
-                          // Editing balcony directly keeps Total constant by updating Interior.
-                          const newInterior = Math.max(0, total - b);
-                          update(t, { balconyArea: Number(b.toFixed(2)), internalArea: Number(newInterior.toFixed(2)) });
-                        }}
-                        title="Auto-deducted from Total at the class %. Edit to override."
-                      />
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step={0.5}
+                          min={0}
+                          max={100}
+                          className="cell-input text-right pr-7"
+                          value={total > 0 ? Number(((t.balconyArea / total) * 100).toFixed(1)) : 0}
+                          onChange={(e) => setBalconyPct(t, parseFloat(e.target.value) || 0)}
+                          title="Balcony as % of Total area. Editing this keeps Total constant."
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-ink-400 pointer-events-none">%</span>
+                      </div>
+                      <div className="text-[10px] text-ink-500 text-right mt-0.5 tabular-nums">
+                        = {t.balconyArea.toFixed(1)} m²
+                      </div>
                     </td>
                     <td className="cell-edit">
                       <input type="number" step={0.1} className="cell-input text-right"
