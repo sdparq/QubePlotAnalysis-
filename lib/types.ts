@@ -293,9 +293,8 @@ export function defaultCommonAreasBreakdown(): CommonAreasBreakdown {
       { id: "ca-amen-cowork", name: "Coworking",   pct: 10, countsAsGFA: true  },
     ],
     circulation: [
-      { id: "ca-circ-lobby",  name: "Lobbies",     pct: 40, countsAsGFA: true },
-      { id: "ca-circ-corr",   name: "Corridors",   pct: 45, countsAsGFA: true },
-      { id: "ca-circ-stairs", name: "Stairs",      pct: 15, countsAsGFA: true },
+      { id: "ca-circ-lobby",  name: "Lobbies",     pct: 45, countsAsGFA: true },
+      { id: "ca-circ-corr",   name: "Corridors",   pct: 55, countsAsGFA: true },
     ],
     services: [
       { id: "ca-serv-mep",    name: "MEP rooms",   pct: 30, countsAsGFA: true },

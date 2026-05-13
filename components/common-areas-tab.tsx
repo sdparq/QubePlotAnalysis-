@@ -31,7 +31,7 @@ interface GroupDef {
 
 const GROUPS: GroupDef[] = [
   { key: "amenities",   label: "Amenities",   hint: "Indoor + outdoor amenity rooms (gym, pool, sauna, kids, coworking…)." },
-  { key: "circulation", label: "Circulation", hint: "Lobbies, corridors, stairs (lift cores are counted in the Lifts tab)." },
+  { key: "circulation", label: "Circulation", hint: "Lobbies and corridors (lift cores and stairs are counted in the Lifts tab)." },
   { key: "services",    label: "Services",    hint: "MEP rooms, shafts, ducts, plant rooms." },
 ];
 
