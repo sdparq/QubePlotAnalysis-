@@ -230,11 +230,11 @@ export default function ParkingTab() {
         <div className="mb-5">
           <h2 className="section-title">Parking surface</h2>
           <p className="section-sub">
-            Estimated built area required to fit all parking spaces — useful to size
-            basements / podium parking levels.
+            Estimated built area required to fit all parking spaces and how it compares to
+            the basement footprint available (= plot area × number of basements, from Setup).
           </p>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
           <Stat
             label="Total spaces"
             value={fmt0(r.grandRequired)}
@@ -250,12 +250,76 @@ export default function ParkingTab() {
             value={`${fmt0(r.totalParkingSurfaceM2)} m²`}
             sub={fmtSqft(r.totalParkingSurfaceM2)}
           />
-          <Stat
-            label="Per basement (if 1)"
-            value={`${fmt0(r.totalParkingSurfaceM2)} m²`}
-            sub="Split across N basements as needed"
-          />
         </div>
+
+        {(() => {
+          const plotArea = project.plotArea ?? 0;
+          const basementCount = project.basements?.count ?? 0;
+          const availableSurface = plotArea * basementCount;
+          const balance = availableSurface - r.totalParkingSurfaceM2;
+          const enough = balance >= 0;
+          const needed = plotArea > 0 ? Math.ceil(r.totalParkingSurfaceM2 / plotArea) : 0;
+          return (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Stat
+                  label="Plot area"
+                  value={plotArea > 0 ? `${fmt0(plotArea)} m²` : "—"}
+                  sub={plotArea > 0 ? fmtSqft(plotArea) : "Set in Setup"}
+                />
+                <Stat
+                  label="Basements"
+                  value={`${basementCount}`}
+                  sub={
+                    basementCount > 0
+                      ? `${project.basements?.heightM ?? 0} m height each`
+                      : "Set in Setup → Floor breakdown"
+                  }
+                />
+                <Stat
+                  label="Available basement surface"
+                  value={availableSurface > 0 ? `${fmt0(availableSurface)} m²` : "—"}
+                  sub={availableSurface > 0 ? `${fmt0(plotArea)} × ${basementCount} basements` : ""}
+                />
+                <BalanceStat
+                  value={balance}
+                  ok={enough && availableSurface > 0}
+                  unset={availableSurface === 0}
+                />
+              </div>
+
+              {plotArea > 0 && r.totalParkingSurfaceM2 > 0 && (
+                <p className={`text-[12px] mt-3 leading-snug ${enough && availableSurface > 0 ? "text-emerald-700" : "text-amber-900"}`}>
+                  {availableSurface === 0 ? (
+                    <>
+                      No basements set yet — you would need{" "}
+                      <strong>{needed} basement{needed === 1 ? "" : "s"}</strong> of the
+                      full plot footprint ({fmt0(plotArea)} m²) to fit{" "}
+                      {fmt0(r.totalParkingSurfaceM2)} m² of parking. Set them in
+                      <em> Setup → Floor breakdown → Basements</em>.
+                    </>
+                  ) : enough ? (
+                    <>
+                      ✓ The {basementCount} basement{basementCount === 1 ? "" : "s"} provide{" "}
+                      {fmt0(availableSurface)} m² — enough to fit{" "}
+                      {fmt0(r.totalParkingSurfaceM2)} m² of parking with a{" "}
+                      <strong>{fmt0(balance)} m²</strong> margin.
+                    </>
+                  ) : (
+                    <>
+                      The {basementCount} basement{basementCount === 1 ? "" : "s"} only
+                      provide {fmt0(availableSurface)} m², which is{" "}
+                      <strong>{fmt0(-balance)} m² short</strong> of the{" "}
+                      {fmt0(r.totalParkingSurfaceM2)} m² needed. You&apos;d need at least{" "}
+                      <strong>{needed} basement{needed === 1 ? "" : "s"}</strong> (or shift
+                      some parking to ground / podium levels).
+                    </>
+                  )}
+                </p>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );
@@ -267,6 +331,20 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
       <div className="eyebrow text-ink-500 text-[10px]">{label}</div>
       <div className="text-[18px] font-light tabular-nums text-ink-900 mt-0.5">{value}</div>
       {sub && <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">{sub}</div>}
+    </div>
+  );
+}
+
+function BalanceStat({ value, ok, unset }: { value: number; ok: boolean; unset: boolean }) {
+  const color = unset ? "text-ink-400" : ok ? "text-emerald-700" : "text-red-700";
+  const label = "Surface balance";
+  const display = unset ? "—" : `${value >= 0 ? "+" : ""}${fmt0(value)} m²`;
+  const sub = unset ? "Add basements in Setup" : ok ? "Fits within basements ✓" : "Short of required";
+  return (
+    <div className="border border-ink-200 bg-white p-3">
+      <div className="eyebrow text-ink-500 text-[10px]">{label}</div>
+      <div className={`text-[18px] font-light tabular-nums mt-0.5 ${color}`}>{display}</div>
+      <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">{sub}</div>
     </div>
   );
 }
