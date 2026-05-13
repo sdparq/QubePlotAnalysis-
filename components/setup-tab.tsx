@@ -345,17 +345,34 @@ function GfaBreakdownCard({
     return total > 0 ? (item.value / total) * 100 : 0;
   }
 
-  const sumM2 = GFA_CATEGORIES.reduce((s, c) => s + effectiveM2(c.key), 0);
-  const sumPct = total > 0 ? (sumM2 / total) * 100 : 0;
-  const mismatch = total > 0 ? Math.abs(sumM2 - total) : 0;
-  const mismatchPct = total > 0 ? mismatch / total : 0;
+  /** Fraction of a use's built area (BUA) that counts toward GFA.
+   *  For Residential it's driven by the sub-breakdown; for the others it's 1 today. */
+  function gfaShare(key: GfaUseCategory): number {
+    if (key !== "residential") return 1;
+    const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+    let sum = 0;
+    for (const sub of Object.values(rb)) {
+      if (sub.countsAsGFA) sum += sub.pct;
+    }
+    return Math.max(0, Math.min(1, sum / 100));
+  }
+
+  function effectiveGFA(key: GfaUseCategory): number {
+    return effectiveM2(key) * gfaShare(key);
+  }
+
+  const sumBUA = GFA_CATEGORIES.reduce((s, c) => s + effectiveM2(c.key), 0);
+  const sumGFA = GFA_CATEGORIES.reduce((s, c) => s + effectiveGFA(c.key), 0);
+  const sumPctGFA = total > 0 ? (sumGFA / total) * 100 : 0;
+  const sumPctBUA = total > 0 ? (sumBUA / total) * 100 : 0;
+  const gfaMismatch = total > 0 ? Math.abs(sumGFA - total) : 0;
+  const gfaMismatchPct = total > 0 ? gfaMismatch / total : 0;
 
   function rebalanceTo100() {
     if (total <= 0) return;
-    // Lock all percent entries that exist; redistribute the rest pro-rata across absolutes.
-    // Simplest: convert everything to absolute scaled so the sum matches the total.
-    if (sumM2 <= 0) return;
-    const factor = total / sumM2;
+    // Scale every BUA pro-rata so the resulting GFA sum equals targetGFA.
+    if (sumGFA <= 0) return;
+    const factor = total / sumGFA;
     const next: GfaBreakdown = {};
     for (const c of GFA_CATEGORIES) {
       const m2 = effectiveM2(c.key);
@@ -383,7 +400,7 @@ function GfaBreakdownCard({
                 {total.toLocaleString("en-US")} m² · {fmtSqft(total)}
               </strong>
             </div>
-            {mismatchPct > 0.005 && sumM2 > 0 && (
+            {gfaMismatchPct > 0.005 && sumGFA > 0 && (
               <button
                 onClick={rebalanceTo100}
                 className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
@@ -404,13 +421,14 @@ function GfaBreakdownCard({
       )}
 
       <div className="border border-ink-200">
-        <div className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+        <div className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
           <div>Use</div>
           <div className="text-right">Input</div>
           <div className="text-center">Mode</div>
-          <div className="text-right">m²</div>
-          <div className="text-right">≈ sqft</div>
-          <div className="text-right">% of total</div>
+          <div className="text-right">GFA m²</div>
+          <div className="text-right">BUA m²</div>
+          <div className="text-right">≈ sqft (BUA)</div>
+          <div className="text-right">% of GFA</div>
         </div>
         {GFA_CATEGORIES.map((c) => {
           const item = getItem(c.key);
@@ -419,7 +437,7 @@ function GfaBreakdownCard({
           return (
             <div key={c.key}>
               <div
-                className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
+                className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
               >
                 <div>
                   <div className="text-ink-900">{c.label}</div>
@@ -451,9 +469,19 @@ function GfaBreakdownCard({
                     → {item.mode === "absolute" ? "%" : "m²"}
                   </button>
                 </div>
-                <div className="text-right text-ink-900">{m2 > 0 ? m2.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</div>
-                <div className="text-right text-ink-500">{fmtSqft(m2)}</div>
-                <div className="text-right text-ink-700">{pct > 0 ? `${pct.toFixed(1)}%` : "—"}</div>
+                {(() => {
+                  const bua = m2;
+                  const gfa = bua * gfaShare(c.key);
+                  const gfaPct = total > 0 ? (gfa / total) * 100 : 0;
+                  return (
+                    <>
+                      <div className="text-right text-qube-800 font-medium">{gfa > 0 ? Math.round(gfa).toLocaleString("en-US") : "—"}</div>
+                      <div className="text-right text-ink-900">{bua > 0 ? Math.round(bua).toLocaleString("en-US") : "—"}</div>
+                      <div className="text-right text-ink-500">{fmtSqft(bua)}</div>
+                      <div className="text-right text-ink-700">{gfaPct > 0 ? `${gfaPct.toFixed(1)}%` : "—"}</div>
+                    </>
+                  );
+                })()}
               </div>
               {c.key === "residential" && m2 > 0 && (
                 <ResidentialSubBreakdown
@@ -465,22 +493,24 @@ function GfaBreakdownCard({
             </div>
           );
         })}
-        <div className="grid grid-cols-[1fr_140px_110px_120px_140px_90px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
+        <div className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total of uses</div>
           <div></div>
           <div></div>
-          <div className="text-right text-qube-800">{sumM2.toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-          <div className="text-right text-qube-700">{fmtSqft(sumM2)}</div>
-          <div className="text-right text-qube-800">{total > 0 ? `${sumPct.toFixed(1)}%` : "—"}</div>
+          <div className="text-right text-qube-800">{Math.round(sumGFA).toLocaleString("en-US")}</div>
+          <div className="text-right text-qube-800">{Math.round(sumBUA).toLocaleString("en-US")}</div>
+          <div className="text-right text-qube-700">{fmtSqft(sumBUA)}</div>
+          <div className="text-right text-qube-800">{total > 0 ? `${sumPctGFA.toFixed(1)}%` : "—"}</div>
         </div>
       </div>
 
-      {total > 0 && mismatchPct > 0.005 && sumM2 > 0 && (
+      {total > 0 && gfaMismatchPct > 0.005 && sumGFA > 0 && (
         <p className="text-[11.5px] mt-3 leading-snug text-amber-900">
-          The categories sum to <strong>{sumM2.toLocaleString("en-US", { maximumFractionDigits: 0 })} m²</strong>{" "}
-          ({sumPct.toFixed(1)}%) but Target GFA is{" "}
+          Σ GFA across uses = <strong>{Math.round(sumGFA).toLocaleString("en-US")} m²</strong>{" "}
+          ({sumPctGFA.toFixed(1)}%) but Target GFA is{" "}
           <strong>{total.toLocaleString("en-US")} m²</strong>. Adjust the rows or click
-          <em> Rebalance to 100%</em> above.
+          <em> Rebalance to 100%</em> above. Σ BUA = {Math.round(sumBUA).toLocaleString("en-US")} m²
+          (BUA &gt; GFA because some sub-categories are flagged Non-GFA).
         </p>
       )}
     </div>
