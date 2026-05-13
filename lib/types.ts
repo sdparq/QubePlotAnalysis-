@@ -172,6 +172,9 @@ export interface Project {
   /** Optional split of the Target GFA across uses. Each entry can be entered
    *  either as an absolute m² value or as a percentage of `targetGFA`. */
   gfaBreakdown?: GfaBreakdown;
+  /** Optional sub-breakdown of the Residential use (apartments / amenities /
+   *  circulation / services), each with its own percentage and a GFA flag. */
+  residentialBreakdown?: ResidentialBreakdown;
   /** How the user enters common area sizes. "absolute" = m² × floors (default); "percentage" = each row stores a fraction of targetGFA and the m² is derived. */
   commonAreasInputMode?: "absolute" | "percentage";
   /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
@@ -236,6 +239,25 @@ export interface GfaBreakdownItem {
 }
 
 export type GfaBreakdown = Partial<Record<GfaUseCategory, GfaBreakdownItem>>;
+
+export type ResidentialSubCategory = "apartments" | "amenities" | "circulation" | "services";
+
+export interface ResidentialSubItem {
+  /** Percentage of the project's Residential GFA, 0..100. */
+  pct: number;
+  /** Whether this sub-category counts towards the project's reported GFA.
+   *  Some zones exclude services (MEP, shafts) and balconies from GFA. */
+  countsAsGFA: boolean;
+}
+
+export type ResidentialBreakdown = Record<ResidentialSubCategory, ResidentialSubItem>;
+
+export const DEFAULT_RESIDENTIAL_BREAKDOWN: ResidentialBreakdown = {
+  apartments: { pct: 79, countsAsGFA: true },
+  amenities:  { pct:  1, countsAsGFA: true },
+  circulation:{ pct: 10, countsAsGFA: true },
+  services:   { pct: 10, countsAsGFA: true },
+};
 
 export interface GarbageOverrides {
   generationKgPer100sqmPerDay?: number;  // default 12 (Dubai DM)
