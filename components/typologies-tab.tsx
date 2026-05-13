@@ -86,17 +86,17 @@ export default function TypologiesTab() {
     upsert({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
-  /** Edit balcony % directly. We keep the typology's INTERIOR constant and
-   *  scale the balcony so that pct = balcony / (interior + balcony). Total
-   *  area (= interior + balcony) and the sellable shown in the Program tab
-   *  therefore grow when the balcony % grows — that's how a bigger balcony
-   *  affects the unit's overall sellable size. */
+  /** Edit balcony % directly. We keep the Total area constant (= average of
+   *  min/max for the class) and redistribute between interior and balcony.
+   *  The Program tab reflects this through `Interior GFA` (= interior × units
+   *  per floor) — Sellable stays fixed because Total is the sum of the two. */
   function setBalconyPct(t: Typology, pctValue: number) {
     if (!Number.isFinite(pctValue) || pctValue < 0) pctValue = 0;
-    if (pctValue > 99.9) pctValue = 99.9;
-    const interior = t.internalArea;
-    const balcony = pctValue > 0 ? (interior * pctValue) / (100 - pctValue) : 0;
-    upsert({ ...t, internalArea: interior, balconyArea: Number(balcony.toFixed(2)) });
+    if (pctValue > 100) pctValue = 100;
+    const total = t.internalArea + t.balconyArea;
+    const balcony = Number(((total * pctValue) / 100).toFixed(2));
+    const interior = Number((total - balcony).toFixed(2));
+    upsert({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
   /**
