@@ -357,14 +357,22 @@ function GfaBreakdownCard({
     return Math.max(0, Math.min(1, sum / 100));
   }
 
-  function effectiveGFA(key: GfaUseCategory): number {
-    return effectiveM2(key) * gfaShare(key);
+  /** The user types the GFA target for each use. The BUA inflates above it
+   *  whenever a sub-category is flagged Non-GFA (extra built area that doesn't
+   *  count toward FAR). */
+  function buaFor(key: GfaUseCategory): number {
+    const share = gfaShare(key);
+    const m2 = effectiveM2(key);
+    return share > 0 ? m2 / share : m2;
   }
 
-  const sumBUA = GFA_CATEGORIES.reduce((s, c) => s + effectiveM2(c.key), 0);
-  const sumGFA = GFA_CATEGORIES.reduce((s, c) => s + effectiveGFA(c.key), 0);
+  function gfaFor(key: GfaUseCategory): number {
+    return gfaShare(key) > 0 ? effectiveM2(key) : 0;
+  }
+
+  const sumBUA = GFA_CATEGORIES.reduce((s, c) => s + buaFor(c.key), 0);
+  const sumGFA = GFA_CATEGORIES.reduce((s, c) => s + gfaFor(c.key), 0);
   const sumPctGFA = total > 0 ? (sumGFA / total) * 100 : 0;
-  const sumPctBUA = total > 0 ? (sumBUA / total) * 100 : 0;
   const gfaMismatch = total > 0 ? Math.abs(sumGFA - total) : 0;
   const gfaMismatchPct = total > 0 ? gfaMismatch / total : 0;
 
@@ -470,8 +478,8 @@ function GfaBreakdownCard({
                   </button>
                 </div>
                 {(() => {
-                  const bua = m2;
-                  const gfa = bua * gfaShare(c.key);
+                  const bua = buaFor(c.key);
+                  const gfa = gfaFor(c.key);
                   const gfaPct = total > 0 ? (gfa / total) * 100 : 0;
                   return (
                     <>
@@ -485,7 +493,7 @@ function GfaBreakdownCard({
               </div>
               {c.key === "residential" && m2 > 0 && (
                 <ResidentialSubBreakdown
-                  residentialM2={m2}
+                  residentialM2={buaFor("residential")}
                   breakdown={project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN}
                   onChange={(next) => patch({ residentialBreakdown: next })}
                 />
