@@ -16,6 +16,7 @@
 
 import type { Project, ResidentialSubCategory } from "../types";
 import { DEFAULT_RESIDENTIAL_BREAKDOWN } from "../types";
+import { computeProgram } from "./program";
 
 export const RESIDENTIAL_SUBS: ResidentialSubCategory[] = ["apartments", "amenities", "circulation", "services"];
 
@@ -55,11 +56,25 @@ export function residentialSubGFA(project: Project, sub: ResidentialSubCategory)
 export function residentialSubBUA(project: Project, sub: ResidentialSubCategory): number {
   const subGFA = residentialSubGFA(project, sub);
   const share = residentialSubGfaShare(project, sub);
-  if (share > 0) return subGFA / share;
-  // Non-GFA category at the residential level — its BUA is still allocated as
-  // a pure pct of the residentialGFA target (it doesn't deliver any GFA).
-  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
-  return (rb[sub].pct / 100) * residentialGFATarget(project);
+  if (share <= 0) {
+    // Non-GFA category at the residential level — its BUA is still allocated
+    // as a pure pct of the residentialGFA target (it doesn't deliver any GFA).
+    const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+    return (rb[sub].pct / 100) * residentialGFATarget(project);
+  }
+  let bua = subGFA / share;
+  // Apartments: balconies count as BUA but not as GFA. When the program is
+  // filled, the actual balcony ratio comes from the typologies × cells; we
+  // scale the apartments BUA by (1 + balcony share) so the difference shows
+  // up consistently across Setup, Common Areas and the Areas Summary.
+  if (sub === "apartments") {
+    const program = computeProgram(project);
+    if (program.totalInteriorGFA > 0) {
+      const balconyShare = program.totalBalcony / program.totalInteriorGFA;
+      bua = subGFA * (1 + balconyShare);
+    }
+  }
+  return bua;
 }
 
 export function residentialBUA(project: Project): number {
