@@ -21,6 +21,7 @@ import {
   type ZoneClass,
   type TypologyKey,
 } from "@/lib/zone-classes";
+import { residentialBuaInflationFactor } from "@/lib/calc/gfa";
 
 interface FloorSectionDef {
   key: "basements" | "ground" | "podium" | "typeFloors";
@@ -346,15 +347,13 @@ function GfaBreakdownCard({
   }
 
   /** Fraction of a use's built area (BUA) that counts toward GFA.
-   *  For Residential it's driven by the sub-breakdown; for the others it's 1 today. */
+   *  For Residential we derive it from the inflation factor in the shared
+   *  helper (which accounts for both residentialBreakdown flags AND the
+   *  Common Areas sub-breakdown). For the others, 1. */
   function gfaShare(key: GfaUseCategory): number {
     if (key !== "residential") return 1;
-    const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
-    let sum = 0;
-    for (const sub of Object.values(rb)) {
-      if (sub.countsAsGFA) sum += sub.pct;
-    }
-    return Math.max(0, Math.min(1, sum / 100));
+    const inflation = residentialBuaInflationFactor(project);
+    return inflation > 0 ? 1 / inflation : 1;
   }
 
   /** The user types the GFA target for each use. The BUA inflates above it

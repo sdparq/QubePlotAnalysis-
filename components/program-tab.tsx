@@ -5,8 +5,8 @@ import { computeProgram } from "@/lib/calc/program";
 import { fmt0, fmt2 } from "@/lib/format";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone, TYPOLOGY_KEYS, type TypologyKey } from "@/lib/zone-classes";
+import { residentialSubGFA } from "@/lib/calc/gfa";
 import {
-  DEFAULT_RESIDENTIAL_BREAKDOWN,
   type Typology,
   type UnitCategory,
 } from "@/lib/types";
@@ -23,28 +23,10 @@ const CATEGORY_FOR_TYPOLOGY_KEY: Record<TypologyKey, UnitCategory | null> = {
   penthouse: "Penthouse",
 };
 
-/** Reads the Apartments-only GFA out of Setup:
- *    residentialGFA = gfaBreakdown.residential.value (resolved to m²)
- *    residentialBUA = residentialGFA / gfaShare  (gfaShare = sum of GFA-counted residential subs)
- *    apartmentsGFA  = residentialBUA × residentialBreakdown.apartments.pct / 100
- *  When the user hasn't filled the breakdown, falls back to 0 and the panel
- *  shows a hint pointing back to Setup. */
+/** Apartments-only GFA from Setup. Delegates to the shared helper so the math
+ *  stays consistent with the Setup table and the Common Areas group totals. */
 function computeApartmentsGFA(project: ReturnType<typeof useProject>): number {
-  const item = project.gfaBreakdown?.residential;
-  if (!item) return 0;
-  const target = project.targetGFA ?? 0;
-  const residentialGFA = item.mode === "absolute" ? item.value : (item.value / 100) * target;
-  if (residentialGFA <= 0) return 0;
-  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
-  let gfaShare = 0;
-  for (const v of Object.values(rb)) {
-    if (v.countsAsGFA) gfaShare += v.pct;
-  }
-  gfaShare /= 100;
-  if (gfaShare <= 0) return 0;
-  const residentialBUA = residentialGFA / gfaShare;
-  const apartmentsPct = (rb.apartments?.pct ?? 0) / 100;
-  return residentialBUA * apartmentsPct;
+  return residentialSubGFA(project, "apartments");
 }
 
 export default function ProgramTab() {

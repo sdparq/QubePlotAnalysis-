@@ -4,6 +4,11 @@ import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
 import { computeProgram } from "@/lib/calc/program";
 import {
+  residentialBUA,
+  residentialSubBUA,
+  residentialSubGFA,
+} from "@/lib/calc/gfa";
+import {
   defaultCommonAreasBreakdown,
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -29,22 +34,6 @@ const GROUPS: GroupDef[] = [
   { key: "circulation", label: "Circulation", hint: "Lobbies, corridors, lift cores, stairs." },
   { key: "services",    label: "Services",    hint: "MEP rooms, shafts, ducts, plant rooms." },
 ];
-
-/** Total residential built area derived from the Setup GFA breakdown. */
-function computeResidentialBUA(project: ReturnType<typeof useProject>): number {
-  const item = project.gfaBreakdown?.residential;
-  if (!item) return 0;
-  const target = project.targetGFA ?? 0;
-  const residentialGFA = item.mode === "absolute" ? item.value : (item.value / 100) * target;
-  if (residentialGFA <= 0) return 0;
-  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
-  let gfaShare = 0;
-  for (const v of Object.values(rb)) {
-    if (v.countsAsGFA) gfaShare += v.pct;
-  }
-  gfaShare /= 100;
-  return gfaShare > 0 ? residentialGFA / gfaShare : residentialGFA;
-}
 
 /** Build the flat CommonArea[] list the rest of the calc engine consumes. */
 function buildFlatCommonAreas(
@@ -78,18 +67,26 @@ export default function CommonAreasTab() {
     [project.commonAreasBreakdown],
   );
 
-  const residentialBUA = useMemo(() => computeResidentialBUA(project), [project]);
-  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+  // Group BUA is sized so its GFA-counted share equals what Setup allocates.
+  //   subGFA  = pct × residentialGFA × (countsAsGFA at residential level)
+  //   subBUA  = subGFA / subGfaShare    (inflates when Pool/Padel/... are Non-GFA)
   const groupBUA: Record<CommonAreasGroup, number> = {
-    amenities:   residentialBUA * (rb.amenities?.pct   ?? 0) / 100,
-    circulation: residentialBUA * (rb.circulation?.pct ?? 0) / 100,
-    services:    residentialBUA * (rb.services?.pct    ?? 0) / 100,
+    amenities:   residentialSubBUA(project, "amenities"),
+    circulation: residentialSubBUA(project, "circulation"),
+    services:    residentialSubBUA(project, "services"),
   };
+  const groupGFAFromSetup: Record<CommonAreasGroup, number> = {
+    amenities:   residentialSubGFA(project, "amenities"),
+    circulation: residentialSubGFA(project, "circulation"),
+    services:    residentialSubGFA(project, "services"),
+  };
+  const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
   const groupPct: Record<CommonAreasGroup, number> = {
     amenities:   rb.amenities?.pct   ?? 0,
     circulation: rb.circulation?.pct ?? 0,
     services:    rb.services?.pct    ?? 0,
   };
+  const residentialBUATotal = useMemo(() => residentialBUA(project), [project]);
 
   function commit(next: CommonAreasBreakdown) {
     patch({
@@ -146,14 +143,14 @@ export default function CommonAreasTab() {
           </p>
         </div>
 
-        {residentialBUA <= 0 && (
+        {residentialBUATotal <= 0 && (
           <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] mb-4 leading-snug">
             Set <strong>Residential GFA</strong> in Setup&apos;s GFA breakdown to drive
             this table.
           </div>
         )}
 
-        {residentialBUA > 0 && (
+        {residentialBUATotal > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <Stat label="Total common areas BUA" value={`${fmt0(totalBUA)} m²`} sub={fmtSqft(totalBUA)} />
             <Stat label="Counted as GFA" value={`${fmt0(totalGFA)} m²`} sub={fmtSqft(totalGFA)} />
@@ -169,6 +166,7 @@ export default function CommonAreasTab() {
               group={g}
               subs={breakdown[g.key]}
               groupBUA={groupBUA[g.key]}
+              groupGFAFromSetup={groupGFAFromSetup[g.key]}
               groupPct={groupPct[g.key]}
               onAdd={() => addSub(g.key)}
               onRebalance={() => rebalanceGroup(g.key)}
@@ -187,11 +185,12 @@ export default function CommonAreasTab() {
 /* -------------------------------------------------------------------------- */
 
 function GroupSection({
-  group, subs, groupBUA, groupPct, onAdd, onRebalance, onUpdateSub, onDelete,
+  group, subs, groupBUA, groupGFAFromSetup, groupPct, onAdd, onRebalance, onUpdateSub, onDelete,
 }: {
   group: GroupDef;
   subs: CommonAreaSub[];
   groupBUA: number;
+  groupGFAFromSetup: number;
   groupPct: number;
   onAdd: () => void;
   onRebalance: () => void;
@@ -220,7 +219,14 @@ function GroupSection({
         </div>
         <div className="text-right">
           <div className="eyebrow text-ink-500 text-[10px]">Of which GFA</div>
-          <div className="text-[12px] text-qube-800 font-medium tabular-nums">{gfaSum > 0 ? `${Math.round(gfaSum).toLocaleString("en-US")} m²` : "—"}</div>
+          <div className="text-[12px] text-qube-800 font-medium tabular-nums">
+            {gfaSum > 0 ? `${Math.round(gfaSum).toLocaleString("en-US")} m²` : "—"}
+          </div>
+          {groupGFAFromSetup > 0 && Math.abs(gfaSum - groupGFAFromSetup) > 1 && (
+            <div className="text-[10px] text-amber-700 mt-0.5">
+              vs Setup {Math.round(groupGFAFromSetup).toLocaleString("en-US")} m²
+            </div>
+          )}
         </div>
       </div>
 
