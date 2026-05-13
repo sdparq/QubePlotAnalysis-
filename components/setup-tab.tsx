@@ -425,8 +425,8 @@ function GfaBreakdownCard({
           <div>Use</div>
           <div className="text-right">Input</div>
           <div className="text-center">Mode</div>
-          <div className="text-right">GFA m²</div>
           <div className="text-right">BUA m²</div>
+          <div className="text-right">GFA m²</div>
           <div className="text-right">≈ sqft (BUA)</div>
           <div className="text-right">% of GFA</div>
         </div>
@@ -475,8 +475,8 @@ function GfaBreakdownCard({
                   const gfaPct = total > 0 ? (gfa / total) * 100 : 0;
                   return (
                     <>
-                      <div className="text-right text-qube-800 font-medium">{gfa > 0 ? Math.round(gfa).toLocaleString("en-US") : "—"}</div>
                       <div className="text-right text-ink-900">{bua > 0 ? Math.round(bua).toLocaleString("en-US") : "—"}</div>
+                      <div className="text-right text-qube-800 font-medium">{gfa > 0 ? Math.round(gfa).toLocaleString("en-US") : "—"}</div>
                       <div className="text-right text-ink-500">{fmtSqft(bua)}</div>
                       <div className="text-right text-ink-700">{gfaPct > 0 ? `${gfaPct.toFixed(1)}%` : "—"}</div>
                     </>
@@ -497,8 +497,8 @@ function GfaBreakdownCard({
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total of uses</div>
           <div></div>
           <div></div>
-          <div className="text-right text-qube-800">{Math.round(sumGFA).toLocaleString("en-US")}</div>
           <div className="text-right text-qube-800">{Math.round(sumBUA).toLocaleString("en-US")}</div>
+          <div className="text-right text-qube-800">{Math.round(sumGFA).toLocaleString("en-US")}</div>
           <div className="text-right text-qube-700">{fmtSqft(sumBUA)}</div>
           <div className="text-right text-qube-800">{total > 0 ? `${sumPctGFA.toFixed(1)}%` : "—"}</div>
         </div>
