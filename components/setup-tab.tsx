@@ -21,7 +21,7 @@ import {
   type ZoneClass,
   type TypologyKey,
 } from "@/lib/zone-classes";
-import { residentialBuaInflationFactor } from "@/lib/calc/gfa";
+import { residentialBuaInflationFactor, residentialSubBUA, residentialSubGFA } from "@/lib/calc/gfa";
 
 interface FloorSectionDef {
   key: "basements" | "ground" | "podium" | "typeFloors";
@@ -492,7 +492,7 @@ function GfaBreakdownCard({
               </div>
               {c.key === "residential" && m2 > 0 && (
                 <ResidentialSubBreakdown
-                  residentialM2={buaFor("residential")}
+                  project={project}
                   breakdown={project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN}
                   onChange={(next) => patch({ residentialBreakdown: next })}
                 />
@@ -583,11 +583,11 @@ const RESIDENTIAL_SUB_CATEGORIES: { key: ResidentialSubCategory; label: string; 
 ];
 
 function ResidentialSubBreakdown({
-  residentialM2,
+  project,
   breakdown,
   onChange,
 }: {
-  residentialM2: number;
+  project: ReturnType<typeof useProject>;
   breakdown: ResidentialBreakdown;
   onChange: (b: ResidentialBreakdown) => void;
 }) {
@@ -603,7 +603,7 @@ function ResidentialSubBreakdown({
   const sumPct = RESIDENTIAL_SUB_CATEGORIES.reduce((s, c) => s + (breakdown[c.key]?.pct ?? 0), 0);
   const gfaSubsM2 = RESIDENTIAL_SUB_CATEGORIES
     .filter((c) => breakdown[c.key]?.countsAsGFA)
-    .reduce((s, c) => s + residentialM2 * (breakdown[c.key]?.pct ?? 0) / 100, 0);
+    .reduce((s, c) => s + residentialSubGFA(project, c.key), 0);
   const mismatch = Math.abs(sumPct - 100) > 0.5;
 
   return (
@@ -623,21 +623,23 @@ function ResidentialSubBreakdown({
           )}
         </div>
       </div>
-      <div className="grid grid-cols-[14px_1fr_80px_90px_120px_120px] gap-1 px-1 py-1 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 border-b border-ink-200">
+      <div className="grid grid-cols-[14px_1fr_80px_90px_110px_110px_110px] gap-1 px-1 py-1 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 border-b border-ink-200">
         <span></span>
         <span>Subcategory</span>
         <span className="text-right">% of res.</span>
         <span className="text-center">Counts as GFA</span>
-        <span className="text-right">m²</span>
-        <span className="text-right">≈ sqft</span>
+        <span className="text-right">BUA m²</span>
+        <span className="text-right">GFA m²</span>
+        <span className="text-right">≈ sqft (BUA)</span>
       </div>
       {RESIDENTIAL_SUB_CATEGORIES.map((c) => {
         const sub = breakdown[c.key];
-        const m2 = residentialM2 * (sub.pct ?? 0) / 100;
+        const subBUA = residentialSubBUA(project, c.key);
+        const subGFA = residentialSubGFA(project, c.key);
         return (
           <div
             key={c.key}
-            className="grid grid-cols-[14px_1fr_80px_90px_120px_120px] gap-1 px-1 py-1 items-center text-[12px] tabular-nums"
+            className="grid grid-cols-[14px_1fr_80px_90px_110px_110px_110px] gap-1 px-1 py-1 items-center text-[12px] tabular-nums"
           >
             <span className="text-ink-300 text-[14px] leading-none">└</span>
             <div>
@@ -669,17 +671,19 @@ function ResidentialSubBreakdown({
                 }`}
               >{sub.countsAsGFA ? "GFA" : "Non-GFA"}</button>
             </div>
-            <div className="text-right text-ink-900">{m2 > 0 ? Math.round(m2).toLocaleString("en-US") : "—"}</div>
-            <div className="text-right text-ink-500">{m2 > 0 ? `${Math.round(m2 * M2_TO_SQFT).toLocaleString("en-US")} sqft` : "—"}</div>
+            <div className="text-right text-ink-900">{subBUA > 0 ? Math.round(subBUA).toLocaleString("en-US") : "—"}</div>
+            <div className="text-right text-qube-800 font-medium">{subGFA > 0 ? Math.round(subGFA).toLocaleString("en-US") : "—"}</div>
+            <div className="text-right text-ink-500">{subBUA > 0 ? `${Math.round(subBUA * M2_TO_SQFT).toLocaleString("en-US")} sqft` : "—"}</div>
           </div>
         );
       })}
-      <div className="grid grid-cols-[14px_1fr_80px_90px_120px_120px] gap-1 px-1 py-1 items-center text-[11px] tabular-nums">
+      <div className="grid grid-cols-[14px_1fr_80px_90px_110px_110px_110px] gap-1 px-1 py-1 items-center text-[11px] tabular-nums">
         <span></span>
         <span className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Sum</span>
         <span className={`text-right ${mismatch ? "text-amber-700 font-medium" : "text-ink-700"}`}>{sumPct.toFixed(1)}%</span>
         <span></span>
-        <span></span>
+        <span className="text-right text-ink-700">{Math.round(RESIDENTIAL_SUB_CATEGORIES.reduce((s, c) => s + residentialSubBUA(project, c.key), 0)).toLocaleString("en-US")}</span>
+        <span className="text-right text-qube-800">{Math.round(gfaSubsM2).toLocaleString("en-US")}</span>
         <span></span>
       </div>
     </div>
