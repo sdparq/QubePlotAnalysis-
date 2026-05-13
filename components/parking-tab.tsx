@@ -24,22 +24,19 @@ export default function ParkingTab() {
           </div>
           <div className="flex items-center gap-4">
             <label className="grid gap-1">
-              <span className="eyebrow text-ink-500 text-[10.5px]">PRM share of required</span>
-              <div className="relative">
-                <input
-                  type="number"
-                  step={0.5}
-                  min={0}
-                  max={100}
-                  className="cell-input text-right pr-9 w-28"
-                  value={Number((project.prmPercent * 100).toFixed(1))}
-                  onChange={(e) => {
-                    const n = parseFloat(e.target.value);
-                    if (Number.isFinite(n) && n >= 0) patch({ prmPercent: n / 100 });
-                  }}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-ink-400 pointer-events-none">%</span>
-              </div>
+              <span className="eyebrow text-ink-500 text-[10.5px]">Retail parking · spaces / m²</span>
+              <input
+                type="number"
+                step={0.05}
+                min={0}
+                className="cell-input text-right w-28"
+                value={Number((project.retailParkingPerM2 ?? 1).toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0) patch({ retailParkingPerM2: n });
+                }}
+                title="Required spaces per m² of retail GFA (from Setup → Retail). Default 1 space / m²."
+              />
             </label>
             <button className="btn btn-primary" onClick={() => upsertP({ id: `pk-${Date.now()}`, name: "New level", standard: 0, prm: 0 })}>+ Add level</button>
           </div>
@@ -134,7 +131,13 @@ export default function ParkingTab() {
       <div className="card">
         <div className="mb-5">
           <h2 className="section-title">Required vs available</h2>
-          <p className="section-sub">Each typology contributes its own ratio (set in the Typologies tab).</p>
+          <p className="section-sub">
+            Each typology contributes its own ratio (set in Typologies). Retail comes from
+            Setup → GFA breakdown × {Number((project.retailParkingPerM2 ?? 1).toFixed(2))}{" "}
+            spaces / m². PRM follows Dubai DCD:{" "}
+            <strong>2% of total up to 500 (min 1)</strong>, then{" "}
+            <strong>+1% on each additional space</strong>.
+          </p>
         </div>
         <div>
           <table className="tbl w-full table-fixed">
@@ -183,6 +186,14 @@ export default function ParkingTab() {
                 <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Residential required</td>
                 <td className="text-right">{fmt0(r.requiredTotal)}</td>
               </tr>
+              {r.retailRequired > 0 && (
+                <tr className="row-subtotal">
+                  <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">
+                    Retail required ({fmt0(r.retailM2)} m² × {r.retailRateUsed.toFixed(2)})
+                  </td>
+                  <td className="text-right">{fmt0(r.retailRequired)}</td>
+                </tr>
+              )}
               {r.otherUsesTotal > 0 && (
                 <tr className="row-subtotal">
                   <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Other uses required</td>
@@ -194,7 +205,9 @@ export default function ParkingTab() {
                 <td className="text-right">{fmt0(r.grandRequired)}</td>
               </tr>
               <tr>
-                <td colSpan={4} className="text-right text-ink-500 text-xs">Of which PRM ({(project.prmPercent * 100).toFixed(0)}%)</td>
+                <td colSpan={4} className="text-right text-ink-500 text-xs">
+                  Of which PRM (Dubai DCD tiered rule)
+                </td>
                 <td className="text-right">{fmt0(r.requiredPRM)}</td>
               </tr>
             </tbody>

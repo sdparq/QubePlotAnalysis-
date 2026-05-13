@@ -1,5 +1,4 @@
 import type { Project, Typology } from "../types";
-import { DUBAI_STANDARDS } from "../standards/dubai";
 
 export interface ParkingResult {
   availableStandard: number;
@@ -17,8 +16,33 @@ export interface ParkingResult {
   balance: number;
   otherUsesRequired: { name: string; netArea: number; ratio: number; required: number }[];
   otherUsesTotal: number;
+  /** Retail parking auto-derived from Setup's GFA breakdown (retail m² × rate). */
+  retailRequired: number;
+  retailRateUsed: number;
+  retailM2: number;
   grandRequired: number;
   grandBalance: number;
+}
+
+/**
+ * Dubai DCD accessible-parking tiered rule (QUBE matrix):
+ *   < 25 total       → no minimum
+ *   25 – 500 total   → 2% of total, minimum of one
+ *   > 500 total      → 2% on first 500 + 1% on the rest (= 10 + 1% × (total − 500))
+ */
+export function requiredPRM(totalRequired: number): number {
+  if (totalRequired < 25) return 0;
+  if (totalRequired <= 500) return Math.max(1, Math.ceil(totalRequired * 0.02));
+  return Math.ceil(500 * 0.02) + Math.ceil((totalRequired - 500) * 0.01);
+}
+
+/** Retail GFA (m²) drawn from Setup's GFA breakdown — the single source of
+ *  truth for retail area. */
+function retailGFA(project: Project): number {
+  const item = project.gfaBreakdown?.retail;
+  if (!item) return 0;
+  const target = project.targetGFA ?? 0;
+  return item.mode === "absolute" ? item.value : (item.value / 100) * target;
 }
 
 export function computeParking(project: Project): ParkingResult {
@@ -78,9 +102,11 @@ export function computeParking(project: Project): ParkingResult {
   }));
   const otherUsesTotal = otherUsesRequired.reduce((s, r) => s + r.required, 0);
 
-  const grandRequired = requiredTotal + otherUsesTotal;
+  const retailM2 = retailGFA(project);
+  const retailRateUsed = project.retailParkingPerM2 ?? 1.0;
+  const retailRequired = Math.ceil(retailM2 * retailRateUsed);
 
-  const requiredPRM = Math.ceil(grandRequired * (project.prmPercent || DUBAI_STANDARDS.parking.prmPercent));
+  const grandRequired = requiredTotal + otherUsesTotal + retailRequired;
 
   return {
     availableStandard,
@@ -91,12 +117,16 @@ export function computeParking(project: Project): ParkingResult {
     requiredByCategory,
     totalUnitsCounted,
     requiredTotal,
-    requiredPRM,
-    prmBalance: availablePRM - requiredPRM,
+    requiredPRM: requiredPRM(grandRequired),
+    prmBalance: availablePRM - requiredPRM(grandRequired),
     balance: availableTotal - requiredTotal,
     otherUsesRequired,
     otherUsesTotal,
+    retailRequired,
+    retailRateUsed,
+    retailM2,
     grandRequired,
     grandBalance: availableTotal - grandRequired,
   };
 }
+
