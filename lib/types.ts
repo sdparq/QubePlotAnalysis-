@@ -172,9 +172,13 @@ export interface Project {
   /** Maximum total built area (BUA, m²) the project must respect — sometimes
    *  given as a plot-level constraint. When exceeded, the UI flags it. */
   maxBUA?: number;
-  /** Retail parking standard — spaces per m² of retail GFA. Default 1.0 (one
-   *  space per m² of retail) per the QUBE Dubai convention; editable in Parking. */
-  retailParkingPerM2?: number;
+  /** Retail parking standard — m² of retail GFA per required parking space.
+   *  Default 70 m² / space (QUBE Dubai convention: 1 plaza por cada 70 m²
+   *  de retail). Editable in the Parking tab. */
+  retailM2PerSpace?: number;
+  /** Average built area consumed by one parking space (incl. aisles, ramps).
+   *  Used to estimate the total parking surface needed. Default 25 m² / space. */
+  m2PerParkingSpace?: number;
   /** Optional split of the Target GFA across uses. Each entry can be entered
    *  either as an absolute m² value or as a percentage of `targetGFA`. */
   gfaBreakdown?: GfaBreakdown;

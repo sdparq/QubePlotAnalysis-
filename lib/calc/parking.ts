@@ -16,12 +16,15 @@ export interface ParkingResult {
   balance: number;
   otherUsesRequired: { name: string; netArea: number; ratio: number; required: number }[];
   otherUsesTotal: number;
-  /** Retail parking auto-derived from Setup's GFA breakdown (retail m² × rate). */
+  /** Retail parking auto-derived from Setup's GFA breakdown (retail m² / rate). */
   retailRequired: number;
-  retailRateUsed: number;
+  retailM2PerSpaceUsed: number;
   retailM2: number;
   grandRequired: number;
   grandBalance: number;
+  /** Total parking surface needed (m²) — `grandRequired × m²/space`. */
+  totalParkingSurfaceM2: number;
+  m2PerParkingSpaceUsed: number;
 }
 
 /**
@@ -103,10 +106,14 @@ export function computeParking(project: Project): ParkingResult {
   const otherUsesTotal = otherUsesRequired.reduce((s, r) => s + r.required, 0);
 
   const retailM2 = retailGFA(project);
-  const retailRateUsed = project.retailParkingPerM2 ?? 1.0;
-  const retailRequired = Math.ceil(retailM2 * retailRateUsed);
+  const retailM2PerSpaceUsed = project.retailM2PerSpace ?? 70;
+  const retailRequired = retailM2PerSpaceUsed > 0
+    ? Math.ceil(retailM2 / retailM2PerSpaceUsed)
+    : 0;
 
   const grandRequired = requiredTotal + otherUsesTotal + retailRequired;
+  const m2PerParkingSpaceUsed = project.m2PerParkingSpace ?? 25;
+  const totalParkingSurfaceM2 = grandRequired * m2PerParkingSpaceUsed;
 
   return {
     availableStandard,
@@ -123,10 +130,12 @@ export function computeParking(project: Project): ParkingResult {
     otherUsesRequired,
     otherUsesTotal,
     retailRequired,
-    retailRateUsed,
+    retailM2PerSpaceUsed,
     retailM2,
     grandRequired,
     grandBalance: availableTotal - grandRequired,
+    totalParkingSurfaceM2,
+    m2PerParkingSpaceUsed,
   };
 }
 
