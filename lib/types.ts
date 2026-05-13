@@ -169,6 +169,9 @@ export interface Project {
   maxHeightM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
+  /** Maximum total built area (BUA, m²) the project must respect — sometimes
+   *  given as a plot-level constraint. When exceeded, the UI flags it. */
+  maxBUA?: number;
   /** Optional split of the Target GFA across uses. Each entry can be entered
    *  either as an absolute m² value or as a percentage of `targetGFA`. */
   gfaBreakdown?: GfaBreakdown;

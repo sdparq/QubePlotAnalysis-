@@ -159,6 +159,16 @@ export default function CommonAreasTab() {
           </div>
         )}
 
+        {project.maxBUA && project.maxBUA > 0 && residentialBUATotal > project.maxBUA + 1 && (
+          <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] mb-4 leading-snug">
+            Residential BUA = <strong>{Math.round(residentialBUATotal).toLocaleString("en-US")} m²</strong>{" "}
+            exceeds the project&apos;s <strong>Max BUA</strong> ({project.maxBUA.toLocaleString("en-US")} m²)
+            by {Math.round(residentialBUATotal - project.maxBUA).toLocaleString("en-US")} m². The extra
+            comes from Non-GFA subcategories below — reduce the % allocated to Pool / Padel / etc.,
+            or toggle some of them back to GFA, or relax the limit in Setup.
+          </div>
+        )}
+
         <div className="grid gap-5">
           {GROUPS.map((g) => (
             <GroupSection

@@ -97,6 +97,13 @@ export default function SetupTab() {
               onChange={(v) => patch({ targetGFA: v > 0 ? v : undefined })}
             />
           </Field>
+          <Field label="Max BUA (m²)" hint={`≈ ${fmtSqft(project.maxBUA ?? 0)}`}>
+            <NumInput
+              value={project.maxBUA ?? 0}
+              step={10}
+              onChange={(v) => patch({ maxBUA: v > 0 ? v : undefined })}
+            />
+          </Field>
           <Field label="Latitude">
             <NumInput
               value={project.latitude ?? 0}
@@ -518,6 +525,16 @@ function GfaBreakdownCard({
           <strong>{total.toLocaleString("en-US")} m²</strong>. Adjust the rows or click
           <em> Rebalance to 100%</em> above. Σ BUA = {Math.round(sumBUA).toLocaleString("en-US")} m²
           (BUA &gt; GFA because some sub-categories are flagged Non-GFA).
+        </p>
+      )}
+
+      {project.maxBUA && project.maxBUA > 0 && sumBUA > project.maxBUA + 1 && (
+        <p className="text-[11.5px] mt-3 leading-snug text-red-700">
+          Σ BUA across uses = <strong>{Math.round(sumBUA).toLocaleString("en-US")} m²</strong>{" "}
+          exceeds the <strong>Max BUA</strong> limit of{" "}
+          <strong>{project.maxBUA.toLocaleString("en-US")} m²</strong> by{" "}
+          {Math.round(sumBUA - project.maxBUA).toLocaleString("en-US")} m². Reduce Non-GFA
+          flags or the use allocations to stay within the constraint.
         </p>
       )}
     </div>

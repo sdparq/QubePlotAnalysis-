@@ -41,7 +41,15 @@ export function residentialSubGfaShare(project: Project, sub: ResidentialSubCate
 export function residentialSubGFA(project: Project, sub: ResidentialSubCategory): number {
   const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
   if (!rb[sub].countsAsGFA) return 0;
-  return (rb[sub].pct / 100) * residentialGFATarget(project);
+  // Cap the Σ subGFAs at residentialGFA target: when the user types percentages
+  // that add up to more than 100% across GFA-counted subs, scale them all
+  // proportionally so the sum equals the target exactly. Non-GFA subs are
+  // ignored here — they don't consume any of the GFA budget.
+  const totalGfaPct = RESIDENTIAL_SUBS
+    .filter((k) => rb[k].countsAsGFA)
+    .reduce((s, k) => s + (rb[k]?.pct ?? 0), 0);
+  const scale = totalGfaPct > 100 ? 100 / totalGfaPct : 1;
+  return ((rb[sub].pct * scale) / 100) * residentialGFATarget(project);
 }
 
 export function residentialSubBUA(project: Project, sub: ResidentialSubCategory): number {
