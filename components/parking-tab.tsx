@@ -1,7 +1,14 @@
 "use client";
+import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeParking } from "@/lib/calc/parking";
 import { fmt0 } from "@/lib/format";
+import {
+  offsetPolygon,
+  polygonArea,
+  rectangleToPolygon,
+  rectanglePlotPolygon,
+} from "@/lib/geom";
 import type { OtherUse } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
@@ -17,6 +24,30 @@ export default function ParkingTab() {
   const removeU = useStore((s) => s.removeOtherUse);
   const upsertTypology = useStore((s) => s.upsertTypology);
   const r = computeParking(project);
+
+  // Buildable area = plot polygon shrunk by the setbacks (same logic as Massing).
+  const buildableArea = useMemo(() => {
+    const plotArea = project.plotArea ?? 0;
+    const sqRoot = plotArea > 0 ? Math.sqrt(plotArea) : 50;
+    const frontage = project.plotFrontage && project.plotFrontage > 0 ? project.plotFrontage : sqRoot;
+    const depth = project.plotDepth && project.plotDepth > 0 ? project.plotDepth : sqRoot;
+    const sFront = project.setbackFront ?? 0;
+    const sRear = project.setbackRear ?? 0;
+    const sSide = project.setbackSide ?? 0;
+    const sUniform = project.setbackUniform ?? Math.max(sFront, sRear, sSide, 3);
+    if (project.plotMode === "polygon" && project.plotPolygon && project.plotPolygon.length >= 3) {
+      const n = project.plotPolygon.length;
+      const perEdge = project.setbackPerEdge && project.setbackPerEdge.length === n
+        ? project.setbackPerEdge
+        : new Array(n).fill(sUniform);
+      return polygonArea(offsetPolygon(project.plotPolygon, perEdge));
+    }
+    if (project.plotMode === "polygon" && project.plotPolygon) {
+      // Polygon set but invalid — fall back to rectangle.
+      return polygonArea(rectanglePlotPolygon(frontage, depth));
+    }
+    return polygonArea(rectangleToPolygon(frontage, depth, sFront, sRear, sSide));
+  }, [project.plotArea, project.plotFrontage, project.plotDepth, project.setbackFront, project.setbackRear, project.setbackSide, project.setbackUniform, project.setbackPerEdge, project.plotMode, project.plotPolygon]);
 
   return (
     <div className="grid gap-6">
@@ -255,67 +286,91 @@ export default function ParkingTab() {
         {(() => {
           const plotArea = project.plotArea ?? 0;
           const basementCount = project.basements?.count ?? 0;
-          const availableSurface = plotArea * basementCount;
-          const balance = availableSurface - r.totalParkingSurfaceM2;
-          const enough = balance >= 0;
-          const needed = plotArea > 0 ? Math.ceil(r.totalParkingSurfaceM2 / plotArea) : 0;
+          const podiumCount = project.podium?.count ?? 0;
+          const basementSurface = plotArea * basementCount;
+          const podiumSurface = buildableArea * podiumCount;
+          const availTotal = basementSurface + podiumSurface;
+          const required = r.totalParkingSurfaceM2;
+          const balance = availTotal - required;
+          const enough = balance >= 0 && availTotal > 0;
+          const basementsNeededAlone = plotArea > 0 ? Math.ceil(required / plotArea) : 0;
+          const podiumsNeededAlone = buildableArea > 0 ? Math.ceil(required / buildableArea) : 0;
           return (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat
-                  label="Plot area"
-                  value={plotArea > 0 ? `${fmt0(plotArea)} m²` : "—"}
-                  sub={plotArea > 0 ? fmtSqft(plotArea) : "Set in Setup"}
-                />
-                <Stat
-                  label="Basements"
-                  value={`${basementCount}`}
-                  sub={
-                    basementCount > 0
-                      ? `${project.basements?.heightM ?? 0} m height each`
-                      : "Set in Setup → Floor breakdown"
-                  }
-                />
-                <Stat
-                  label="Available basement surface"
-                  value={availableSurface > 0 ? `${fmt0(availableSurface)} m²` : "—"}
-                  sub={availableSurface > 0 ? `${fmt0(plotArea)} × ${basementCount} basements` : ""}
-                />
-                <BalanceStat
-                  value={balance}
-                  ok={enough && availableSurface > 0}
-                  unset={availableSurface === 0}
-                />
+              <div className="grid gap-2">
+                {/* Basements row */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Stat
+                    label="Plot area (basement)"
+                    value={plotArea > 0 ? `${fmt0(plotArea)} m²` : "—"}
+                    sub={plotArea > 0 ? fmtSqft(plotArea) : "Set in Setup"}
+                  />
+                  <Stat
+                    label="Basements"
+                    value={`${basementCount}`}
+                    sub={basementCount > 0 ? `${project.basements?.heightM ?? 0} m height each` : "Set in Setup → Floor breakdown"}
+                  />
+                  <Stat
+                    label="Buildable (podium)"
+                    value={buildableArea > 0 ? `${fmt0(buildableArea)} m²` : "—"}
+                    sub={buildableArea > 0 ? `${fmtSqft(buildableArea)} after setbacks` : "Set setbacks in Massing / Plot"}
+                  />
+                  <Stat
+                    label="Podium levels"
+                    value={`${podiumCount}`}
+                    sub={podiumCount > 0 ? `${project.podium?.heightM ?? 0} m height each` : "Set in Setup → Floor breakdown"}
+                  />
+                </div>
+                {/* Surface availability row */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Stat
+                    label="Avail. in basements"
+                    value={basementSurface > 0 ? `${fmt0(basementSurface)} m²` : "—"}
+                    sub={basementSurface > 0 ? `${fmt0(plotArea)} × ${basementCount}` : ""}
+                  />
+                  <Stat
+                    label="Avail. in podium"
+                    value={podiumSurface > 0 ? `${fmt0(podiumSurface)} m²` : "—"}
+                    sub={podiumSurface > 0 ? `${fmt0(buildableArea)} × ${podiumCount}` : ""}
+                  />
+                  <Stat
+                    label="Total available"
+                    value={availTotal > 0 ? `${fmt0(availTotal)} m²` : "—"}
+                    sub={availTotal > 0 ? fmtSqft(availTotal) : ""}
+                  />
+                  <BalanceStat value={balance} ok={enough} unset={availTotal === 0} />
+                </div>
               </div>
 
-              {plotArea > 0 && r.totalParkingSurfaceM2 > 0 && (
-                <p className={`text-[12px] mt-3 leading-snug ${enough && availableSurface > 0 ? "text-emerald-700" : "text-amber-900"}`}>
-                  {availableSurface === 0 ? (
+              {required > 0 && (
+                <div className={`text-[12px] mt-3 leading-snug ${enough ? "text-emerald-700" : "text-amber-900"}`}>
+                  {availTotal === 0 ? (
                     <>
-                      No basements set yet — you would need{" "}
-                      <strong>{needed} basement{needed === 1 ? "" : "s"}</strong> of the
-                      full plot footprint ({fmt0(plotArea)} m²) to fit{" "}
-                      {fmt0(r.totalParkingSurfaceM2)} m² of parking. Set them in
-                      <em> Setup → Floor breakdown → Basements</em>.
+                      No basements or podium levels set yet to host parking. To fit the{" "}
+                      {fmt0(required)} m² of parking you could:
+                      <ul className="list-disc ml-5 mt-1">
+                        {plotArea > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (full plot footprint of {fmt0(plotArea)} m²)</li>}
+                        {buildableArea > 0 && <li>or <strong>{podiumsNeededAlone}</strong> podium level{podiumsNeededAlone === 1 ? "" : "s"} alone (buildable footprint of {fmt0(buildableArea)} m²)</li>}
+                        <li>or any combination — set them in <em>Setup → Floor breakdown</em>.</li>
+                      </ul>
                     </>
                   ) : enough ? (
                     <>
-                      ✓ The {basementCount} basement{basementCount === 1 ? "" : "s"} provide{" "}
-                      {fmt0(availableSurface)} m² — enough to fit{" "}
-                      {fmt0(r.totalParkingSurfaceM2)} m² of parking with a{" "}
-                      <strong>{fmt0(balance)} m²</strong> margin.
+                      ✓ Total available <strong>{fmt0(availTotal)} m²</strong> ({basementCount} basement{basementCount === 1 ? "" : "s"} + {podiumCount} podium{podiumCount === 1 ? "" : "s"}) covers the {fmt0(required)} m² required with a <strong>{fmt0(balance)} m²</strong> margin.
+                      {basementSurface >= required && podiumCount > 0 && (
+                        <> · You could fit it all in the basements alone ({fmt0(basementSurface)} m²) and free the podium for amenities.</>
+                      )}
                     </>
                   ) : (
                     <>
-                      The {basementCount} basement{basementCount === 1 ? "" : "s"} only
-                      provide {fmt0(availableSurface)} m², which is{" "}
-                      <strong>{fmt0(-balance)} m² short</strong> of the{" "}
-                      {fmt0(r.totalParkingSurfaceM2)} m² needed. You&apos;d need at least{" "}
-                      <strong>{needed} basement{needed === 1 ? "" : "s"}</strong> (or shift
-                      some parking to ground / podium levels).
+                      Available <strong>{fmt0(availTotal)} m²</strong> falls{" "}
+                      <strong>{fmt0(-balance)} m² short</strong> of {fmt0(required)} m² required.{" "}
+                      You&apos;d need either <strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"}{" "}
+                      (full plot), <strong>{podiumsNeededAlone}</strong> podium level{podiumsNeededAlone === 1 ? "" : "s"}{" "}
+                      (buildable), or a mix that adds up to {fmt0(required)} m².
                     </>
                   )}
-                </p>
+                </div>
               )}
             </>
           );
