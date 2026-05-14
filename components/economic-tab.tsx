@@ -23,31 +23,50 @@ export default function EconomicTab() {
     setCfg({ typologyPricing: next });
   }
 
+  const constructionRateAuto = r.defaults.constructionRatePerBUA;
+  const constructionRateManual = cfg.constructionRatePerBUA ?? 0;
+  const constructionRateUsesAuto = constructionRateManual <= 0 && constructionRateAuto > 0;
+
   return (
     <div className="grid gap-6">
       {/* ---------- Top KPIs ---------- */}
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <Kpi label="GDV (Revenue)" value={fmtMoneyShort(r.totalRevenue, currency)} sub={fmtMoney(r.totalRevenue, currency)} />
         <Kpi label="TDC (Cost)" value={fmtMoneyShort(r.totalCost, currency)} sub={fmtMoney(r.totalCost, currency)} />
         <Kpi
-          label="Profit"
+          label="Gross profit"
+          value={fmtMoneyShort(r.grossProfit, currency)}
+          sub="GDV − TDC"
+          tone={r.grossProfit > 0 ? "good" : r.grossProfit < 0 ? "bad" : undefined}
+        />
+        <Kpi
+          label={`Corporate tax ${fmtPct(r.corporateTaxRate)}`}
+          value={fmtMoneyShort(r.corporateTax, currency)}
+          sub={r.corporateTaxExemption > 0 ? `Exempt up to ${fmtMoneyShort(r.corporateTaxExemption, currency)}` : "UAE CT on gross profit"}
+        />
+        <Kpi
+          label="Net profit"
           value={fmtMoneyShort(r.profit, currency)}
-          sub={r.profit > 0 ? "GDV − TDC" : r.profit < 0 ? "Loss" : ""}
+          sub="After UAE corporate tax"
           tone={r.profit > 0 ? "good" : r.profit < 0 ? "bad" : undefined}
         />
         <Kpi
-          label="Margin / cost"
-          value={fmtPct(r.marginOnCost)}
-          sub="Profit ÷ TDC"
-          tone={r.marginOnCost > 0.15 ? "good" : r.marginOnCost < 0 ? "bad" : undefined}
-        />
-        <Kpi
-          label="Margin / GDV"
+          label="Net margin / GDV"
           value={fmtPct(r.marginOnGDV)}
-          sub="Profit ÷ GDV"
+          sub={`Gross ${fmtPct(r.grossMarginOnGDV)}`}
           tone={r.marginOnGDV > 0.15 ? "good" : r.marginOnGDV < 0 ? "bad" : undefined}
         />
       </section>
+
+      {/* ---------- Auto-fill banner ---------- */}
+      {r.detectedClass && (
+        <div className="border border-qube-200 bg-qube-50 text-[12.5px] text-ink-700 p-3 leading-snug">
+          <span className="font-medium text-qube-800">Auto-fill from class {r.detectedClass}</span>
+          {" — "}sale prices, construction rate ({r.defaults.heightTierLabel || "—"}) and other figures are
+          pre-filled from the OMRT/QUBE matrix. Any value you type overrides the auto value; clear a field
+          to fall back to the class default.
+        </div>
+      )}
 
       {/* ---------- Pricing per typology ---------- */}
       <div className="card">
@@ -55,8 +74,7 @@ export default function EconomicTab() {
           <div>
             <h2 className="section-title">Sales pricing per typology</h2>
             <p className="section-sub">
-              Enter the asking price per m² of sellable area for each typology. The unit price and total revenue
-              update live.
+              Defaults come from the class library (AED/SqFt → AED/m², mid-range). Type a number to override.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -82,7 +100,7 @@ export default function EconomicTab() {
               <col />
               <col style={{ width: 70 }} />
               <col style={{ width: 110 }} />
-              <col style={{ width: 130 }} />
+              <col style={{ width: 150 }} />
               <col style={{ width: 150 }} />
               <col style={{ width: 160 }} />
               <col style={{ width: 80 }} />
@@ -99,30 +117,39 @@ export default function EconomicTab() {
               </tr>
             </thead>
             <tbody>
-              {r.perTypologyRevenue.map((row) => (
-                <tr key={row.typology.id}>
-                  <td className="font-medium text-ink-900">
-                    {row.typology.name}
-                    <span className="text-ink-400 text-xs ml-2">{row.typology.category}</span>
-                  </td>
-                  <td className="text-right">{fmt0(row.units)}</td>
-                  <td className="text-right tabular-nums">{fmt2(row.sellablePerUnit)}</td>
-                  <td className="cell-edit">
-                    <input
-                      type="number"
-                      min={0}
-                      step={50}
-                      className="cell-input text-right"
-                      value={row.pricePerM2 || ""}
-                      placeholder="0"
-                      onChange={(e) => setTypologyPrice(row.typology.id, parseFloat(e.target.value) || 0)}
-                    />
-                  </td>
-                  <td className="text-right tabular-nums">{fmt0(row.pricePerUnit)}</td>
-                  <td className="text-right tabular-nums">{fmt0(row.totalRevenue)}</td>
-                  <td className="text-right text-ink-500 text-xs">{fmtPct(row.pctOfRevenue)}</td>
-                </tr>
-              ))}
+              {r.perTypologyRevenue.map((row) => {
+                const manual = cfg.typologyPricing?.[row.typology.id] ?? 0;
+                const usesAuto = !manual && row.pricePerM2Auto > 0;
+                return (
+                  <tr key={row.typology.id}>
+                    <td className="font-medium text-ink-900">
+                      {row.typology.name}
+                      <span className="text-ink-400 text-xs ml-2">{row.typology.category}</span>
+                    </td>
+                    <td className="text-right">{fmt0(row.units)}</td>
+                    <td className="text-right tabular-nums">{fmt2(row.sellablePerUnit)}</td>
+                    <td className="cell-edit">
+                      <div className="grid">
+                        <input
+                          type="number"
+                          min={0}
+                          step={50}
+                          className={`cell-input text-right ${usesAuto ? "text-ink-500 italic" : ""}`}
+                          value={manual || ""}
+                          placeholder={row.pricePerM2Auto > 0 ? fmt0(row.pricePerM2Auto) : "0"}
+                          onChange={(e) => setTypologyPrice(row.typology.id, parseFloat(e.target.value) || 0)}
+                        />
+                        {usesAuto && (
+                          <span className="text-[9.5px] text-qube-700 text-right mt-0.5">auto</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="text-right tabular-nums">{fmt0(row.pricePerUnit)}</td>
+                    <td className="text-right tabular-nums">{fmt0(row.totalRevenue)}</td>
+                    <td className="text-right text-ink-500 text-xs">{fmtPct(row.pctOfRevenue)}</td>
+                  </tr>
+                );
+              })}
               <tr className="row-total">
                 <td colSpan={3} className="text-right uppercase tracking-[0.10em] text-[11px]">
                   Residential subtotal
@@ -176,8 +203,8 @@ export default function EconomicTab() {
         <div className="mb-5">
           <h2 className="section-title">Costs</h2>
           <p className="section-sub">
-            Enter direct cost figures (land, construction rate). Soft costs, marketing, contingency etc. are
-            percentages with sensible defaults — adjust per your market and project type.
+            Land is a direct input. Construction rate auto-fills from the class library; everything else
+            uses % defaults you can adjust per project.
           </p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -190,27 +217,44 @@ export default function EconomicTab() {
             />
           </Field>
           <Field label={`Construction rate (${currency} / m² BUA)`}>
-            <NumInput
-              value={cfg.constructionRatePerBUA ?? 0}
-              step={50}
-              min={0}
-              onChange={(v) => setCfg({ constructionRatePerBUA: v })}
-            />
+            <div className="grid">
+              <NumInput
+                value={constructionRateManual || (constructionRateUsesAuto ? constructionRateAuto : 0)}
+                step={50}
+                min={0}
+                italic={constructionRateUsesAuto}
+                onChange={(v) => setCfg({ constructionRatePerBUA: v })}
+              />
+              {constructionRateUsesAuto && (
+                <span className="text-[10px] text-qube-700 mt-0.5">
+                  auto · class {r.detectedClass} · {r.defaults.heightTierLabel}
+                </span>
+              )}
+            </div>
           </Field>
           <PctField label="Soft costs (% of construction)" value={cfg.softCostsPct ?? 0.06} onChange={(v) => setCfg({ softCostsPct: v })} />
           <PctField label="Permits & DM fees (% of construction)" value={cfg.permitsPct ?? 0.02} onChange={(v) => setCfg({ permitsPct: v })} />
           <PctField label="Contingency (% of construction + soft)" value={cfg.contingencyPct ?? 0.05} onChange={(v) => setCfg({ contingencyPct: v })} />
-          <PctField label="Financing (% of construction)" value={cfg.financingPct ?? 0.03} onChange={(v) => setCfg({ financingPct: v })} />
-          <PctField label="Marketing & sales (% of GDV)" value={cfg.marketingPct ?? 0.04} onChange={(v) => setCfg({ marketingPct: v })} />
-          <PctField label="Brokerage / agency (% of GDV)" value={cfg.brokeragePct ?? 0.02} onChange={(v) => setCfg({ brokeragePct: v })} />
+          <PctField label="Financing (% of construction)" value={cfg.financingPct ?? 0.06} onChange={(v) => setCfg({ financingPct: v })} />
+          <PctField label="Marketing (% of GDV)" value={cfg.marketingPct ?? 0.01} onChange={(v) => setCfg({ marketingPct: v })} />
+          <PctField label="Sales / brokerage (% of GDV)" value={cfg.brokeragePct ?? 0.07} onChange={(v) => setCfg({ brokeragePct: v })} />
           <PctField label="Branding fee (% of GDV)" value={cfg.brandingFeePct ?? 0} onChange={(v) => setCfg({ brandingFeePct: v })} />
+          <PctField label="UAE corporate tax (% of profit)" value={cfg.corporateTaxPct ?? 0.09} onChange={(v) => setCfg({ corporateTaxPct: v })} />
+          <Field label={`Tax exemption (${currency})`}>
+            <NumInput
+              value={cfg.corporateTaxExemption ?? 0}
+              step={25000}
+              min={0}
+              onChange={(v) => setCfg({ corporateTaxExemption: v })}
+            />
+          </Field>
         </div>
       </div>
 
       {/* ---------- Cost breakdown ---------- */}
       <div className="card">
         <div className="mb-5">
-          <h2 className="section-title">Cost breakdown</h2>
+          <h2 className="section-title">Cost &amp; profit breakdown</h2>
         </div>
         <table className="tbl w-full table-fixed">
           <colgroup>
@@ -244,6 +288,33 @@ export default function EconomicTab() {
               <td className="text-right">{fmt0(r.totalCost)}</td>
               <td className="text-right">100%</td>
               <td className="text-right">{fmtPct(r.totalRevenue > 0 ? r.totalCost / r.totalRevenue : 0)}</td>
+            </tr>
+            <tr>
+              <td colSpan={2} className="text-right uppercase tracking-[0.10em] text-[11px] text-ink-600">
+                Gross profit (GDV − TDC)
+              </td>
+              <td className={`text-right tabular-nums ${r.grossProfit >= 0 ? "text-ink-900" : "text-red-700"}`}>{fmt0(r.grossProfit)}</td>
+              <td className="text-right text-ink-500">{fmtPct(r.grossMarginOnCost)}</td>
+              <td className="text-right text-ink-500">{fmtPct(r.grossMarginOnGDV)}</td>
+            </tr>
+            <tr>
+              <td colSpan={2} className="text-right uppercase tracking-[0.10em] text-[11px] text-ink-600">
+                UAE corporate tax {fmtPct(r.corporateTaxRate)}
+                {r.corporateTaxExemption > 0 && (
+                  <span className="text-ink-400 normal-case tracking-normal text-[10.5px] ml-2">
+                    (− {fmtMoneyShort(r.corporateTaxExemption, currency)} exempt)
+                  </span>
+                )}
+              </td>
+              <td className="text-right tabular-nums text-red-700">− {fmt0(r.corporateTax)}</td>
+              <td className="text-right text-ink-500">—</td>
+              <td className="text-right text-ink-500">{fmtPct(r.totalRevenue > 0 ? r.corporateTax / r.totalRevenue : 0)}</td>
+            </tr>
+            <tr className="row-total">
+              <td colSpan={2} className="uppercase tracking-[0.10em] text-[11px]">Net profit (after tax)</td>
+              <td className={`text-right tabular-nums ${r.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt0(r.profit)}</td>
+              <td className="text-right">{fmtPct(r.marginOnCost)}</td>
+              <td className="text-right">{fmtPct(r.marginOnGDV)}</td>
             </tr>
           </tbody>
         </table>
@@ -301,15 +372,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function NumInput({
-  value, onChange, step = 1, min, suffix,
-}: { value: number; onChange: (v: number) => void; step?: number; min?: number; suffix?: string }) {
+  value, onChange, step = 1, min, suffix, italic,
+}: { value: number; onChange: (v: number) => void; step?: number; min?: number; suffix?: string; italic?: boolean }) {
   return (
     <div className="relative">
       <input
         type="number"
         step={step}
         min={min}
-        className={`cell-input ${suffix ? "pr-9" : ""}`}
+        className={`cell-input ${suffix ? "pr-9" : ""} ${italic ? "text-ink-500 italic" : ""}`}
         value={Number.isFinite(value) ? value : 0}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
       />

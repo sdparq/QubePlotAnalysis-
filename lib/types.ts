@@ -349,15 +349,19 @@ export interface EconomicConfig {
   /** Soft costs (consultants, design fees) — fraction of construction. */
   softCostsPct?: number;          // default 0.06
   /** Marketing & sales — fraction of revenue. */
-  marketingPct?: number;          // default 0.04
+  marketingPct?: number;          // default 0.01
   /** Permits & DM fees — fraction of construction. */
   permitsPct?: number;            // default 0.02
   /** Contingency — fraction of (construction + soft costs). */
   contingencyPct?: number;        // default 0.05
   /** Financing / interest during construction — fraction of construction. */
-  financingPct?: number;          // default 0.03
-  /** Brokerage / agent fees — fraction of revenue. */
-  brokeragePct?: number;          // default 0.02
+  financingPct?: number;          // default 0.06
+  /** Brokerage / agent / sales — fraction of revenue. */
+  brokeragePct?: number;          // default 0.07
   /** Optional branding fee (e.g. hotel-branded residence) — fraction of revenue. */
   brandingFeePct?: number;        // default 0
+  /** UAE corporate tax rate — applied to gross profit above the exemption. */
+  corporateTaxPct?: number;       // default 0.09
+  /** UAE corporate tax exemption (AED) — first slice of profit not taxed. */
+  corporateTaxExemption?: number; // default 0
 }
