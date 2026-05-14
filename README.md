@@ -7,7 +7,7 @@ Reproduces every calculation from `Analysis_Production City .xlsx` and lets any 
 
 - Next.js 14 (App Router) + TypeScript + Tailwind
 - Calculations: pure TS modules in `lib/calc/`
-- State: Zustand with `localStorage` persistence
+- State: Zustand with `localStorage` persistence (+ optional Supabase cloud sync)
 - Export: ExcelJS — produces a workbook with the same 5 sheets as the source Excel
 - Tests: Vitest with parity test against the Production City sample
 
@@ -52,7 +52,48 @@ lib/
 7. **Results** — dashboard with KPIs and compliance checks
 8. **Export Excel** — recreates the 5-sheet workbook for sharing
 
-State auto-saves to localStorage. Use *Export JSON* / *Import JSON* to share analyses between users.
+State auto-saves to localStorage. Use *Export JSON* / *Import JSON* to share analyses between users — or enable the optional cloud sync below for live collaboration.
+
+## Cloud sync (optional)
+
+The app can sync projects to a shared Supabase database so every signed-in user sees and edits the same set of projects.
+
+1. Create a Supabase project (free tier is enough). Note its `Project URL` and `anon public` key.
+2. In the SQL editor, run:
+
+   ```sql
+   create table public.projects (
+     id uuid primary key default gen_random_uuid(),
+     name text not null default 'Untitled project',
+     data jsonb not null default '{}'::jsonb,
+     created_by uuid references auth.users(id) on delete set null,
+     created_at timestamptz default now(),
+     updated_by uuid references auth.users(id) on delete set null,
+     updated_at timestamptz default now()
+   );
+   create index projects_updated_at_idx on public.projects (updated_at desc);
+
+   alter table public.projects enable row level security;
+   create policy "auth read"   on public.projects for select using (auth.role() = 'authenticated');
+   create policy "auth insert" on public.projects for insert with check (auth.role() = 'authenticated');
+   create policy "auth update" on public.projects for update using (auth.role() = 'authenticated');
+   create policy "auth delete" on public.projects for delete using (auth.role() = 'authenticated');
+
+   create function public.touch_updated_at() returns trigger language plpgsql as $$
+   begin new.updated_at = now(); new.updated_by = auth.uid(); return new; end $$;
+   create trigger projects_touch before update on public.projects
+   for each row execute function public.touch_updated_at();
+   ```
+
+3. In **Authentication → Providers**, enable Google. Add the Netlify URL to **URL Configuration → Site URL** and to the redirect allow-list.
+4. Set the two env vars (copy `.env.example` → `.env.local`, and add the same two in Netlify → Site settings → Environment):
+
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   ```
+
+5. Redeploy. The header gains a **Sign in with Google** button; once signed in, every change to a cloud-tracked project auto-saves and is visible to everyone else in real time on their next load. Without these env vars the app runs unchanged in local-only mode.
 
 ## Deploy to Netlify
 
@@ -65,7 +106,7 @@ The app is configured as a fully static export — works on any static host, no 
    - Node 20
 3. Click *Deploy*.
 
-That's it — no plugin needed, no env vars.
+That's it — no plugin needed. For cloud sync set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in Netlify's environment (see *Cloud sync* above); without them the app stays local-only.
 
 ## Urban-context 3D view
 

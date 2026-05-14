@@ -98,6 +98,8 @@ export interface ParcelInfo {
 
 export interface Project {
   id: string;
+  /** Set once the project has been pushed to Supabase. Same value as the cloud row's primary key. */
+  cloudId?: string;
   createdAt: number;
   updatedAt: number;
   name: string;

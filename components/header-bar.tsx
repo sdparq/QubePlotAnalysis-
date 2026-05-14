@@ -2,6 +2,7 @@
 import { useStore, useProject } from "@/lib/store";
 import { exportToExcel } from "@/lib/export-xlsx";
 import ProjectSwitcher from "./project-switcher";
+import CloudStatus from "./cloud-status";
 
 export default function HeaderBar() {
   const project = useProject();
@@ -69,6 +70,7 @@ export default function HeaderBar() {
             className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
             onClick={() => exportToExcel(project)}
           >Export Excel</button>
+          <div className="ml-2"><CloudStatus /></div>
         </div>
       </div>
     </header>

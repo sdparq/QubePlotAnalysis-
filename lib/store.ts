@@ -23,6 +23,15 @@ interface State {
   setProject: (p: Project) => void;
   patch: (patch: Partial<Project>) => void;
 
+  // Cloud sync
+  /** Replace (or insert) a project keyed by its cloud uuid. Re-keys local ids
+   *  when a project gets linked for the first time. */
+  upsertFromCloud: (p: Project, opts?: { activate?: boolean }) => void;
+  /** Remove a project by its cloud id (does nothing if not present locally). */
+  removeByCloudId: (cloudId: string) => void;
+  /** Mark the active local-only project as linked to a freshly created cloud row. */
+  linkActiveToCloud: (cloudId: string) => void;
+
   upsertTypology: (t: Typology) => void;
   removeTypology: (id: string) => void;
 
@@ -121,6 +130,49 @@ export const useStore = create<State>()(
 
       setProject: (p) => set((s) => updateActive(s, () => p)),
       patch: (patch) => set((s) => updateActive(s, (p) => ({ ...p, ...patch }))),
+
+      upsertFromCloud: (p, opts) => {
+        const cloudId = p.cloudId ?? p.id;
+        const incoming: Project = { ...p, id: cloudId, cloudId };
+        set((s) => {
+          const existing = s.projects[cloudId];
+          // Don't clobber unsaved newer local edits.
+          if (existing && existing.updatedAt > incoming.updatedAt) return {};
+          const projects = { ...s.projects, [cloudId]: incoming };
+          const activeProjectId = opts?.activate ? cloudId : s.activeProjectId;
+          return { projects, activeProjectId };
+        });
+      },
+
+      removeByCloudId: (cloudId) => {
+        set((s) => {
+          if (!s.projects[cloudId]) return {};
+          const next = { ...s.projects };
+          delete next[cloudId];
+          if (Object.keys(next).length === 0) {
+            const blank = emptyProject();
+            return { projects: { [blank.id]: blank }, activeProjectId: blank.id };
+          }
+          let activeId = s.activeProjectId;
+          if (activeId === cloudId) {
+            activeId = Object.values(next).sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+          }
+          return { projects: next, activeProjectId: activeId };
+        });
+      },
+
+      linkActiveToCloud: (cloudId) => {
+        set((s) => {
+          const oldId = s.activeProjectId;
+          const p = s.projects[oldId];
+          if (!p) return {};
+          const linked: Project = { ...p, id: cloudId, cloudId, updatedAt: Date.now() };
+          const next = { ...s.projects };
+          delete next[oldId];
+          next[cloudId] = linked;
+          return { projects: next, activeProjectId: cloudId };
+        });
+      },
 
       upsertTypology: (t) =>
         set((s) =>

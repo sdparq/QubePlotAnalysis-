@@ -13,13 +13,14 @@
   "dependencies": {
     "@react-three/drei": "9.114.0",
     "@react-three/fiber": "8.17.10",
+    "@supabase/supabase-js": "^2.105.4",
+    "exceljs": "4.4.0",
     "next": "14.2.18",
+    "pdfjs-dist": "4.7.76",
+    "polygon-clipping": "0.15.7",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "three": "0.169.0",
-    "exceljs": "4.4.0",
-    "pdfjs-dist": "4.7.76",
-    "polygon-clipping": "0.15.7",
     "zustand": "4.5.5"
   },
   "devDependencies": {
