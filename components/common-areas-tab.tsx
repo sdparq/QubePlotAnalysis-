@@ -2,7 +2,6 @@
 import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
-import { computeProgram } from "@/lib/calc/program";
 import {
   residentialBUA,
   residentialSubBUA,
@@ -60,7 +59,6 @@ function buildFlatCommonAreas(
 export default function CommonAreasTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
-  const program = computeProgram(project);
 
   const breakdown: CommonAreasBreakdown = useMemo(
     () => project.commonAreasBreakdown ?? defaultCommonAreasBreakdown(),
@@ -70,11 +68,17 @@ export default function CommonAreasTab() {
   // Group BUA is sized so its GFA-counted share equals what Setup allocates.
   //   subGFA  = pct × residentialGFA × (countsAsGFA at residential level)
   //   subBUA  = subGFA / subGfaShare    (inflates when Pool/Padel/... are Non-GFA)
-  const groupBUA: Record<CommonAreasGroup, number> = {
-    amenities:   residentialSubBUA(project, "amenities"),
-    circulation: residentialSubBUA(project, "circulation"),
-    services:    residentialSubBUA(project, "services"),
-  };
+  function groupBUAFor(breakdownOverride?: CommonAreasBreakdown): Record<CommonAreasGroup, number> {
+    const proj = breakdownOverride
+      ? { ...project, commonAreasBreakdown: breakdownOverride }
+      : project;
+    return {
+      amenities:   residentialSubBUA(proj, "amenities"),
+      circulation: residentialSubBUA(proj, "circulation"),
+      services:    residentialSubBUA(proj, "services"),
+    };
+  }
+  const groupBUA = groupBUAFor();
   const groupGFAFromSetup: Record<CommonAreasGroup, number> = {
     amenities:   residentialSubGFA(project, "amenities"),
     circulation: residentialSubGFA(project, "circulation"),
@@ -89,9 +93,12 @@ export default function CommonAreasTab() {
   const residentialBUATotal = useMemo(() => residentialBUA(project), [project]);
 
   function commit(next: CommonAreasBreakdown) {
+    // Compute the group BUAs against the NEW breakdown so the flat list and
+    // every downstream calc reflect the toggle/edit immediately.
+    const nextGroupBUA = groupBUAFor(next);
     patch({
       commonAreasBreakdown: next,
-      commonAreas: buildFlatCommonAreas(next, groupBUA),
+      commonAreas: buildFlatCommonAreas(next, nextGroupBUA),
     });
   }
 
@@ -125,10 +132,21 @@ export default function CommonAreasTab() {
   }
 
   // ── Aggregate stats ─────────────────────────────────────────────────────
-  const totalBUA = groupBUA.amenities + groupBUA.circulation + groupBUA.services;
-  const totalGFA = program.commonAreasGFA;
-  const totalOpen = program.commonAreasOpen;
-  const totalBUAonly = program.commonAreasBUAonly;
+  // (totalBUA / totalGFA are derived from the breakdown below, so they always
+  // mirror what the table shows — even when group sums don't add up to 100%.)
+  // ── Aggregate stats (derived live from the breakdown to stay in sync) ──
+  const aggregated = (["amenities", "circulation", "services"] as CommonAreasGroup[])
+    .flatMap((g) =>
+      breakdown[g].map((s) => ({
+        bua: groupBUA[g] * s.pct / 100,
+        gfa: s.countsAsGFA ? groupBUA[g] * s.pct / 100 : 0,
+        open: s.countsAsGFA ? 0 : groupBUA[g] * s.pct / 100,
+      })),
+    );
+  const totalBUA = aggregated.reduce((s, x) => s + x.bua, 0);
+  const totalGFA = aggregated.reduce((s, x) => s + x.gfa, 0);
+  const totalOpen = aggregated.reduce((s, x) => s + x.open, 0);
+  const totalBUAonly = 0; // not used by the breakdown — kept for compatibility.
 
   return (
     <div className="grid gap-6">
