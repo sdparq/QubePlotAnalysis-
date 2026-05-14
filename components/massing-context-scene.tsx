@@ -7,7 +7,13 @@ import type { Point } from "@/lib/geom";
 import { polygonBBox } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import type { CustomNeighbor } from "@/lib/types";
-import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT } from "@/lib/ai-render";
+import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
+
+type AiStyle = "scheme" | "hyperreal";
+const PROMPT_FOR: Record<AiStyle, string> = {
+  scheme: DEFAULT_SCHEME_PROMPT,
+  hyperreal: DEFAULT_HYPERREAL_PROMPT,
+};
 
 export interface ContextSceneProps {
   plot: Point[];
@@ -188,8 +194,17 @@ export default function MassingContextScene(props: ContextSceneProps) {
   const [keyDialog, setKeyDialog] = useState<{ open: boolean; draft: string }>({ open: false, draft: "" });
   const [aiRendering, setAiRendering] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string; modelUsed?: string } | null>(null);
-  const [aiPrompt, setAiPrompt] = useState<string>(DEFAULT_SCHEME_PROMPT);
+  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string; modelUsed?: string; style: AiStyle } | null>(null);
+  const [aiStyle, setAiStyle] = useState<AiStyle>("scheme");
+  const [aiPrompts, setAiPrompts] = useState<Record<AiStyle, string>>({
+    scheme: DEFAULT_SCHEME_PROMPT,
+    hyperreal: DEFAULT_HYPERREAL_PROMPT,
+  });
+  const aiPrompt = aiPrompts[aiStyle];
+  const setAiPrompt = useCallback(
+    (next: string) => setAiPrompts((p) => ({ ...p, [aiStyle]: next })),
+    [aiStyle],
+  );
 
   const persistKey = useCallback((k: string) => {
     setApiKey(k);
@@ -202,24 +217,27 @@ export default function MassingContextScene(props: ContextSceneProps) {
     try { return c.toDataURL("image/png"); } catch { return null; }
   }, []);
 
-  const handleGeminiRender = useCallback(async () => {
+  const handleGeminiRender = useCallback(async (styleOverride?: AiStyle) => {
     if (!apiKey) {
       setKeyDialog({ open: true, draft: "" });
       return;
     }
     const png = captureCanvasPng();
     if (!png) { setAiError("Could not capture the viewer canvas."); return; }
+    const style = styleOverride ?? aiStyle;
+    const prompt = (aiPrompts[style] ?? PROMPT_FOR[style]).trim() || PROMPT_FOR[style];
+    if (styleOverride && styleOverride !== aiStyle) setAiStyle(styleOverride);
     setAiRendering(true);
     setAiError(null);
     try {
-      const out = await renderSchemeWithGemini(apiKey, png, aiPrompt.trim() || DEFAULT_SCHEME_PROMPT);
-      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote, modelUsed: out.modelUsed });
+      const out = await renderSchemeWithGemini(apiKey, png, prompt);
+      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote, modelUsed: out.modelUsed, style });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : String(e));
     } finally {
       setAiRendering(false);
     }
-  }, [apiKey, aiPrompt, captureCanvasPng]);
+  }, [apiKey, aiPrompts, aiStyle, captureCanvasPng]);
 
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
@@ -566,7 +584,22 @@ export default function MassingContextScene(props: ContextSceneProps) {
           )}
 
           <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5 w-[260px]">
-            <span className="eyebrow text-ink-500 text-[10px]">AI scheme render</span>
+            <span className="eyebrow text-ink-500 text-[10px]">AI render</span>
+            <div className="inline-flex border border-ink-200 bg-bone-50">
+              {([
+                { id: "scheme", label: "Schematic" },
+                { id: "hyperreal", label: "Hyperreal" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setAiStyle(opt.id)}
+                  className={`flex-1 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                    aiStyle === opt.id ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-200"
+                  }`}
+                  title={opt.id === "scheme" ? "Flat pastel axonometric diagram" : "Photorealistic BIG-style render"}
+                >{opt.label}</button>
+              ))}
+            </div>
             <label className="grid gap-1">
               <span className="text-[9px] uppercase tracking-[0.10em] text-ink-500">Prompt</span>
               <textarea
@@ -576,21 +609,21 @@ export default function MassingContextScene(props: ContextSceneProps) {
                 onChange={(e) => setAiPrompt(e.target.value)}
                 spellCheck={false}
               />
-              {aiPrompt !== DEFAULT_SCHEME_PROMPT && (
+              {aiPrompt !== PROMPT_FOR[aiStyle] && (
                 <button
                   className="text-[10px] text-qube-700 hover:text-qube-900 underline justify-self-start"
-                  onClick={() => setAiPrompt(DEFAULT_SCHEME_PROMPT)}
-                  title="Restore the default prompt"
+                  onClick={() => setAiPrompt(PROMPT_FOR[aiStyle])}
+                  title="Restore the default prompt for this style"
                 >Reset to default</button>
               )}
             </label>
             <button
               className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
-              onClick={handleGeminiRender}
+              onClick={() => handleGeminiRender()}
               disabled={aiRendering}
               title="Capture the viewer and re-render it via Google Gemini. Free tier from aistudio.google.com."
             >
-              {aiRendering ? "Rendering…" : "✦ Render scheme"}
+              {aiRendering ? "Rendering…" : aiStyle === "scheme" ? "✦ Render scheme" : "✦ Render hyperreal"}
             </button>
             <button
               className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
@@ -888,22 +921,34 @@ export default function MassingContextScene(props: ContextSceneProps) {
           <div className="bg-white border border-ink-200 shadow-lg max-w-[1100px] w-full max-h-full overflow-auto grid gap-3 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="eyebrow text-ink-500">AI scheme render</div>
-                <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini output</h3>
+                <div className="eyebrow text-ink-500">
+                  AI {aiResult.style === "hyperreal" ? "hyperreal" : "scheme"} render
+                </div>
+                <h3 className="text-[15px] font-medium text-ink-900 mt-1">
+                  {aiResult.style === "hyperreal" ? "Photorealistic preview" : "Schematic axonometric"}
+                </h3>
                 {aiResult.modelUsed && (
                   <p className="text-[10.5px] text-ink-500 mt-0.5">model: {aiResult.modelUsed}</p>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <a
-                  download="qube-scheme.png"
+                  download={aiResult.style === "hyperreal" ? "qube-hyperreal.png" : "qube-scheme.png"}
                   href={aiResult.imageDataUrl}
                   className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] border border-ink-300 text-ink-800 hover:bg-bone-50"
                 >Download PNG</a>
+                {aiResult.style === "scheme" && (
+                  <button
+                    className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-ink-900 text-bone-100 hover:bg-ink-800 disabled:opacity-50"
+                    disabled={aiRendering}
+                    onClick={() => handleGeminiRender("hyperreal")}
+                    title="Re-render the same massing in a BIG Architects-style photorealistic look"
+                  >✦ Go hyperrealistic →</button>
+                )}
                 <button
                   className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
                   disabled={aiRendering}
-                  onClick={handleGeminiRender}
+                  onClick={() => handleGeminiRender(aiResult.style)}
                 >Re-render</button>
                 <button
                   className="text-ink-400 hover:text-ink-700 text-[18px] leading-none px-2"
@@ -914,7 +959,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
             </div>
             <div className="border border-ink-200 bg-bone-50 flex items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={aiResult.imageDataUrl} alt="AI scheme render" className="max-w-full h-auto" />
+              <img src={aiResult.imageDataUrl} alt="AI render" className="max-w-full h-auto" />
             </div>
             {aiResult.note && (
               <p className="text-[11px] text-ink-500 leading-snug whitespace-pre-wrap">{aiResult.note}</p>
@@ -923,8 +968,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
         </div>
       )}
 
-      {aiRendering && !aiResult && (
-        <div className="absolute inset-0 z-20 bg-ink-900/35 flex items-center justify-center pointer-events-none">
+      {aiRendering && (
+        <div className="absolute inset-0 z-40 bg-ink-900/35 flex items-center justify-center pointer-events-none">
           <div className="bg-white px-4 py-3 border border-ink-200 shadow-md text-[12px] text-ink-700 grid gap-2 justify-items-center">
             <div className="w-6 h-6 border-2 border-qube-500 border-t-transparent rounded-full animate-spin" />
             <span>Rendering with Gemini…</span>

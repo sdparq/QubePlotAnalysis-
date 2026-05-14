@@ -32,6 +32,16 @@ SURROUNDINGS: keep the white neighbouring volumes as flat pastel-white blocks wi
 
 Do not change geometry or proportions of any volume, only apply graphic style. No annotations, no labels, no text.`;
 
+export const DEFAULT_HYPERREAL_PROMPT = `Transform the provided axonometric massing into a photorealistic architectural rendering in the visual language of BIG (Bjarke Ingels Group), MVRDV and Heatherwick Studio — bold, sculptural, modern, iconic. STRICT GEOMETRIC FIDELITY: preserve the exact silhouette, footprint, total height, podium step, courtyards / holes and every set-back of the highlighted project volume. Do not invent new floors, towers or extrusions. Use the same camera angle, framing and orientation as the input.
+
+PROJECT BUILDING (the highlighted volume): render it as a contemporary residential tower with a striking sculptural facade — clean white architectural concrete or off-white fibre-cement panels, full-height floor-to-ceiling glazing in dark anodised aluminium frames, and deeply carved balcony loggias revealing warm timber soffits and slatted oak screens. Crisp shadow lines on every floor slab. The facade reads as parametric / rhythmic but disciplined. Soft reflections on glass showing sky and surrounding context. If the volume includes a podium step, treat the podium roof as a lush landscaped amenity deck: infinity-edge swimming pool with turquoise water and travertine coping, timber decking, planters with mediterranean trees and ornamental grasses, pergolas with white tensile shading, lounge furniture, outdoor kitchen, all carefully composed and photographed from above.
+
+LIGHTING & ATMOSPHERE: golden-hour sun, warm low-angle directional light from one side casting long crisp shadows, soft global illumination, clear blue sky with a few thin cirrus clouds, gentle atmospheric haze in the distance. High dynamic range, physically based rendering, realistic ambient occlusion in every corner, subtle bloom on glazing highlights. Cinematic colour grade — clean whites, warm timber accents, lush greens, deep cobalt sky.
+
+CONTEXT: keep the surrounding neighbour volumes in their exact positions but render them realistically — sandy beige stone, glass curtain walls or rendered plaster facades typical of contemporary Dubai mid-rise architecture, all clearly subordinate to the project building. The ground plane reads as a real urban site: clean asphalt streets with lane markings, granite kerbs, generous wide pedestrian sidewalks in pale stone, mature street trees (date palms and ficus) with detailed canopies casting dappled shadows, small landscaped strips with shrubs and groundcover, parked cars, a few pedestrians for scale, bicycles. Subtle reflections in glazing on neighbour buildings.
+
+QUALITY: ultra-high-resolution architectural visualisation, sharp focus throughout, professional V-Ray / Corona / Lumion / Enscape look, magazine-cover composition, suitable for a developer marketing brochure. No labels, no text, no people that are recognisable, no logos. Maintain the input camera and geometry exactly.`;
+
 async function callGeminiOnce(
   apiKey: string,
   base64: string,
