@@ -1,5 +1,4 @@
 import type { Project } from "../types";
-import { DUBAI_STANDARDS } from "../standards/dubai";
 
 /* -------------------------------------------------------------------------- */
 /*    Dubai Building Code D.8.8 — Passenger elevators in residential apts.   */
@@ -215,30 +214,13 @@ export function minServiceLiftSpec(recommended = false): MinLiftSpec {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              CIBSE / project calc                          */
+/*                              Project calc                                  */
 /* -------------------------------------------------------------------------- */
 
 export interface LiftsResult {
   byFloor: { floor: number; units: number; population: number }[];
   totalUnits: number;
   totalPopulation: number;
-  // CIBSE Guide D round-trip-time path
-  demandStandard: number;
-  demandPremium: number;
-  personsPerTrip: number;
-  totalTravelHeight: number;
-  probableStops: number;
-  rttSeconds: number;
-  tripsPer5Min: number;
-  capacityPerLift: number;
-  liftsCIBSEStandard: number;
-  liftsCIBSEPremium: number;
-  liftsCIBSE: number;
-  ruleOfThumbLifts: number;
-  /** Dubai Building Code D.8.8 minimum (sum of D.13 + D.14). Kept under this
-   *  name for backward-compatibility with previous result shape. */
-  dcdMinLifts: number;
-  // Dubai Building Code D.8.8 path
   occupiedFloors: number;
   boardingFloors: number;
   dbcFromPopulation: number | null;
@@ -246,24 +228,15 @@ export interface LiftsResult {
   dbcTotal: number | null;
   dbcOutOfChart: boolean;
   dbcBeyondChart: boolean;
-  // Combined recommendation
   liftsRecommended: number;
   governing: string;
-  // Cabin guidance (Table D.6)
   passengerMin: MinLiftSpec;
   passengerRecommended: MinLiftSpec;
   serviceMin: MinLiftSpec;
   serviceRecommended: MinLiftSpec;
 }
 
-function roundTo(n: number, digits: number) {
-  const f = Math.pow(10, digits);
-  return Math.round(n * f) / f;
-}
-
 export function computeLifts(project: Project): LiftsResult {
-  const cfg = project.lifts;
-  const std = DUBAI_STANDARDS.lifts;
   const tById = new Map(project.typologies.map((t) => [t.id, t]));
 
   const floors = Array.from({ length: project.numFloors }, (_, i) => i + 1);
@@ -283,22 +256,6 @@ export function computeLifts(project: Project): LiftsResult {
   const totalUnits = byFloor.reduce((s, f) => s + f.units, 0);
   const totalPopulation = byFloor.reduce((s, f) => s + f.population, 0);
 
-  // CIBSE handling-capacity computation
-  const demandStandard = Math.ceil(totalPopulation * cfg.handlingPctStandard);
-  const demandPremium = Math.ceil(totalPopulation * cfg.handlingPctPremium);
-  const personsPerTrip = Math.floor(Math.floor(cfg.cabinKg / std.weightPerPerson) * std.capacityFactor);
-  const totalTravelHeight = project.numFloors * project.floorHeight;
-  const probableStops = roundTo(Math.sqrt(project.numFloors), 1);
-  const rttSeconds = roundTo((2 * totalTravelHeight) / cfg.speed + probableStops * cfg.timePerStop, 1);
-  const tripsPer5Min = Math.floor((std.handlingWindowSec / rttSeconds) * 10) / 10;
-  const capacityPerLift = Math.floor(tripsPer5Min * personsPerTrip);
-  const liftsCIBSEStandard = capacityPerLift > 0 ? Math.ceil(demandStandard / capacityPerLift) : 0;
-  const liftsCIBSEPremium = capacityPerLift > 0 ? Math.ceil(demandPremium / capacityPerLift) : 0;
-  const liftsCIBSE = Math.max(liftsCIBSEStandard, liftsCIBSEPremium);
-
-  const ruleOfThumbLifts = Math.ceil(totalUnits / cfg.unitsPerLiftRule);
-
-  // Dubai Building Code D.8.8 path
   const occupiedFloors = project.numFloors; // residential type floors
   const basementCount = project.basements?.count ?? 0;
   const groundCount = project.ground?.count ?? 1;
@@ -312,35 +269,16 @@ export function computeLifts(project: Project): LiftsResult {
     boardingFloors,
   });
 
-  const candidates: { count: number; label: string }[] = [
-    { count: liftsCIBSE, label: liftsCIBSEPremium >= liftsCIBSEStandard ? "CIBSE premium 7%" : "CIBSE standard 5%" },
-    { count: ruleOfThumbLifts, label: `Rule of thumb (1 per ${cfg.unitsPerLiftRule} units)` },
-    { count: dbc.total ?? 0, label: "Dubai Building Code D.8.8" },
-  ];
-  candidates.sort((a, b) => b.count - a.count);
-  const top = candidates[0];
-  const liftsRecommended = top.count;
-  const governing = dbc.outOfChart && dbc.total === null
-    ? "Out of D.8.8 chart — VT Consultant required (D.9 method 2)"
-    : top.label;
+  const liftsRecommended = dbc.total ?? 0;
+  const governing =
+    dbc.total === null
+      ? "Out of D.8.8 chart — VT Consultant required (D.9 method 2)"
+      : "Dubai Building Code D.8.8";
 
   return {
     byFloor,
     totalUnits,
     totalPopulation,
-    demandStandard,
-    demandPremium,
-    personsPerTrip,
-    totalTravelHeight,
-    probableStops,
-    rttSeconds,
-    tripsPer5Min,
-    capacityPerLift,
-    liftsCIBSEStandard,
-    liftsCIBSEPremium,
-    liftsCIBSE,
-    ruleOfThumbLifts,
-    dcdMinLifts: dbc.total ?? 0,
     occupiedFloors,
     boardingFloors,
     dbcFromPopulation: dbc.fromPopulation,

@@ -44,11 +44,11 @@ export default function ResultsTab() {
           <h3 className="section-title">Lifts</h3>
           <div className="section-rule" />
           <dl className="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
-            <Stat label="Demand 5%" value={fmt0(l.demandStandard)} />
-            <Stat label="Demand 7%" value={fmt0(l.demandPremium)} />
-            <Stat label="Capacity / lift" value={fmt0(l.capacityPerLift)} />
-            <Stat label="RTT" value={`${l.rttSeconds.toFixed(1)} s`} />
-            <Stat label="CIBSE governs" value={fmt0(l.liftsCIBSE)} />
+            <Stat label="Population" value={fmt0(l.totalPopulation)} />
+            <Stat label="Occupied floors" value={fmt0(l.occupiedFloors)} />
+            <Stat label="Boarding floors" value={fmt0(l.boardingFloors)} />
+            <Stat label="From Fig D.13" value={l.dbcFromPopulation !== null ? fmt0(l.dbcFromPopulation) : "—"} />
+            <Stat label="From Fig D.14" value={l.dbcFromBoarding !== null ? fmt0(l.dbcFromBoarding) : "—"} />
             <Stat label="Recommended" value={fmt0(l.liftsRecommended)} good />
           </dl>
         </div>

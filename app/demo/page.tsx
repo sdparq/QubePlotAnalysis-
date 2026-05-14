@@ -554,14 +554,14 @@ function ParkingLiftsScene({ t, data }: { t: number; data: SampleData }) {
       verdict: pk.balance >= 0 && pk.prmBalance >= 0 ? "PASS" : "REVIEW",
     },
     {
-      title: "Tab 06 · Lifts (CIBSE Guide D)",
+      title: "Tab 06 · Lifts (Dubai Building Code D.8.8)",
       rows: [
-        { k: "Recommended", v: `${lf.liftsRecommended} × ${data.project.lifts.cabinKg} kg` },
-        { k: "CIBSE", v: `${lf.liftsCIBSE} cabins` },
-        { k: "Round trip", v: `${lf.rttSeconds.toFixed(0)} s` },
+        { k: "Recommended", v: `${lf.liftsRecommended} lifts` },
+        { k: "Population", v: `${fmt0(lf.totalPopulation)} (${lf.occupiedFloors} floors)` },
+        { k: "Boarding floors", v: `${lf.boardingFloors}` },
         { k: "Governing", v: lf.governing },
       ],
-      verdict: lf.liftsRecommended >= lf.dcdMinLifts ? "PASS" : "REVIEW",
+      verdict: lf.dbcTotal !== null ? "PASS" : "REVIEW",
     },
   ];
   return (

@@ -7,7 +7,6 @@ export default function LiftsTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
   const r = computeLifts(project);
-  const cfg = project.lifts;
 
   const basementCount = project.basements?.count ?? 0;
   const groundCount = project.ground?.count ?? 1;
@@ -127,56 +126,11 @@ export default function LiftsTab() {
         </div>
       </div>
 
-      {/* CIBSE Guide D — secondary check */}
-      <div className="card">
-        <div className="mb-5">
-          <h2 className="section-title">CIBSE Guide D · handling-capacity check</h2>
-          <p className="section-sub">
-            Round-trip-time analysis as a cross-check against the D.8.8 minimum. The final
-            recommendation below uses whichever method gives the higher number.
-          </p>
-        </div>
-        <div className="grid sm:grid-cols-3 gap-5 mb-5">
-          <Field label="Cabin rated load (kg)">
-            <select className="cell-input" value={cfg.cabinKg} onChange={(e) => patch({ lifts: { ...cfg, cabinKg: parseInt(e.target.value, 10) as 1000 | 1275 | 1600 } })}>
-              <option value={1000}>1000 kg</option>
-              <option value={1275}>1275 kg</option>
-              <option value={1600}>1600 kg</option>
-            </select>
-          </Field>
-          <Field label="Speed (m/s)">
-            <input type="number" step={0.05} className="cell-input" value={cfg.speed} onChange={(e) => patch({ lifts: { ...cfg, speed: parseFloat(e.target.value) || 0 } })} />
-          </Field>
-          <Field label="Time per stop (s)">
-            <input type="number" step={0.5} className="cell-input" value={cfg.timePerStop} onChange={(e) => patch({ lifts: { ...cfg, timePerStop: parseFloat(e.target.value) || 0 } })} />
-          </Field>
-          <Field label="Standard handling %">
-            <input type="number" step={0.5} className="cell-input" value={cfg.handlingPctStandard * 100} onChange={(e) => patch({ lifts: { ...cfg, handlingPctStandard: (parseFloat(e.target.value) || 0) / 100 } })} />
-          </Field>
-          <Field label="Premium handling %">
-            <input type="number" step={0.5} className="cell-input" value={cfg.handlingPctPremium * 100} onChange={(e) => patch({ lifts: { ...cfg, handlingPctPremium: (parseFloat(e.target.value) || 0) / 100 } })} />
-          </Field>
-          <Field label="Rule of thumb · units / lift">
-            <input type="number" step={1} className="cell-input" value={cfg.unitsPerLiftRule} onChange={(e) => patch({ lifts: { ...cfg, unitsPerLiftRule: Math.max(1, Math.round(parseFloat(e.target.value) || 1)) } })} />
-          </Field>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Kpi label="Total travel height" value={`${fmt2(r.totalTravelHeight)} m`} sub={`${project.numFloors} floors × ${project.floorHeight} m`} />
-          <Kpi label="Probable stops" value={r.probableStops.toFixed(1)} sub="√N" />
-          <Kpi label="RTT" value={`${r.rttSeconds.toFixed(1)} s`} sub={`2H/v + stops × ${cfg.timePerStop} s`} />
-          <Kpi label="Trips per 5 min" value={r.tripsPer5Min.toFixed(1)} sub="300 / RTT" />
-          <Kpi label="Persons / trip @ 80%" value={fmt0(r.personsPerTrip)} sub={`Cabin ${cfg.cabinKg} kg`} />
-          <Kpi label="Capacity / lift in 5 min" value={fmt0(r.capacityPerLift)} sub="Trips × persons" />
-          <Kpi label="Demand standard 5%" value={fmt0(r.demandStandard)} sub="People in 5 min" />
-          <Kpi label="Demand premium 7%" value={fmt0(r.demandPremium)} sub="People in 5 min" />
-        </div>
-      </div>
-
       {/* Final recommendation */}
       <div className="card">
         <div className="mb-5">
           <h2 className="section-title">Lifts required — final</h2>
-          <p className="section-sub">Recommended count = max of Dubai D.8.8 minimum and the CIBSE / rule-of-thumb checks.</p>
+          <p className="section-sub">Based on Dubai Building Code D.8.8.</p>
         </div>
         <div>
           <table className="tbl w-full table-fixed">
@@ -196,21 +150,6 @@ export default function LiftsTab() {
                     : "Out of chart — VT consultant required"}
                 </td>
               </tr>
-              <tr>
-                <td>CIBSE standard 5%</td>
-                <td className="text-right">{fmt0(r.liftsCIBSEStandard)}</td>
-                <td className="text-ink-500 text-xs">ceil({fmt0(r.demandStandard)} ÷ {fmt0(r.capacityPerLift)})</td>
-              </tr>
-              <tr>
-                <td>CIBSE premium 7%</td>
-                <td className="text-right">{fmt0(r.liftsCIBSEPremium)}</td>
-                <td className="text-ink-500 text-xs">ceil({fmt0(r.demandPremium)} ÷ {fmt0(r.capacityPerLift)})</td>
-              </tr>
-              <tr>
-                <td>Rule of thumb (1 per {cfg.unitsPerLiftRule} units)</td>
-                <td className="text-right">{fmt0(r.ruleOfThumbLifts)}</td>
-                <td className="text-ink-500 text-xs">{fmt0(r.totalUnits)} units</td>
-              </tr>
               <tr className="row-total">
                 <td>RECOMMENDED</td>
                 <td className="text-right text-2xl text-qube-700 font-semibold">{fmt0(r.liftsRecommended)}</td>
@@ -222,10 +161,6 @@ export default function LiftsTab() {
       </div>
     </div>
   );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="grid gap-2"><span className="eyebrow">{label}</span>{children}</label>;
 }
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {

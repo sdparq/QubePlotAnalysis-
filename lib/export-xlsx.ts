@@ -166,7 +166,7 @@ export async function exportToExcel(project: Project) {
 
   // ===== 3.Lifts =====
   const wsL = wb.addWorksheet("3.Lifts");
-  wsL.addRow([`LIFT CALCULATION — ${project.name.toUpperCase()} (CIBSE Guide D)`]);
+  wsL.addRow([`LIFT CALCULATION — ${project.name.toUpperCase()} (Dubai Building Code D.8.8)`]);
   wsL.getCell("A1").font = { bold: true, size: 14 };
   wsL.addRow([]);
   wsL.addRow(["STEP 1 — POPULATION BY FLOOR"]);
@@ -178,50 +178,35 @@ export async function exportToExcel(project: Project) {
   applySubtotal(wsL.lastRow!);
 
   wsL.addRow([]);
-  wsL.addRow(["STEP 2 — HANDLING DEMAND"]);
+  wsL.addRow(["STEP 2 — D.8.8 INPUTS"]);
   wsL.lastRow!.font = BOLD;
   wsL.addRow(["Parameter", "Value", "Notes"]);
   applyHeader(wsL.lastRow!);
-  wsL.addRow(["Standard handling %", project.lifts.handlingPctStandard, ""]);
-  wsL.addRow(["Persons in 5 min (standard)", r.lifts.demandStandard, ""]);
-  wsL.addRow(["Premium handling %", project.lifts.handlingPctPremium, ""]);
-  wsL.addRow(["Persons in 5 min (premium)", r.lifts.demandPremium, ""]);
+  wsL.addRow(["Occupied floors", r.lifts.occupiedFloors, "Residential / type floors"]);
+  wsL.addRow(["Boarding floors", r.lifts.boardingFloors, "Basements + Ground + Podium"]);
+  wsL.addRow(["Population", Number(r.lifts.totalPopulation.toFixed(2)), "Per Table D.5"]);
 
   wsL.addRow([]);
-  wsL.addRow(["STEP 3 — CABIN CAPACITY"]);
-  wsL.lastRow!.font = BOLD;
-  wsL.addRow(["Cabin (kg)", project.lifts.cabinKg]);
-  wsL.addRow(["Persons / trip @ 80%", r.lifts.personsPerTrip]);
-
-  wsL.addRow([]);
-  wsL.addRow(["STEP 4 — ROUND TRIP TIME"]);
-  wsL.lastRow!.font = BOLD;
-  wsL.addRow(["Floors served", project.numFloors]);
-  wsL.addRow(["Floor height (m)", project.floorHeight]);
-  wsL.addRow(["Total travel height (m)", Number(r.lifts.totalTravelHeight.toFixed(2))]);
-  wsL.addRow(["Speed (m/s)", project.lifts.speed]);
-  wsL.addRow(["Probable stops (√N)", r.lifts.probableStops]);
-  wsL.addRow(["Time per stop (s)", project.lifts.timePerStop]);
-  wsL.addRow(["RTT (s)", r.lifts.rttSeconds]);
-
-  wsL.addRow([]);
-  wsL.addRow(["STEP 5 — CAPACITY PER LIFT"]);
-  wsL.lastRow!.font = BOLD;
-  wsL.addRow(["Trips / 5 min", r.lifts.tripsPer5Min]);
-  wsL.addRow(["Capacity / lift in 5 min", r.lifts.capacityPerLift]);
-
-  wsL.addRow([]);
-  wsL.addRow(["STEP 6 — LIFTS REQUIRED"]);
+  wsL.addRow(["STEP 3 — LIFTS REQUIRED (D.8.8)"]);
   wsL.lastRow!.font = BOLD;
   wsL.addRow(["Criterion", "Lifts", "Notes"]);
   applyHeader(wsL.lastRow!);
-  wsL.addRow(["CIBSE standard 5%", r.lifts.liftsCIBSEStandard, ""]);
-  wsL.addRow(["CIBSE premium 7%", r.lifts.liftsCIBSEPremium, ""]);
-  wsL.addRow([`Rule of thumb (1 per ${project.lifts.unitsPerLiftRule} units)`, r.lifts.ruleOfThumbLifts, ""]);
-  wsL.addRow([`DCD minimum (≥${project.lifts.dcdMinUnitsThreshold} units)`, r.lifts.dcdMinLifts, ""]);
+  wsL.addRow(["From population (Fig D.13)", r.lifts.dbcFromPopulation ?? "—", ""]);
+  wsL.addRow(["From boarding floors (Fig D.14)", r.lifts.dbcFromBoarding ?? "—", ""]);
   wsL.addRow(["RECOMMENDED", r.lifts.liftsRecommended, r.lifts.governing]);
   applySubtotal(wsL.lastRow!);
-  setColWidths(wsL, [38, 16, 32]);
+
+  wsL.addRow([]);
+  wsL.addRow(["STEP 4 — CABIN SPECS (Table D.6)"]);
+  wsL.lastRow!.font = BOLD;
+  wsL.addRow(["Type", "Rated kg", "Persons", "Cabin W×D (mm)", "Door W×H (mm)"]);
+  applyHeader(wsL.lastRow!);
+  wsL.addRow([`Passenger (${r.lifts.passengerMin.description})`, r.lifts.passengerMin.ratedKg, r.lifts.passengerMin.persons, `${r.lifts.passengerMin.cabinW_mm}×${r.lifts.passengerMin.cabinD_mm}`, `${r.lifts.passengerMin.doorW_mm}×${r.lifts.passengerMin.doorH_mm}`]);
+  if (r.lifts.occupiedFloors > 10) {
+    wsL.addRow([`Passenger (${r.lifts.passengerRecommended.description})`, r.lifts.passengerRecommended.ratedKg, r.lifts.passengerRecommended.persons, `${r.lifts.passengerRecommended.cabinW_mm}×${r.lifts.passengerRecommended.cabinD_mm}`, `${r.lifts.passengerRecommended.doorW_mm}×${r.lifts.passengerRecommended.doorH_mm}`]);
+  }
+  wsL.addRow([`Service (${r.lifts.serviceMin.description})`, r.lifts.serviceMin.ratedKg, r.lifts.serviceMin.persons, `${r.lifts.serviceMin.cabinW_mm}×${r.lifts.serviceMin.cabinD_mm}`, `${r.lifts.serviceMin.doorW_mm}×${r.lifts.serviceMin.doorH_mm}`]);
+  setColWidths(wsL, [38, 18, 14, 22, 22]);
 
   // ===== 4.Garbage Room =====
   const wsG = wb.addWorksheet("4.Garbage Room");
