@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { getSupabase, isCloudEnabled } from "./supabase";
+import { getSupabase, isCloudEnabled, sharedEmail } from "./supabase";
 import type { Project } from "./types";
 import { useStore } from "./store";
 
@@ -49,13 +49,16 @@ export function useAuth(): {
   return { user: session?.user ?? null, session, loading, enabled: isCloudEnabled };
 }
 
-export async function signInWithGoogle(): Promise<void> {
+/** Sign in to the shared team account. Returns an error message or null on success. */
+export async function signInWithPassword(password: string): Promise<string | null> {
   const sb = getSupabase();
-  if (!sb) throw new Error("Cloud not configured");
-  await sb.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.origin },
+  if (!sb) return "Cloud not configured";
+  const { error } = await sb.auth.signInWithPassword({
+    email: sharedEmail,
+    password,
   });
+  if (error) return error.message;
+  return null;
 }
 
 export async function signOut(): Promise<void> {

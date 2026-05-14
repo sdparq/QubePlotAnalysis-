@@ -56,7 +56,7 @@ State auto-saves to localStorage. Use *Export JSON* / *Import JSON* to share ana
 
 ## Cloud sync (optional)
 
-The app can sync projects to a shared Supabase database so every signed-in user sees and edits the same set of projects.
+The app can sync projects to a shared Supabase database so every team member sees and edits the same set of projects. The whole team enters with a **single password** that you choose — there are no individual user accounts.
 
 1. Create a Supabase project (free tier is enough). Note its `Project URL` and `anon public` key.
 2. In the SQL editor, run:
@@ -85,15 +85,23 @@ The app can sync projects to a shared Supabase database so every signed-in user 
    for each row execute function public.touch_updated_at();
    ```
 
-3. In **Authentication → Providers**, enable Google. Add the Netlify URL to **URL Configuration → Site URL** and to the redirect allow-list.
-4. Set the two env vars (copy `.env.example` → `.env.local`, and add the same two in Netlify → Site settings → Environment):
+3. In **Authentication → Providers → Email**, enable email and turn **off** "Confirm email" (no inboxes are involved).
+4. In **Authentication → Users → Add user → Create new user**, create the single shared team account:
+   - Email: anything you want, e.g. `team@qubeplot.app` (it does not need to be a real inbox).
+   - Password: the team password you'll hand out.
+   - Tick **Auto Confirm User**.
+
+   To rotate the password later, edit the same user here and tell the team — old sessions invalidate the next time they load the app.
+
+5. Set the env vars (copy `.env.example` → `.env.local`, and add the same in Netlify → Site settings → Environment):
 
    ```
    NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   NEXT_PUBLIC_SUPABASE_SHARED_EMAIL=team@qubeplot.app
    ```
 
-5. Redeploy. The header gains a **Sign in with Google** button; once signed in, every change to a cloud-tracked project auto-saves and is visible to everyone else in real time on their next load. Without these env vars the app runs unchanged in local-only mode.
+6. Redeploy. The header gains a **Team password** input; once unlocked, every change to a cloud-tracked project auto-saves and is visible to the rest of the team on their next load. Without these env vars the app runs unchanged in local-only mode.
 
 ## Deploy to Netlify
 

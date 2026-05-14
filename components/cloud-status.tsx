@@ -7,7 +7,7 @@ import {
   deleteCloudProject,
   listCloudProjects,
   loadCloudProject,
-  signInWithGoogle,
+  signInWithPassword,
   signOut,
   upsertCloudProject,
   useAuth,
@@ -46,6 +46,9 @@ export default function CloudStatus() {
   const [cloudList, setCloudList] = useState<CloudProjectSummary[] | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pwd, setPwd] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
+  const [pwdErr, setPwdErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const project = useStore((s) => s.projects[s.activeProjectId]);
@@ -141,10 +144,34 @@ export default function CloudStatus() {
   }
 
   if (!user) {
+    async function handleSignIn(e: React.FormEvent) {
+      e.preventDefault();
+      if (!pwd) return;
+      setSigningIn(true);
+      setPwdErr(null);
+      const err = await signInWithPassword(pwd);
+      setSigningIn(false);
+      if (err) {
+        setPwdErr("Wrong password");
+      } else {
+        setPwd("");
+      }
+    }
     return (
-      <button className={ghostBtn} onClick={() => signInWithGoogle()}>
-        Sign in with Google
-      </button>
+      <form onSubmit={handleSignIn} className="flex items-center gap-1">
+        <input
+          type="password"
+          value={pwd}
+          onChange={(e) => setPwd(e.target.value)}
+          placeholder="Team password"
+          autoComplete="current-password"
+          className="px-2 py-1.5 text-[12px] bg-ink-800 border border-bone-100/25 text-bone-100 placeholder-bone-200/40 focus:border-bone-100/60 focus:outline-none w-[140px]"
+        />
+        <button type="submit" className={ghostBtn} disabled={signingIn || !pwd}>
+          {signingIn ? "…" : "Unlock"}
+        </button>
+        {pwdErr && <span className="text-[10px] text-red-300 ml-1">{pwdErr}</span>}
+      </form>
     );
   }
 
@@ -184,19 +211,14 @@ export default function CloudStatus() {
     }
   }
 
-  const email = user.email ?? "Signed in";
-  const initial = email.slice(0, 1).toUpperCase();
-
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 px-2 py-1.5 text-[11px] uppercase tracking-[0.10em] text-bone-100 hover:bg-ink-800 transition-colors"
-        title={email}
+        title="Cloud workspace"
       >
-        <span className="w-6 h-6 flex items-center justify-center bg-qube-500 text-white text-[11px] font-semibold">
-          {initial}
-        </span>
+        <span className="w-2 h-2 rounded-full bg-qube-500" />
         <span className="hidden md:inline text-bone-200/80 normal-case tracking-normal">
           {statusLabel(status, savedAt)}
         </span>
@@ -205,8 +227,8 @@ export default function CloudStatus() {
       {open && (
         <div className="absolute right-0 top-full mt-1 w-[320px] bg-ink-900 border border-bone-100/15 text-bone-100 z-50 shadow-xl">
           <div className="px-4 py-3 border-b border-bone-100/10">
-            <div className="text-[11px] uppercase tracking-[0.10em] text-bone-200/60">Signed in as</div>
-            <div className="text-sm truncate">{email}</div>
+            <div className="text-[11px] uppercase tracking-[0.10em] text-bone-200/60">Cloud workspace</div>
+            <div className="text-sm">Connected</div>
             <div className="text-[10px] text-bone-200/50 mt-0.5">{statusLabel(status, savedAt)}</div>
           </div>
 
@@ -265,7 +287,7 @@ export default function CloudStatus() {
 
           <div className="px-4 py-3 border-t border-bone-100/10 flex justify-end">
             <button onClick={() => signOut()} className={ghostBtn}>
-              Sign out
+              Lock
             </button>
           </div>
         </div>
