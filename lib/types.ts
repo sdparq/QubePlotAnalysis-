@@ -183,6 +183,10 @@ export interface Project {
    *  buildable footprint (full podium) when unset. Lower it to reserve part
    *  of the podium for amenities / retail / etc. */
   podiumParkingPerFloorM2?: number;
+  /** Override for the number of boarding floors used by the Dubai Building
+   *  Code D.8.8 lift sizing (Figure D.14). When unset, derived from the
+   *  Setup floor breakdown (basements + ground + podium). */
+  dbcBoardingFloors?: number;
   /** Optional split of the Target GFA across uses. Each entry can be entered
    *  either as an absolute m² value or as a percentage of `targetGFA`. */
   gfaBreakdown?: GfaBreakdown;
