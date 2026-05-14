@@ -179,6 +179,10 @@ export interface Project {
   /** Average built area consumed by one parking space (incl. aisles, ramps).
    *  Used to estimate the total parking surface needed. Default 25 m² / space. */
   m2PerParkingSpace?: number;
+  /** Surface per podium level available for parking (m²). Defaults to the
+   *  buildable footprint (full podium) when unset. Lower it to reserve part
+   *  of the podium for amenities / retail / etc. */
+  podiumParkingPerFloorM2?: number;
   /** Optional split of the Target GFA across uses. Each entry can be entered
    *  either as an absolute m² value or as a percentage of `targetGFA`. */
   gfaBreakdown?: GfaBreakdown;
