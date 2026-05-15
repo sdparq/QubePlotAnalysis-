@@ -1,5 +1,6 @@
 import type { Project, Typology } from "../types";
 import { commonAreaCategory, effectiveCommonAreaTotal } from "../types";
+import { effectiveTargetGFA } from "./gfa";
 
 export interface FloorSummary {
   floor: number;
@@ -100,11 +101,14 @@ export function computeProgram(project: Project): ProgramResult {
 
   const shaftsDeduction = totalUnits * project.shaftPerUnit;
 
+  const effectiveTarget = effectiveTargetGFA(project);
+  const caOpts = { commonAreasInputMode: project.commonAreasInputMode, effectiveTarget };
+
   let commonAreasGFA = 0;
   let commonAreasBUAonly = 0;
   let commonAreasOpen = 0;
   for (const c of project.commonAreas) {
-    const total = effectiveCommonAreaTotal(c, project);
+    const total = effectiveCommonAreaTotal(c, caOpts);
     const cat = commonAreaCategory(c);
     if (cat === "GFA") commonAreasGFA += total;
     else if (cat === "BUA") commonAreasBUAonly += total;
@@ -126,7 +130,7 @@ export function computeProgram(project: Project): ProgramResult {
   let amenitiesGFAarea = 0;
   for (const c of project.commonAreas) {
     if (commonAreaCategory(c) !== "GFA") continue;
-    const total = effectiveCommonAreaTotal(c, project);
+    const total = effectiveCommonAreaTotal(c, caOpts);
     if (circulationKeywords.test(c.name)) circulationGFA += total;
     else if (servicesKeywords.test(c.name)) servicesGFA += total;
     else amenitiesGFAarea += total;

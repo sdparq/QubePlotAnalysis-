@@ -6,6 +6,7 @@ import {
   residentialSubBUA,
   residentialSubGFA,
   residentialGFATarget,
+  effectiveTargetGFA,
   RESIDENTIAL_SUBS,
 } from "@/lib/calc/gfa";
 import {
@@ -48,7 +49,7 @@ const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
 export default function SummaryTab() {
   const project = useProject();
 
-  const target = project.targetGFA ?? 0;
+  const target = effectiveTargetGFA(project);
   const maxBUA = project.maxBUA ?? 0;
   const cab: CommonAreasBreakdown = useMemo(
     () => project.commonAreasBreakdown ?? defaultCommonAreasBreakdown(),

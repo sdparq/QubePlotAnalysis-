@@ -41,14 +41,16 @@ export function commonAreaCategory(c: CommonArea): CommonAreaCategory {
   return "GFA";
 }
 
-/** Resolve the effective total m² of a common area, taking into account the project's input mode. */
+/** Resolve the effective total m² of a common area, taking into account the project's input mode.
+ *  `effectiveTarget` is the GFA (m²) value that "percentage" rows reference — callers should
+ *  pass `effectiveTargetGFA(project)` so the resolution stays consistent whether the user
+ *  is inputting GFA or BUA as the project's headline area. */
 export function effectiveCommonAreaTotal(
   c: CommonArea,
-  project: { commonAreasInputMode?: "absolute" | "percentage"; targetGFA?: number }
+  opts: { commonAreasInputMode?: "absolute" | "percentage"; effectiveTarget: number }
 ): number {
-  if (project.commonAreasInputMode === "percentage") {
-    const target = project.targetGFA ?? 0;
-    return (c.area || 0) * target;
+  if (opts.commonAreasInputMode === "percentage") {
+    return (c.area || 0) * (opts.effectiveTarget || 0);
   }
   return (c.area || 0) * (c.floors || 1);
 }
@@ -169,8 +171,16 @@ export interface Project {
   /** Hard constraints used to score variants and flag the active massing. */
   maxFAR?: number;
   maxHeightM?: number;
-  /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
+  /** Which area the user is inputting as the project's headline area.
+   *  "GFA" (default, legacy) — user types `targetGFA`. "BUA" — user types
+   *  `targetBUA` and the equivalent GFA target is derived from the project's
+   *  GFA/BUA inflation factor. All downstream calcs continue to run on GFA. */
+  areaInputMode?: "GFA" | "BUA";
+  /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage".
+   *  Read directly when areaInputMode === "GFA"; derived from `targetBUA` when "BUA". */
   targetGFA?: number;
+  /** Target BUA (m²) — only used when areaInputMode === "BUA". */
+  targetBUA?: number;
   /** Maximum total built area (BUA, m²) the project must respect — sometimes
    *  given as a plot-level constraint. When exceeded, the UI flags it. */
   maxBUA?: number;

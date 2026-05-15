@@ -20,10 +20,29 @@ import { computeProgram } from "./program";
 
 export const RESIDENTIAL_SUBS: ResidentialSubCategory[] = ["apartments", "amenities", "circulation", "services"];
 
+/** Resolve the project's effective Target GFA (m²) — always returned in GFA,
+ *  regardless of whether the user entered it as GFA or BUA. When inputting BUA,
+ *  the equivalent GFA is `targetBUA / inflation`, where inflation is the project's
+ *  current BUA-to-GFA ratio (a pure function of the breakdown percentages, not of
+ *  the headline magnitude — so this resolves in a single step without a loop). */
+export function effectiveTargetGFA(project: Project): number {
+  if (project.areaInputMode === "BUA") {
+    const bua = project.targetBUA ?? 0;
+    if (bua <= 0) return 0;
+    // Use a probe with areaInputMode forced to GFA and targetGFA=1 so the
+    // inflation factor calculation references targetGFA=1 directly without
+    // recursing back through effectiveTargetGFA.
+    const probe: Project = { ...project, areaInputMode: "GFA", targetGFA: 1 };
+    const factor = residentialBuaInflationFactor(probe);
+    return factor > 0 ? bua / factor : 0;
+  }
+  return project.targetGFA ?? 0;
+}
+
 export function residentialGFATarget(project: Project): number {
   const item = project.gfaBreakdown?.residential;
   if (!item) return 0;
-  const target = project.targetGFA ?? 0;
+  const target = effectiveTargetGFA(project);
   return item.mode === "absolute" ? item.value : (item.value / 100) * target;
 }
 

@@ -21,7 +21,7 @@ import {
   type ZoneClass,
   type TypologyKey,
 } from "@/lib/zone-classes";
-import { residentialBuaInflationFactor, residentialSubBUA, residentialSubGFA } from "@/lib/calc/gfa";
+import { effectiveTargetGFA, residentialBuaInflationFactor, residentialSubBUA, residentialSubGFA } from "@/lib/calc/gfa";
 
 interface FloorSectionDef {
   key: "basements" | "ground" | "podium" | "typeFloors";
@@ -90,13 +90,7 @@ export default function SetupTab() {
           <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
             <NumInput value={project.plotArea} onChange={(v) => patch({ plotArea: v })} />
           </Field>
-          <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
-            <NumInput
-              value={project.targetGFA ?? 0}
-              step={10}
-              onChange={(v) => patch({ targetGFA: v > 0 ? v : undefined })}
-            />
-          </Field>
+          <AreaInputField project={project} patch={patch} />
           <Field label="Max BUA (m²)" hint={`≈ ${fmtSqft(project.maxBUA ?? 0)}`}>
             <NumInput
               value={project.maxBUA ?? 0}
@@ -134,8 +128,10 @@ export default function SetupTab() {
           </Field>
         </div>
         <p className="text-[11px] text-ink-500 mt-3">
-          Target GFA powers the percentage input mode in Common Areas (leave 0 if you prefer m²). Latitude / longitude
-          unlock the In-context Massing view that streams Google Photorealistic 3D Tiles around the plot.
+          Switch the headline area between <strong>GFA</strong> and <strong>BUA</strong> with the toggle — when the
+          authority gives a max BUA instead of a FAR-based GFA, type it as BUA and the equivalent GFA is derived
+          automatically from the project's breakdown. The chosen Target also powers the percentage input mode in
+          Common Areas. Latitude / longitude unlock the In-context Massing view.
         </p>
       </div>
 
@@ -316,7 +312,7 @@ function GfaBreakdownCard({
   project: ReturnType<typeof useProject>;
   patch: (p: Partial<ReturnType<typeof useProject>>) => void;
 }) {
-  const total = project.targetGFA ?? 0;
+  const total = effectiveTargetGFA(project);
   const breakdown: GfaBreakdown = project.gfaBreakdown ?? {};
 
   function getItem(key: GfaUseCategory): GfaBreakdownItem {
@@ -538,6 +534,67 @@ function GfaBreakdownCard({
         </p>
       )}
     </div>
+  );
+}
+
+function AreaInputField({
+  project,
+  patch,
+}: {
+  project: ReturnType<typeof useProject>;
+  patch: (p: Partial<ReturnType<typeof useProject>>) => void;
+}) {
+  const mode: "GFA" | "BUA" = project.areaInputMode ?? "GFA";
+  const value = mode === "BUA" ? project.targetBUA ?? 0 : project.targetGFA ?? 0;
+
+  // Inflation factor (BUA / GFA) of the current project — a pure function of the
+  // breakdown %s, independent of magnitude. Used to show the "implied" other-side area.
+  const probeForFactor = { ...project, areaInputMode: "GFA" as const, targetGFA: 1 };
+  const factor = residentialBuaInflationFactor(probeForFactor);
+  const impliedLabel = mode === "BUA" ? "≈ Implied GFA" : "≈ Implied BUA";
+  const impliedM2 =
+    mode === "BUA"
+      ? factor > 0
+        ? (project.targetBUA ?? 0) / factor
+        : 0
+      : (project.targetGFA ?? 0) * factor;
+
+  function setValue(v: number) {
+    if (mode === "BUA") patch({ targetBUA: v > 0 ? v : undefined });
+    else patch({ targetGFA: v > 0 ? v : undefined });
+  }
+
+  function switchMode(next: "GFA" | "BUA") {
+    if (next === mode) return;
+    // Carry the displayed value across modes by converting through the inflation factor.
+    if (next === "BUA") {
+      const bua = (project.targetGFA ?? 0) * factor;
+      patch({ areaInputMode: "BUA", targetBUA: bua > 0 ? Number(bua.toFixed(0)) : undefined });
+    } else {
+      const gfa = factor > 0 ? (project.targetBUA ?? 0) / factor : 0;
+      patch({ areaInputMode: "GFA", targetGFA: gfa > 0 ? Number(gfa.toFixed(0)) : undefined });
+    }
+  }
+
+  const seg = (active: boolean) =>
+    `px-2 py-0.5 text-[10px] font-semibold tracking-wider ${
+      active ? "bg-ink-900 text-white" : "bg-bone-50 text-ink-500 hover:text-ink-900"
+    }`;
+
+  return (
+    <label className="grid gap-2">
+      <span className="eyebrow flex items-center gap-2">
+        <span>Target {mode} (m²)</span>
+        <span className="inline-flex border border-ink-200 overflow-hidden">
+          <button type="button" className={seg(mode === "GFA")} onClick={() => switchMode("GFA")}>GFA</button>
+          <button type="button" className={seg(mode === "BUA")} onClick={() => switchMode("BUA")}>BUA</button>
+        </span>
+      </span>
+      <NumInput value={value} step={10} onChange={setValue} />
+      <span className="text-[10px] text-ink-500">
+        {impliedLabel} {Math.round(impliedM2).toLocaleString("en-US")} m² · {fmtSqft(value)}
+      </span>
+    </label>
   );
 }
 
