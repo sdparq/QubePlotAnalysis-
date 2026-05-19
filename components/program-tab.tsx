@@ -208,15 +208,23 @@ function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, exis
   }
   const droppedShare = droppedKeys.reduce((s, k) => s + mix[k], 0);
 
-  // Per-typology target: GFA-share × apartmentsGFA / (typologies in same category) / interior.
+  // Per-typology target. typologyMix is a share of TOTAL UNITS (sums to ~1),
+  // not a share of GFA. Compute total units N from the weighted-average
+  // interior area, then split by mix share.
   const targets = useMemo(() => {
-    return typologies.map((t) => {
+    const rows = typologies.map((t) => {
       const k = TYPOLOGY_KEYS.find((kk) => CATEGORY_FOR_TYPOLOGY_KEY[kk] === t.category);
       const pct = k ? mix[k] : 0;
       const sameCat = typologies.filter((x) => x.category === t.category).length || 1;
-      const allocatedGFA = apartmentsGFA * pct / sameCat;
-      const units = t.internalArea > 0 ? Math.round(allocatedGFA / t.internalArea) : 0;
-      return { typology: t, units, allocatedGFA, sameCat };
+      const unitShare = pct / sameCat;
+      return { typology: t, unitShare, sameCat };
+    });
+    const avgArea = rows.reduce((s, r) => s + r.unitShare * r.typology.internalArea, 0);
+    const N = avgArea > 0 ? apartmentsGFA / avgArea : 0;
+    return rows.map((r) => {
+      const units = Math.round(N * r.unitShare);
+      const allocatedGFA = units * r.typology.internalArea;
+      return { typology: r.typology, units, allocatedGFA, sameCat: r.sameCat };
     });
   }, [typologies, mix, apartmentsGFA]);
 
