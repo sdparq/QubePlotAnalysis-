@@ -1,5 +1,4 @@
 import type { Project, Typology } from "../types";
-import { effectiveTargetGFA } from "./gfa";
 
 export interface ParkingResult {
   availableStandard: number;
@@ -45,7 +44,7 @@ export function requiredPRM(totalRequired: number): number {
 function retailGFA(project: Project): number {
   const item = project.gfaBreakdown?.retail;
   if (!item) return 0;
-  const target = effectiveTargetGFA(project);
+  const target = project.targetGFA ?? 0;
   return item.mode === "absolute" ? item.value : (item.value / 100) * target;
 }
 
