@@ -34,8 +34,7 @@ const GROUPS: GroupDef[] = [
 ];
 
 /** Build the flat CommonArea[] list the rest of the calc engine consumes.
- *  Each sub's m² is `groupGFAQuota × sub.pct / 100`. GFA-counted subs together
- *  cover the group's GFA quota; non-GFA subs are additive BUA extras. */
+ *  Every row here is GFA — non-GFA built area lives in a separate block. */
 function buildFlatCommonAreas(
   breakdown: CommonAreasBreakdown,
   groupGFAQuota: Record<CommonAreasGroup, number>,
@@ -50,7 +49,7 @@ function buildFlatCommonAreas(
         name: `${g.label} · ${sub.name}`,
         area: Number(area.toFixed(2)),
         floors: 1,
-        category: sub.countsAsGFA ? "GFA" : "OPEN",
+        category: "GFA",
       });
     }
   }
@@ -114,17 +113,13 @@ export default function CommonAreasTab() {
     commit({ ...breakdown, [group]: [...breakdown[group], newSub] });
   }
 
-  /** Rebalance only the GFA-counted rows so their pcts sum to 100%. Non-GFA
-   *  rows are intentionally left alone — they're additive BUA extras and the
-   *  user controls them independently. */
+  /** Rebalance all sub rows so their pcts sum to 100% — every row counts as GFA. */
   function rebalanceGroup(group: CommonAreasGroup) {
     const subs = breakdown[group];
-    const gfaSum = subs.filter((s) => s.countsAsGFA).reduce((s, x) => s + x.pct, 0);
-    if (gfaSum <= 0) return;
-    const factor = 100 / gfaSum;
-    const nextGroup = subs.map((s) =>
-      s.countsAsGFA ? { ...s, pct: Number((s.pct * factor).toFixed(2)) } : s,
-    );
+    const sum = subs.reduce((s, x) => s + x.pct, 0);
+    if (sum <= 0) return;
+    const factor = 100 / sum;
+    const nextGroup = subs.map((s) => ({ ...s, pct: Number((s.pct * factor).toFixed(2)) }));
     commit({ ...breakdown, [group]: nextGroup });
   }
 
@@ -139,20 +134,12 @@ export default function CommonAreasTab() {
   }
 
   // ── Aggregate stats (derived live from the breakdown to stay in sync) ──
-  const aggregated = (["amenities", "circulation", "services"] as CommonAreasGroup[])
-    .flatMap((g) =>
-      breakdown[g].map((s) => {
-        const m2 = (groupGFAQuota[g] * s.pct) / 100;
-        return {
-          bua: m2,
-          gfa: s.countsAsGFA ? m2 : 0,
-          open: s.countsAsGFA ? 0 : m2,
-        };
-      }),
+  const totalGFA = (["amenities", "circulation", "services"] as CommonAreasGroup[])
+    .reduce(
+      (sum, g) => sum + breakdown[g].reduce((s, row) => s + (groupGFAQuota[g] * row.pct) / 100, 0),
+      0,
     );
-  const totalBUA = aggregated.reduce((s, x) => s + x.bua, 0);
-  const totalGFA = aggregated.reduce((s, x) => s + x.gfa, 0);
-  const totalOpen = aggregated.reduce((s, x) => s + x.open, 0);
+  const totalQuota = groupGFAQuota.amenities + groupGFAQuota.circulation + groupGFAQuota.services;
 
   return (
     <div className="grid gap-6">
@@ -160,10 +147,10 @@ export default function CommonAreasTab() {
         <div className="mb-5">
           <h2 className="section-title">Common Areas &amp; Services</h2>
           <p className="section-sub">
-            Cada grupo (Amenities, Circulation, Services) tiene un <strong>% de residential</strong>{" "}
-            editable que fija su cuota de GFA. Dentro de cada grupo, las subcategorías reparten esa
-            cuota — las marcadas <strong>GFA</strong> deben sumar 100% para cubrir la cuota; las
-            <strong> Non-GFA</strong> son metros cuadrados extra que sólo cuentan como BUA.
+            Cada grupo (Amenities, Circulation, Services) tiene un <strong>% de residential GFA</strong>{" "}
+            editable que fija su cuota. Dentro de cada grupo, las subcategorías reparten esa cuota
+            (sus porcentajes deben sumar 100%). Todo lo que metes aquí cuenta como GFA — las áreas
+            que <em>no</em> cuentan como GFA (piscinas, padel, ...) irán en un bloque aparte abajo.
           </p>
         </div>
 
@@ -175,11 +162,14 @@ export default function CommonAreasTab() {
         )}
 
         {residentialBUATotal > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <Stat label="Total common areas BUA" value={`${fmt0(totalBUA)} m²`} sub={fmtSqft(totalBUA)} />
-            <Stat label="Counted as GFA" value={`${fmt0(totalGFA)} m²`} sub={fmtSqft(totalGFA)} />
-            <Stat label="Non-GFA (extra BUA)" value={`${fmt0(totalOpen)} m²`} sub={fmtSqft(totalOpen)} />
-            <Stat label="Σ Group GFA quota" value={`${fmt0(groupGFAQuota.amenities + groupGFAQuota.circulation + groupGFAQuota.services)} m²`} />
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+            <Stat label="Σ Group GFA quota" value={`${fmt0(totalQuota)} m²`} sub={fmtSqft(totalQuota)} />
+            <Stat label="Σ Delivered GFA" value={`${fmt0(totalGFA)} m²`} sub={fmtSqft(totalGFA)} />
+            <Stat
+              label="Quota mismatch"
+              value={Math.abs(totalGFA - totalQuota) < 1 ? "—" : `${(totalGFA - totalQuota).toFixed(0)} m²`}
+              sub={Math.abs(totalGFA - totalQuota) < 1 ? "GFA matches quota" : "rebalance groups"}
+            />
           </div>
         )}
 
@@ -221,11 +211,9 @@ function GroupSection({
   onDelete: (id: string) => void;
   onUpdateGroupPct: (pct: number) => void;
 }) {
-  const gfaPctSum = subs.filter((s) => s.countsAsGFA).reduce((s, x) => s + x.pct, 0);
-  const allPctSum = subs.reduce((s, x) => s + x.pct, 0);
-  const gfaMismatch = subs.some((s) => s.countsAsGFA) && Math.abs(gfaPctSum - 100) > 0.5;
-  const gfaTotalM2 = (groupGFAQuota * gfaPctSum) / 100;
-  const buaTotalM2 = (groupGFAQuota * allPctSum) / 100;
+  const sumPct = subs.reduce((s, x) => s + x.pct, 0);
+  const mismatch = subs.length > 0 && Math.abs(sumPct - 100) > 0.5;
+  const deliveredM2 = (groupGFAQuota * sumPct) / 100;
 
   return (
     <div className="border border-ink-200">
@@ -259,27 +247,23 @@ function GroupSection({
           </div>
         </div>
         <div className="text-right">
-          <div className="eyebrow text-ink-500 text-[10px]">Actual GFA / BUA</div>
+          <div className="eyebrow text-ink-500 text-[10px]">Delivered</div>
           <div className="text-[12px] text-qube-800 font-medium tabular-nums">
-            {gfaTotalM2 > 0 ? `${Math.round(gfaTotalM2).toLocaleString("en-US")} m²` : "—"}
-            <span className="text-ink-500 font-normal">
-              {" "}/ {buaTotalM2 > 0 ? `${Math.round(buaTotalM2).toLocaleString("en-US")} m²` : "—"}
-            </span>
+            {deliveredM2 > 0 ? `${Math.round(deliveredM2).toLocaleString("en-US")} m²` : "—"}
           </div>
-          {gfaMismatch && (
+          {mismatch && (
             <div className="text-[10px] text-amber-700 mt-0.5">
-              GFA subs Σ {gfaPctSum.toFixed(1)}% (target 100%)
+              Σ {sumPct.toFixed(1)}% (target 100%)
             </div>
           )}
         </div>
       </div>
 
       {/* Sub-rows table */}
-      <div className="grid grid-cols-[14px_1fr_90px_100px_110px_120px_28px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 border-b border-ink-100 bg-bone-50/40">
+      <div className="grid grid-cols-[14px_1fr_100px_120px_140px_28px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 border-b border-ink-100 bg-bone-50/40">
         <span></span>
         <span>Subcategory</span>
         <span className="text-right">% of group</span>
-        <span className="text-center">Counts as</span>
         <span className="text-right">m²</span>
         <span className="text-right">≈ sqft</span>
         <span></span>
@@ -289,7 +273,7 @@ function GroupSection({
         return (
           <div
             key={sub.id}
-            className="grid grid-cols-[14px_1fr_90px_100px_110px_120px_28px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
+            className="grid grid-cols-[14px_1fr_100px_120px_140px_28px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
           >
             <span className="text-ink-300 text-[14px] leading-none">└</span>
             <input
@@ -311,16 +295,6 @@ function GroupSection({
               />
               <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9.5px] text-ink-400 pointer-events-none">%</span>
             </div>
-            <div className="text-center">
-              <button
-                onClick={() => onUpdateSub(sub.id, { countsAsGFA: !sub.countsAsGFA })}
-                className={`px-2 py-0.5 text-[10px] uppercase tracking-[0.10em] border ${
-                  sub.countsAsGFA
-                    ? "bg-qube-500 text-white border-qube-500"
-                    : "bg-white text-ink-500 border-ink-300"
-                }`}
-              >{sub.countsAsGFA ? "GFA" : "Non-GFA"}</button>
-            </div>
             <div className="text-right text-ink-900">{m2 > 0 ? Math.round(m2).toLocaleString("en-US") : "—"}</div>
             <div className="text-right text-ink-500">{fmtSqft(m2)}</div>
             <button
@@ -333,14 +307,11 @@ function GroupSection({
         );
       })}
 
-      {/* Footer: sums + actions */}
-      <div className="grid grid-cols-[14px_1fr_90px_100px_110px_120px_28px] gap-1 px-3 py-1.5 items-center text-[11.5px] tabular-nums bg-bone-50/40">
+      {/* Footer: sum + actions */}
+      <div className="grid grid-cols-[14px_1fr_100px_120px_140px_28px] gap-1 px-3 py-1.5 items-center text-[11.5px] tabular-nums bg-bone-50/40">
         <span></span>
-        <span className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Σ GFA / Σ total</span>
-        <span className={`text-right ${gfaMismatch ? "text-amber-700 font-medium" : "text-ink-700"}`}>
-          {gfaPctSum.toFixed(1)}% / {allPctSum.toFixed(1)}%
-        </span>
-        <span></span>
+        <span className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Sum</span>
+        <span className={`text-right ${mismatch ? "text-amber-700 font-medium" : "text-ink-700"}`}>{sumPct.toFixed(1)}%</span>
         <span></span>
         <span></span>
         <span></span>
@@ -349,12 +320,12 @@ function GroupSection({
         <button onClick={onAdd} className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline">
           + Add subcategory
         </button>
-        {gfaMismatch && (
+        {mismatch && (
           <button
             onClick={onRebalance}
             className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
-            title="Scale only the GFA-counted rows so they sum to 100%"
-          >Rebalance GFA rows to 100%</button>
+            title="Scale every row proportionally so the sum equals 100%"
+          >Rebalance to 100%</button>
         )}
       </div>
     </div>

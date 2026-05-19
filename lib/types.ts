@@ -301,13 +301,11 @@ export interface CommonAreasBreakdown {
 export function defaultCommonAreasBreakdown(): CommonAreasBreakdown {
   return {
     amenities: [
-      { id: "ca-amen-gym",    name: "Gym",         pct: 25, countsAsGFA: true  },
-      { id: "ca-amen-pool",   name: "Pool",        pct: 20, countsAsGFA: false },
-      { id: "ca-amen-sauna",  name: "Sauna",       pct: 5,  countsAsGFA: true  },
-      { id: "ca-amen-padel",  name: "Padel court", pct: 15, countsAsGFA: false },
-      { id: "ca-amen-social", name: "Social area", pct: 15, countsAsGFA: true  },
-      { id: "ca-amen-kids",   name: "Kids area",   pct: 10, countsAsGFA: true  },
-      { id: "ca-amen-cowork", name: "Coworking",   pct: 10, countsAsGFA: true  },
+      { id: "ca-amen-gym",    name: "Gym",         pct: 35, countsAsGFA: true },
+      { id: "ca-amen-sauna",  name: "Sauna",       pct: 10, countsAsGFA: true },
+      { id: "ca-amen-social", name: "Social area", pct: 25, countsAsGFA: true },
+      { id: "ca-amen-kids",   name: "Kids area",   pct: 15, countsAsGFA: true },
+      { id: "ca-amen-cowork", name: "Coworking",   pct: 15, countsAsGFA: true },
     ],
     circulation: [
       { id: "ca-circ-lobby",  name: "Lobbies",     pct: 45, countsAsGFA: true },

@@ -6,24 +6,22 @@
  *   residentialGFA target = user input in Setup (gfaBreakdown.residential)
  *
  *   For each residential sub (apartments / amenities / circulation / services):
- *     subQuota       = (rb[sub].pct / 100) × residentialGFA target
- *                      → the "% of residential" the user types in Common Areas
+ *     pct[sub]      = residentialBreakdown.pct (apartments is auto-derived =
+ *                     100 − Σ groups so the four always sum to 100%)
+ *     subQuota      = (pct[sub] / 100) × residentialGFA target
  *
  *   apartments has no sub-breakdown:
- *     subGFA = subQuota                    (when residentialBreakdown.countsAsGFA)
- *     subBUA = subGFA × (1 + balconyShare) (balconies inflate BUA, not GFA)
+ *     subGFA = subQuota
+ *     subBUA = subGFA × (1 + balconyShare)   (balconies inflate BUA only)
  *
- *   amenities / circulation / services have a Common Areas sub-breakdown.
- *   Each row's pct is a fraction of the group's GFA QUOTA:
- *     row m²   = subQuota × row.pct / 100
- *     subGFA   = Σ row m² for rows flagged GFA       = subQuota × (Σ gfa pcts / 100)
- *     subBUA   = Σ row m² across all rows in group   = subQuota × (Σ all pcts / 100)
+ *   amenities / circulation / services: each row's pct is a fraction of the
+ *   group's GFA quota and every row counts as GFA. Non-GFA built area lives
+ *   in a separate block below the Common Areas table (added later).
+ *     row m² = subQuota × row.pct / 100
+ *     subGFA = subBUA = subQuota × (Σ row pcts / 100)
  *
- *   So the user controls GFA delivery by tweaking the GFA-counted rows (they
- *   should sum to 100% to cover the quota). Non-GFA rows are additive extras
- *   that inflate BUA above the quota without affecting GFA — exactly what the
- *   user asked for ("los GFA suman el % adecuado de residential, el BUA va
- *   aparte").
+ *   When the rows in a group sum to exactly 100%, GFA = quota. Lower sums
+ *   under-deliver the quota; higher sums over-deliver it.
  */
 
 import type { Project, ResidentialSubCategory } from "../types";
@@ -56,21 +54,18 @@ function subQuota(project: Project, sub: ResidentialSubCategory): number {
   return (residentialSubPct(project, sub) / 100) * residentialGFATarget(project);
 }
 
-/** Σ percent of common-area sub-rows, split by GFA / total. */
-function groupSubPcts(project: Project, sub: ResidentialSubCategory): { all: number; gfa: number } {
+/** Sum of common-area sub-row pcts inside a group (100 when no breakdown). */
+function groupSubPctSum(project: Project, sub: ResidentialSubCategory): number {
   const subs = project.commonAreasBreakdown?.[sub as Exclude<ResidentialSubCategory, "apartments">];
-  if (!subs || subs.length === 0) return { all: 100, gfa: 100 };
-  const all = subs.reduce((s, x) => s + x.pct, 0);
-  const gfa = subs.filter((x) => x.countsAsGFA).reduce((s, x) => s + x.pct, 0);
-  return { all, gfa };
+  if (!subs || subs.length === 0) return 100;
+  return subs.reduce((s, x) => s + x.pct, 0);
 }
 
 export function residentialSubGFA(project: Project, sub: ResidentialSubCategory): number {
   const quota = subQuota(project, sub);
   if (quota <= 0) return 0;
   if (sub === "apartments") return quota;
-  const { gfa } = groupSubPcts(project, sub);
-  return (quota * gfa) / 100;
+  return (quota * groupSubPctSum(project, sub)) / 100;
 }
 
 export function residentialSubBUA(project: Project, sub: ResidentialSubCategory): number {
@@ -84,8 +79,8 @@ export function residentialSubBUA(project: Project, sub: ResidentialSubCategory)
     }
     return quota;
   }
-  const { all } = groupSubPcts(project, sub);
-  return (quota * all) / 100;
+  // Common-area groups: every row counts as GFA, so BUA equals GFA here.
+  return (quota * groupSubPctSum(project, sub)) / 100;
 }
 
 /** Quota helper (m²) — exported so the Common Areas tab can use the same source of truth. */
@@ -103,3 +98,4 @@ export function residentialBuaInflationFactor(project: Project): number {
   if (gfa <= 0) return 1;
   return residentialBUA(project) / gfa;
 }
+
