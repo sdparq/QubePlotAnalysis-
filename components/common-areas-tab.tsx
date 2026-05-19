@@ -131,6 +131,21 @@ export default function CommonAreasTab() {
     commit({ ...breakdown, [group]: nextGroup });
   }
 
+  function updateGroupResidentialPct(group: CommonAreasGroup, pct: number) {
+    const curRb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
+    const nextRb = { ...curRb, [group]: { ...curRb[group], pct: Math.max(0, pct) } };
+    const proj = { ...project, residentialBreakdown: nextRb };
+    const nextGroupBUA: Record<CommonAreasGroup, number> = {
+      amenities:   residentialSubBUA(proj, "amenities"),
+      circulation: residentialSubBUA(proj, "circulation"),
+      services:    residentialSubBUA(proj, "services"),
+    };
+    patch({
+      residentialBreakdown: nextRb,
+      commonAreas: buildFlatCommonAreas(breakdown, nextGroupBUA),
+    });
+  }
+
   // ── Aggregate stats ─────────────────────────────────────────────────────
   // (totalBUA / totalGFA are derived from the breakdown below, so they always
   // mirror what the table shows — even when group sums don't add up to 100%.)
@@ -200,6 +215,7 @@ export default function CommonAreasTab() {
               onRebalance={() => rebalanceGroup(g.key)}
               onUpdateSub={(id, partial) => updateSub(g.key, id, partial)}
               onDelete={(id) => deleteSub(g.key, id)}
+              onUpdateGroupPct={(pct) => updateGroupResidentialPct(g.key, pct)}
             />
           ))}
         </div>
@@ -213,7 +229,7 @@ export default function CommonAreasTab() {
 /* -------------------------------------------------------------------------- */
 
 function GroupSection({
-  group, subs, groupBUA, groupGFAFromSetup, groupPct, onAdd, onRebalance, onUpdateSub, onDelete,
+  group, subs, groupBUA, groupGFAFromSetup, groupPct, onAdd, onRebalance, onUpdateSub, onDelete, onUpdateGroupPct,
 }: {
   group: GroupDef;
   subs: CommonAreaSub[];
@@ -224,6 +240,7 @@ function GroupSection({
   onRebalance: () => void;
   onUpdateSub: (id: string, partial: Partial<CommonAreaSub>) => void;
   onDelete: (id: string) => void;
+  onUpdateGroupPct: (pct: number) => void;
 }) {
   const sumPct = subs.reduce((s, x) => s + x.pct, 0);
   const mismatch = Math.abs(sumPct - 100) > 0.5;
@@ -238,8 +255,21 @@ function GroupSection({
           <div className="text-[10.5px] text-ink-500 leading-snug">{group.hint}</div>
         </div>
         <div className="text-right">
-          <div className="eyebrow text-ink-500 text-[10px]">From Setup</div>
-          <div className="text-[12px] text-ink-900 tabular-nums">{groupPct.toFixed(1)}% residential</div>
+          <div className="eyebrow text-ink-500 text-[10px]">% of residential</div>
+          <div className="relative inline-block">
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              className="cell-input text-right pr-5 !py-1 !px-1.5 w-[80px]"
+              value={Number(groupPct.toFixed(2))}
+              onChange={(e) => {
+                const n = parseFloat(e.target.value);
+                if (Number.isFinite(n) && n >= 0) onUpdateGroupPct(n);
+              }}
+            />
+            <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9.5px] text-ink-400 pointer-events-none">%</span>
+          </div>
         </div>
         <div className="text-right">
           <div className="eyebrow text-ink-500 text-[10px]">Group BUA</div>
