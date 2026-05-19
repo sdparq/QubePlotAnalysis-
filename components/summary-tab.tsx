@@ -9,9 +9,6 @@ import {
   RESIDENTIAL_SUBS,
 } from "@/lib/calc/gfa";
 import {
-  defaultCommonAreasBreakdown,
-  type CommonAreasBreakdown,
-  type CommonAreasGroup,
   type GfaUseCategory,
   type ResidentialSubCategory,
 } from "@/lib/types";
@@ -25,12 +22,6 @@ function fmtM2(m2: number): string {
   if (!Number.isFinite(m2) || m2 === 0) return "—";
   return `${Math.round(m2).toLocaleString("en-US")} m²`;
 }
-
-const GROUP_LABEL: Record<CommonAreasGroup, string> = {
-  amenities: "Amenities",
-  circulation: "Circulation",
-  services: "Services",
-};
 
 const RESIDENTIAL_SUB_LABEL: Record<ResidentialSubCategory, string> = {
   apartments: "Apartments",
@@ -50,10 +41,6 @@ export default function SummaryTab() {
 
   const target = project.targetGFA ?? 0;
   const maxBUA = project.maxBUA ?? 0;
-  const cab: CommonAreasBreakdown = useMemo(
-    () => project.commonAreasBreakdown ?? defaultCommonAreasBreakdown(),
-    [project.commonAreasBreakdown],
-  );
 
   // ── Residential breakdown ───────────────────────────────────────────────
   const residentialBuaTotal = useMemo(() => residentialBUA(project), [project]);
@@ -102,19 +89,6 @@ export default function SummaryTab() {
         gfa: subGFA,
         flag,
       });
-      if (sub === "apartments") continue;
-      const subs = cab[sub as CommonAreasGroup];
-      for (const item of subs) {
-        const itemBUA = subBUA * item.pct / 100;
-        if (itemBUA <= 0) continue;
-        rows.push({
-          type: "sub2",
-          label: item.name,
-          bua: itemBUA,
-          gfa: item.countsAsGFA ? itemBUA : 0,
-          flag: item.countsAsGFA ? "GFA" : "Non-GFA",
-        });
-      }
     }
   }
 

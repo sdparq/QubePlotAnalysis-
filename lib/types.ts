@@ -198,6 +198,10 @@ export interface Project {
   /** Hierarchical breakdown of common areas with editable sub-percentages and
    *  GFA flags. When set it drives the flat `commonAreas` list automatically. */
   commonAreasBreakdown?: CommonAreasBreakdown;
+  /** Services common area in m² (BUA only — does NOT count toward GFA). Typed
+   *  as an absolute value because services (MEP rooms, shafts, plant rooms)
+   *  scale with engineering needs rather than as a % of residential GFA. */
+  servicesBUA?: number;
   /** How the user enters common area sizes. "absolute" = m² × floors (default); "percentage" = each row stores a fraction of targetGFA and the m² is derived. */
   commonAreasInputMode?: "absolute" | "percentage";
   /** Per-project overrides for the waste-room calculation. Falls back to Dubai DM defaults. */
