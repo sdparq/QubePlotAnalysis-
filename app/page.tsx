@@ -22,11 +22,11 @@ const TABS = [
   { id: "common", num: "02", label: "Distribution" },
   { id: "typologies", num: "03", label: "Typologies" },
   { id: "program", num: "04", label: "Apartments" },
-  { id: "summary", num: "05", label: "Areas Summary" },
-  { id: "parking", num: "06", label: "Parking" },
-  { id: "lifts", num: "07", label: "Lifts" },
-  { id: "garbage", num: "08", label: "Garbage" },
-  { id: "massing", num: "09", label: "Massing" },
+  { id: "parking", num: "05", label: "Parking" },
+  { id: "lifts", num: "06", label: "Lifts" },
+  { id: "garbage", num: "07", label: "Garbage" },
+  { id: "massing", num: "08", label: "Massing" },
+  { id: "summary", num: "09", label: "Areas Summary" },
   { id: "economic", num: "10", label: "Economic" },
 ] as const;
 
