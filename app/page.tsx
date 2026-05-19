@@ -19,7 +19,7 @@ const TABS = [
   { id: "zones", num: "L", label: "Class Library" },
   { id: "plot", num: "00", label: "Plot" },
   { id: "setup", num: "01", label: "Setup" },
-  { id: "common", num: "02", label: "Repartos" },
+  { id: "common", num: "02", label: "Distribution" },
   { id: "typologies", num: "03", label: "Typologies" },
   { id: "program", num: "04", label: "Apartments" },
   { id: "summary", num: "05", label: "Areas Summary" },
