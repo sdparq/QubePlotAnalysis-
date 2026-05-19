@@ -82,7 +82,7 @@ export default function ProgramTab() {
 
       <div className="card">
         <div className="mb-5">
-          <h2 className="section-title">Program — units per floor</h2>
+          <h2 className="section-title">Apartments — units per floor</h2>
           <p className="section-sub">Set the count of each typology on each floor. Subtotals update live.</p>
         </div>
         <div className="w-full">

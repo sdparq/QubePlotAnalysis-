@@ -76,12 +76,13 @@ export default function CommonAreasTab() {
     <div className="grid gap-6">
       <div className="card">
         <div className="mb-5">
-          <h2 className="section-title">Common Areas &amp; Services</h2>
+          <h2 className="section-title">Repartos · residential GFA → apartments / common areas</h2>
           <p className="section-sub">
-            <strong>Amenities</strong> y <strong>Circulation</strong> son un % del residential GFA y
-            cuentan como GFA. <strong>Services</strong> (MEP, shafts, plant rooms…) se introduce en
-            m² absolutos y sólo cuenta como <strong>BUA</strong>, no como GFA. Apartments se deriva
-            automáticamente como 100% − Amenities − Circulation.
+            Reparte el GFA residencial entre <strong>Amenities</strong>, <strong>Circulation</strong>{" "}
+            y lo que queda para <strong>Apartments</strong>. <strong>Services</strong> (MEP, shafts,
+            plant rooms…) se introduce en m² absolutos y sólo cuenta como <strong>BUA</strong>, no
+            como GFA. El total de Apartments GFA que sale aquí es el que luego alimenta Typologies y
+            Apartments.
           </p>
         </div>
 
