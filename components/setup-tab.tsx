@@ -18,7 +18,6 @@ import {
   type ZoneClass,
   type TypologyKey,
 } from "@/lib/zone-classes";
-import { residentialBuaInflationFactor } from "@/lib/calc/gfa";
 
 interface FloorSectionDef {
   key: "basements" | "ground" | "podium" | "typeFloors";
@@ -350,30 +349,10 @@ function GfaBreakdownCard({
     return total > 0 ? (item.value / total) * 100 : 0;
   }
 
-  /** Fraction of a use's built area (BUA) that counts toward GFA.
-   *  For Residential we derive it from the inflation factor in the shared
-   *  helper (which accounts for both residentialBreakdown flags AND the
-   *  Common Areas sub-breakdown). For the others, 1. */
-  function gfaShare(key: GfaUseCategory): number {
-    if (key !== "residential") return 1;
-    const inflation = residentialBuaInflationFactor(project);
-    return inflation > 0 ? 1 / inflation : 1;
-  }
-
-  /** The user types the GFA target for each use. The BUA inflates above it
-   *  whenever a sub-category is flagged Non-GFA (extra built area that doesn't
-   *  count toward FAR). */
-  function buaFor(key: GfaUseCategory): number {
-    const share = gfaShare(key);
-    const m2 = effectiveM2(key);
-    return share > 0 ? m2 / share : m2;
-  }
-
   function gfaFor(key: GfaUseCategory): number {
-    return gfaShare(key) > 0 ? effectiveM2(key) : 0;
+    return effectiveM2(key);
   }
 
-  const sumBUA = GFA_CATEGORIES.reduce((s, c) => s + buaFor(c.key), 0);
   const sumGFA = GFA_CATEGORIES.reduce((s, c) => s + gfaFor(c.key), 0);
   const sumPctGFA = total > 0 ? (sumGFA / total) * 100 : 0;
   const gfaMismatch = total > 0 ? Math.abs(sumGFA - total) : 0;
@@ -381,7 +360,6 @@ function GfaBreakdownCard({
 
   function rebalanceTo100() {
     if (total <= 0) return;
-    // Scale every BUA pro-rata so the resulting GFA sum equals targetGFA.
     if (sumGFA <= 0) return;
     const factor = total / sumGFA;
     const next: GfaBreakdown = {};
@@ -432,13 +410,12 @@ function GfaBreakdownCard({
       )}
 
       <div className="border border-ink-200">
-        <div className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+        <div className="grid grid-cols-[1fr_120px_90px_110px_120px_80px] gap-1 px-3 py-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
           <div>Use</div>
           <div className="text-right">Input</div>
           <div className="text-center">Mode</div>
-          <div className="text-right">BUA m²</div>
           <div className="text-right">GFA m²</div>
-          <div className="text-right">≈ sqft (BUA)</div>
+          <div className="text-right">≈ sqft (GFA)</div>
           <div className="text-right">% of GFA</div>
         </div>
         {GFA_CATEGORIES.map((c) => {
@@ -448,7 +425,7 @@ function GfaBreakdownCard({
           return (
             <div key={c.key}>
               <div
-                className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
+                className="grid grid-cols-[1fr_120px_90px_110px_120px_80px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100"
               >
                 <div>
                   <div className="text-ink-900">{c.label}</div>
@@ -481,14 +458,12 @@ function GfaBreakdownCard({
                   </button>
                 </div>
                 {(() => {
-                  const bua = buaFor(c.key);
                   const gfa = gfaFor(c.key);
                   const gfaPct = total > 0 ? (gfa / total) * 100 : 0;
                   return (
                     <>
-                      <div className="text-right text-ink-900">{bua > 0 ? Math.round(bua).toLocaleString("en-US") : "—"}</div>
                       <div className="text-right text-qube-800 font-medium">{gfa > 0 ? Math.round(gfa).toLocaleString("en-US") : "—"}</div>
-                      <div className="text-right text-ink-500">{fmtSqft(bua)}</div>
+                      <div className="text-right text-ink-500">{fmtSqft(gfa)}</div>
                       <div className="text-right text-ink-700">{gfaPct > 0 ? `${gfaPct.toFixed(1)}%` : "—"}</div>
                     </>
                   );
@@ -497,13 +472,12 @@ function GfaBreakdownCard({
             </div>
           );
         })}
-        <div className="grid grid-cols-[1fr_120px_90px_110px_110px_120px_80px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
+        <div className="grid grid-cols-[1fr_120px_90px_110px_120px_80px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total of uses</div>
           <div></div>
           <div></div>
-          <div className="text-right text-qube-800">{Math.round(sumBUA).toLocaleString("en-US")}</div>
           <div className="text-right text-qube-800">{Math.round(sumGFA).toLocaleString("en-US")}</div>
-          <div className="text-right text-qube-700">{fmtSqft(sumBUA)}</div>
+          <div className="text-right text-qube-700">{fmtSqft(sumGFA)}</div>
           <div className="text-right text-qube-800">{total > 0 ? `${sumPctGFA.toFixed(1)}%` : "—"}</div>
         </div>
       </div>
@@ -513,18 +487,7 @@ function GfaBreakdownCard({
           Σ GFA across uses = <strong>{Math.round(sumGFA).toLocaleString("en-US")} m²</strong>{" "}
           ({sumPctGFA.toFixed(1)}%) but Target GFA is{" "}
           <strong>{total.toLocaleString("en-US")} m²</strong>. Adjust the rows or click
-          <em> Rebalance to 100%</em> above. Σ BUA = {Math.round(sumBUA).toLocaleString("en-US")} m²
-          (BUA &gt; GFA because some sub-categories are flagged Non-GFA).
-        </p>
-      )}
-
-      {project.maxBUA && project.maxBUA > 0 && sumBUA > project.maxBUA + 1 && (
-        <p className="text-[11.5px] mt-3 leading-snug text-red-700">
-          Σ BUA across uses = <strong>{Math.round(sumBUA).toLocaleString("en-US")} m²</strong>{" "}
-          exceeds the <strong>Max BUA</strong> limit of{" "}
-          <strong>{project.maxBUA.toLocaleString("en-US")} m²</strong> by{" "}
-          {Math.round(sumBUA - project.maxBUA).toLocaleString("en-US")} m². Reduce Non-GFA
-          flags or the use allocations to stay within the constraint.
+          <em> Rebalance to 100%</em> above.
         </p>
       )}
     </div>
