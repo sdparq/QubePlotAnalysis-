@@ -249,13 +249,29 @@ function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, exis
     }
     const cellsByFloor: Record<number, { typologyId: string; count: number }[]> = {};
     for (let f = 1; f <= numFloors; f++) cellsByFloor[f] = [];
+    // Per-floor running totals — we always drop the "remainder" extras on the
+    // floor that currently has the fewest units so floor totals end up as
+    // equal as possible regardless of how each typology rounds.
+    const floorTotal: number[] = Array(numFloors + 1).fill(0);
     for (const { typology, units } of targets) {
       if (units <= 0) continue;
       const perFloor = Math.floor(units / Math.max(1, numFloors));
       const remainder = units - perFloor * numFloors;
-      for (let f = 1; f <= numFloors; f++) {
-        const cnt = perFloor + (f <= remainder ? 1 : 0);
-        if (cnt > 0) cellsByFloor[f].push({ typologyId: typology.id, count: cnt });
+      if (perFloor > 0) {
+        for (let f = 1; f <= numFloors; f++) {
+          cellsByFloor[f].push({ typologyId: typology.id, count: perFloor });
+          floorTotal[f] += perFloor;
+        }
+      }
+      if (remainder > 0) {
+        const floors = Array.from({ length: numFloors }, (_, i) => i + 1)
+          .sort((a, b) => floorTotal[a] - floorTotal[b] || a - b);
+        for (const f of floors.slice(0, remainder)) {
+          const existing = cellsByFloor[f].find((c) => c.typologyId === typology.id);
+          if (existing) existing.count += 1;
+          else cellsByFloor[f].push({ typologyId: typology.id, count: 1 });
+          floorTotal[f] += 1;
+        }
       }
     }
     onApply(cellsByFloor);
