@@ -4,8 +4,7 @@ import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
 import {
   residentialBUA,
-  residentialSubBUA,
-  residentialSubGFA,
+  residentialSubQuota,
 } from "@/lib/calc/gfa";
 import {
   defaultCommonAreasBreakdown,
@@ -34,16 +33,18 @@ const GROUPS: GroupDef[] = [
   { key: "services",    label: "Services",    hint: "MEP rooms, shafts, ducts, plant rooms." },
 ];
 
-/** Build the flat CommonArea[] list the rest of the calc engine consumes. */
+/** Build the flat CommonArea[] list the rest of the calc engine consumes.
+ *  Each sub's m² is `groupGFAQuota × sub.pct / 100`. GFA-counted subs together
+ *  cover the group's GFA quota; non-GFA subs are additive BUA extras. */
 function buildFlatCommonAreas(
   breakdown: CommonAreasBreakdown,
-  groupBUA: Record<CommonAreasGroup, number>,
+  groupGFAQuota: Record<CommonAreasGroup, number>,
 ): CommonArea[] {
   const out: CommonArea[] = [];
   for (const g of GROUPS) {
-    const bua = groupBUA[g.key];
+    const quota = groupGFAQuota[g.key];
     for (const sub of breakdown[g.key]) {
-      const area = bua * sub.pct / 100;
+      const area = (quota * sub.pct) / 100;
       out.push({
         id: sub.id,
         name: `${g.label} · ${sub.name}`,
@@ -65,25 +66,19 @@ export default function CommonAreasTab() {
     [project.commonAreasBreakdown],
   );
 
-  // Group BUA is sized so its GFA-counted share equals what Setup allocates.
-  //   subGFA  = pct × residentialGFA × (countsAsGFA at residential level)
-  //   subBUA  = subGFA / subGfaShare    (inflates when Pool/Padel/... are Non-GFA)
-  function groupBUAFor(breakdownOverride?: CommonAreasBreakdown): Record<CommonAreasGroup, number> {
-    const proj = breakdownOverride
-      ? { ...project, commonAreasBreakdown: breakdownOverride }
-      : project;
+  // Group GFA quota = (group % of residential) × residentialGFA — exact, no
+  // capping. Apartments auto-derives as 100% − Σ groups inside residentialSubQuota
+  // so the four shares always sum to 100%.
+  function groupGFAQuotaFor(rbOverride?: typeof DEFAULT_RESIDENTIAL_BREAKDOWN): Record<CommonAreasGroup, number> {
+    const proj = rbOverride ? { ...project, residentialBreakdown: rbOverride } : project;
     return {
-      amenities:   residentialSubBUA(proj, "amenities"),
-      circulation: residentialSubBUA(proj, "circulation"),
-      services:    residentialSubBUA(proj, "services"),
+      amenities:   residentialSubQuota(proj, "amenities"),
+      circulation: residentialSubQuota(proj, "circulation"),
+      services:    residentialSubQuota(proj, "services"),
     };
   }
-  const groupBUA = groupBUAFor();
-  const groupGFAFromSetup: Record<CommonAreasGroup, number> = {
-    amenities:   residentialSubGFA(project, "amenities"),
-    circulation: residentialSubGFA(project, "circulation"),
-    services:    residentialSubGFA(project, "services"),
-  };
+  const groupGFAQuota = groupGFAQuotaFor();
+
   const rb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
   const groupPct: Record<CommonAreasGroup, number> = {
     amenities:   rb.amenities?.pct   ?? 0,
@@ -93,12 +88,9 @@ export default function CommonAreasTab() {
   const residentialBUATotal = useMemo(() => residentialBUA(project), [project]);
 
   function commit(next: CommonAreasBreakdown) {
-    // Compute the group BUAs against the NEW breakdown so the flat list and
-    // every downstream calc reflect the toggle/edit immediately.
-    const nextGroupBUA = groupBUAFor(next);
     patch({
       commonAreasBreakdown: next,
-      commonAreas: buildFlatCommonAreas(next, nextGroupBUA),
+      commonAreas: buildFlatCommonAreas(next, groupGFAQuota),
     });
   }
 
@@ -122,46 +114,45 @@ export default function CommonAreasTab() {
     commit({ ...breakdown, [group]: [...breakdown[group], newSub] });
   }
 
+  /** Rebalance only the GFA-counted rows so their pcts sum to 100%. Non-GFA
+   *  rows are intentionally left alone — they're additive BUA extras and the
+   *  user controls them independently. */
   function rebalanceGroup(group: CommonAreasGroup) {
     const subs = breakdown[group];
-    const sum = subs.reduce((s, x) => s + x.pct, 0);
-    if (sum <= 0) return;
-    const factor = 100 / sum;
-    const nextGroup = subs.map((s) => ({ ...s, pct: Number((s.pct * factor).toFixed(2)) }));
+    const gfaSum = subs.filter((s) => s.countsAsGFA).reduce((s, x) => s + x.pct, 0);
+    if (gfaSum <= 0) return;
+    const factor = 100 / gfaSum;
+    const nextGroup = subs.map((s) =>
+      s.countsAsGFA ? { ...s, pct: Number((s.pct * factor).toFixed(2)) } : s,
+    );
     commit({ ...breakdown, [group]: nextGroup });
   }
 
   function updateGroupResidentialPct(group: CommonAreasGroup, pct: number) {
     const curRb = project.residentialBreakdown ?? DEFAULT_RESIDENTIAL_BREAKDOWN;
     const nextRb = { ...curRb, [group]: { ...curRb[group], pct: Math.max(0, pct) } };
-    const proj = { ...project, residentialBreakdown: nextRb };
-    const nextGroupBUA: Record<CommonAreasGroup, number> = {
-      amenities:   residentialSubBUA(proj, "amenities"),
-      circulation: residentialSubBUA(proj, "circulation"),
-      services:    residentialSubBUA(proj, "services"),
-    };
+    const nextQuotas = groupGFAQuotaFor(nextRb);
     patch({
       residentialBreakdown: nextRb,
-      commonAreas: buildFlatCommonAreas(breakdown, nextGroupBUA),
+      commonAreas: buildFlatCommonAreas(breakdown, nextQuotas),
     });
   }
 
-  // ── Aggregate stats ─────────────────────────────────────────────────────
-  // (totalBUA / totalGFA are derived from the breakdown below, so they always
-  // mirror what the table shows — even when group sums don't add up to 100%.)
   // ── Aggregate stats (derived live from the breakdown to stay in sync) ──
   const aggregated = (["amenities", "circulation", "services"] as CommonAreasGroup[])
     .flatMap((g) =>
-      breakdown[g].map((s) => ({
-        bua: groupBUA[g] * s.pct / 100,
-        gfa: s.countsAsGFA ? groupBUA[g] * s.pct / 100 : 0,
-        open: s.countsAsGFA ? 0 : groupBUA[g] * s.pct / 100,
-      })),
+      breakdown[g].map((s) => {
+        const m2 = (groupGFAQuota[g] * s.pct) / 100;
+        return {
+          bua: m2,
+          gfa: s.countsAsGFA ? m2 : 0,
+          open: s.countsAsGFA ? 0 : m2,
+        };
+      }),
     );
   const totalBUA = aggregated.reduce((s, x) => s + x.bua, 0);
   const totalGFA = aggregated.reduce((s, x) => s + x.gfa, 0);
   const totalOpen = aggregated.reduce((s, x) => s + x.open, 0);
-  const totalBUAonly = 0; // not used by the breakdown — kept for compatibility.
 
   return (
     <div className="grid gap-6">
@@ -169,10 +160,10 @@ export default function CommonAreasTab() {
         <div className="mb-5">
           <h2 className="section-title">Common Areas &amp; Services</h2>
           <p className="section-sub">
-            Subcategorías editables dentro de Amenities, Circulation y Services. Cada sub
-            tiene su <strong>%</strong> dentro del grupo y un toggle <strong>GFA / Non-GFA</strong>.
-            Las superficies se calculan automáticamente a partir de los m² que el Setup
-            asigna a cada grupo (residential BUA × % del grupo).
+            Cada grupo (Amenities, Circulation, Services) tiene un <strong>% de residential</strong>{" "}
+            editable que fija su cuota de GFA. Dentro de cada grupo, las subcategorías reparten esa
+            cuota — las marcadas <strong>GFA</strong> deben sumar 100% para cubrir la cuota; las
+            <strong> Non-GFA</strong> son metros cuadrados extra que sólo cuentan como BUA.
           </p>
         </div>
 
@@ -187,18 +178,8 @@ export default function CommonAreasTab() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <Stat label="Total common areas BUA" value={`${fmt0(totalBUA)} m²`} sub={fmtSqft(totalBUA)} />
             <Stat label="Counted as GFA" value={`${fmt0(totalGFA)} m²`} sub={fmtSqft(totalGFA)} />
-            <Stat label="Counted as BUA-only" value={`${fmt0(totalBUAonly)} m²`} />
-            <Stat label="Open / no GFA" value={`${fmt0(totalOpen)} m²`} />
-          </div>
-        )}
-
-        {project.maxBUA && project.maxBUA > 0 && residentialBUATotal > project.maxBUA + 1 && (
-          <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] mb-4 leading-snug">
-            Residential BUA = <strong>{Math.round(residentialBUATotal).toLocaleString("en-US")} m²</strong>{" "}
-            exceeds the project&apos;s <strong>Max BUA</strong> ({project.maxBUA.toLocaleString("en-US")} m²)
-            by {Math.round(residentialBUATotal - project.maxBUA).toLocaleString("en-US")} m². The extra
-            comes from Non-GFA subcategories below — reduce the % allocated to Pool / Padel / etc.,
-            or toggle some of them back to GFA, or relax the limit in Setup.
+            <Stat label="Non-GFA (extra BUA)" value={`${fmt0(totalOpen)} m²`} sub={fmtSqft(totalOpen)} />
+            <Stat label="Σ Group GFA quota" value={`${fmt0(groupGFAQuota.amenities + groupGFAQuota.circulation + groupGFAQuota.services)} m²`} />
           </div>
         )}
 
@@ -208,8 +189,7 @@ export default function CommonAreasTab() {
               key={g.key}
               group={g}
               subs={breakdown[g.key]}
-              groupBUA={groupBUA[g.key]}
-              groupGFAFromSetup={groupGFAFromSetup[g.key]}
+              groupGFAQuota={groupGFAQuota[g.key]}
               groupPct={groupPct[g.key]}
               onAdd={() => addSub(g.key)}
               onRebalance={() => rebalanceGroup(g.key)}
@@ -229,12 +209,11 @@ export default function CommonAreasTab() {
 /* -------------------------------------------------------------------------- */
 
 function GroupSection({
-  group, subs, groupBUA, groupGFAFromSetup, groupPct, onAdd, onRebalance, onUpdateSub, onDelete, onUpdateGroupPct,
+  group, subs, groupGFAQuota, groupPct, onAdd, onRebalance, onUpdateSub, onDelete, onUpdateGroupPct,
 }: {
   group: GroupDef;
   subs: CommonAreaSub[];
-  groupBUA: number;
-  groupGFAFromSetup: number;
+  groupGFAQuota: number;
   groupPct: number;
   onAdd: () => void;
   onRebalance: () => void;
@@ -242,9 +221,11 @@ function GroupSection({
   onDelete: (id: string) => void;
   onUpdateGroupPct: (pct: number) => void;
 }) {
-  const sumPct = subs.reduce((s, x) => s + x.pct, 0);
-  const mismatch = Math.abs(sumPct - 100) > 0.5;
-  const gfaSum = subs.filter((s) => s.countsAsGFA).reduce((sum, s) => sum + groupBUA * s.pct / 100, 0);
+  const gfaPctSum = subs.filter((s) => s.countsAsGFA).reduce((s, x) => s + x.pct, 0);
+  const allPctSum = subs.reduce((s, x) => s + x.pct, 0);
+  const gfaMismatch = subs.some((s) => s.countsAsGFA) && Math.abs(gfaPctSum - 100) > 0.5;
+  const gfaTotalM2 = (groupGFAQuota * gfaPctSum) / 100;
+  const buaTotalM2 = (groupGFAQuota * allPctSum) / 100;
 
   return (
     <div className="border border-ink-200">
@@ -272,17 +253,22 @@ function GroupSection({
           </div>
         </div>
         <div className="text-right">
-          <div className="eyebrow text-ink-500 text-[10px]">Group BUA</div>
-          <div className="text-[12px] text-ink-900 tabular-nums">{groupBUA > 0 ? `${Math.round(groupBUA).toLocaleString("en-US")} m²` : "—"}</div>
+          <div className="eyebrow text-ink-500 text-[10px]">GFA quota</div>
+          <div className="text-[12px] text-ink-900 tabular-nums">
+            {groupGFAQuota > 0 ? `${Math.round(groupGFAQuota).toLocaleString("en-US")} m²` : "—"}
+          </div>
         </div>
         <div className="text-right">
-          <div className="eyebrow text-ink-500 text-[10px]">Of which GFA</div>
+          <div className="eyebrow text-ink-500 text-[10px]">Actual GFA / BUA</div>
           <div className="text-[12px] text-qube-800 font-medium tabular-nums">
-            {gfaSum > 0 ? `${Math.round(gfaSum).toLocaleString("en-US")} m²` : "—"}
+            {gfaTotalM2 > 0 ? `${Math.round(gfaTotalM2).toLocaleString("en-US")} m²` : "—"}
+            <span className="text-ink-500 font-normal">
+              {" "}/ {buaTotalM2 > 0 ? `${Math.round(buaTotalM2).toLocaleString("en-US")} m²` : "—"}
+            </span>
           </div>
-          {groupGFAFromSetup > 0 && Math.abs(gfaSum - groupGFAFromSetup) > 1 && (
+          {gfaMismatch && (
             <div className="text-[10px] text-amber-700 mt-0.5">
-              vs Setup {Math.round(groupGFAFromSetup).toLocaleString("en-US")} m²
+              GFA subs Σ {gfaPctSum.toFixed(1)}% (target 100%)
             </div>
           )}
         </div>
@@ -299,7 +285,7 @@ function GroupSection({
         <span></span>
       </div>
       {subs.map((sub) => {
-        const m2 = groupBUA * sub.pct / 100;
+        const m2 = (groupGFAQuota * sub.pct) / 100;
         return (
           <div
             key={sub.id}
@@ -316,7 +302,6 @@ function GroupSection({
                 type="number"
                 step={0.5}
                 min={0}
-                max={100}
                 className="cell-input text-right pr-6 !py-1 !px-1.5"
                 value={Number(sub.pct.toFixed(2))}
                 onChange={(e) => {
@@ -348,11 +333,13 @@ function GroupSection({
         );
       })}
 
-      {/* Footer: sum + actions */}
+      {/* Footer: sums + actions */}
       <div className="grid grid-cols-[14px_1fr_90px_100px_110px_120px_28px] gap-1 px-3 py-1.5 items-center text-[11.5px] tabular-nums bg-bone-50/40">
         <span></span>
-        <span className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Sum</span>
-        <span className={`text-right ${mismatch ? "text-amber-700 font-medium" : "text-ink-700"}`}>{sumPct.toFixed(1)}%</span>
+        <span className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Σ GFA / Σ total</span>
+        <span className={`text-right ${gfaMismatch ? "text-amber-700 font-medium" : "text-ink-700"}`}>
+          {gfaPctSum.toFixed(1)}% / {allPctSum.toFixed(1)}%
+        </span>
         <span></span>
         <span></span>
         <span></span>
@@ -362,12 +349,12 @@ function GroupSection({
         <button onClick={onAdd} className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline">
           + Add subcategory
         </button>
-        {mismatch && (
+        {gfaMismatch && (
           <button
             onClick={onRebalance}
             className="text-[10.5px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
-            title="Scale every row proportionally so the sum equals 100%"
-          >Rebalance to 100%</button>
+            title="Scale only the GFA-counted rows so they sum to 100%"
+          >Rebalance GFA rows to 100%</button>
         )}
       </div>
     </div>
