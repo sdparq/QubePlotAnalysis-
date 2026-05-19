@@ -101,9 +101,9 @@ export default function TypologiesTab() {
 
   /**
    * Create one typology per non-zero category in the detected class.
-   * Areas come from the class's average sellable (mid-range, SqFt → m²),
-   * split between interior and balcony using `balconyPctOfNsa`. Iteration
-   * order follows TYPOLOGY_KEYS so Studio is first.
+   * Areas come from the class's minimum sellable (low end of the range,
+   * SqFt → m²), split between interior and balcony using `balconyPctOfNsa`.
+   * Iteration order follows TYPOLOGY_KEYS so Studio is first.
    */
   function applyClassMix(letter: ZoneClass) {
     const row = library[letter];
@@ -114,9 +114,8 @@ export default function TypologiesTab() {
       if (pct < 0.005) continue;
       const cat = CATEGORY_FOR_TYPOLOGY_KEY[key];
       if (!cat) continue;
-      const [lo, hi] = row.avgAreaSqft[key];
-      const avgSqft = hi > 0 ? (lo + hi) / 2 : lo;
-      const totalM2 = avgSqft / SQFT_PER_M2;
+      const [lo] = row.avgAreaSqft[key];
+      const totalM2 = lo / SQFT_PER_M2;
       if (totalM2 <= 0) continue;
       const balconyM2 = totalM2 * balconyShare;
       const interiorM2 = totalM2 - balconyM2;
@@ -158,7 +157,7 @@ export default function TypologiesTab() {
                   <tr className="text-[10.5px] uppercase tracking-[0.08em] text-ink-500">
                     <th className="text-left py-1 font-medium">Typology</th>
                     <th className="text-right py-1 font-medium">% of units</th>
-                    <th className="text-right py-1 font-medium">Avg area (min–max)</th>
+                    <th className="text-right py-1 font-medium">Min area (min–max)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -187,7 +186,7 @@ export default function TypologiesTab() {
               >Apply class {detectedClass} mix</button>
               <p className="text-[10.5px] text-ink-500 leading-snug">
                 Creates one typology per non-zero category using the class&apos;s
-                <strong> average</strong> sellable area. Below, edit <em>Total area</em>
+                <strong> minimum</strong> sellable area. Below, edit <em>Total area</em>
                 and the balcony is auto-deducted at{" "}
                 <strong>{(library[detectedClass].balconyPctOfNsa * 100).toFixed(1)}%</strong>{" "}
                 of total (class {detectedClass} from the matrix).
