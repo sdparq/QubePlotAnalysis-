@@ -74,7 +74,7 @@ function SetupScene({ t, data }: { t: number; data: SampleData }) {
     { k: "Frontage × Depth", v: `${fmt2(p.plotFrontage ?? 0)} × ${fmt2(p.plotDepth ?? 0)} m` },
     { k: "Floors", v: `${p.numFloors}` },
     { k: "Floor height", v: `${p.floorHeight.toFixed(2)} m` },
-    { k: "Setbacks (F / R / S)", v: `${p.setbackFront} / ${p.setbackRear} / ${p.setbackSide} m` },
+    { k: "Setbacks (G / P / T)", v: `${p.groundSetbackM ?? 0} / ${p.podiumSetbackM ?? 0} / ${p.towerSetbackM ?? 0} m` },
   ];
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-bone-50">

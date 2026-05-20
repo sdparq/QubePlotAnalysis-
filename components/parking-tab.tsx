@@ -6,7 +6,6 @@ import { fmt0 } from "@/lib/format";
 import {
   offsetPolygon,
   polygonArea,
-  rectangleToPolygon,
   rectanglePlotPolygon,
 } from "@/lib/geom";
 import type { OtherUse } from "@/lib/types";
@@ -25,29 +24,21 @@ export default function ParkingTab() {
   const upsertTypology = useStore((s) => s.upsertTypology);
   const r = computeParking(project);
 
-  // Buildable area = plot polygon shrunk by the setbacks (same logic as Massing).
+  // Buildable area at podium level = plot polygon shrunk by the podium setback.
+  // Parking lives in basements (= plot polygon) and podium floors, so this is
+  // the most restrictive footprint we can safely fill with cars.
   const buildableArea = useMemo(() => {
     const plotArea = project.plotArea ?? 0;
     const sqRoot = plotArea > 0 ? Math.sqrt(plotArea) : 50;
     const frontage = project.plotFrontage && project.plotFrontage > 0 ? project.plotFrontage : sqRoot;
     const depth = project.plotDepth && project.plotDepth > 0 ? project.plotDepth : sqRoot;
-    const sFront = project.setbackFront ?? 0;
-    const sRear = project.setbackRear ?? 0;
-    const sSide = project.setbackSide ?? 0;
-    const sUniform = project.setbackUniform ?? Math.max(sFront, sRear, sSide, 3);
-    if (project.plotMode === "polygon" && project.plotPolygon && project.plotPolygon.length >= 3) {
-      const n = project.plotPolygon.length;
-      const perEdge = project.setbackPerEdge && project.setbackPerEdge.length === n
-        ? project.setbackPerEdge
-        : new Array(n).fill(sUniform);
-      return polygonArea(offsetPolygon(project.plotPolygon, perEdge));
-    }
-    if (project.plotMode === "polygon" && project.plotPolygon) {
-      // Polygon set but invalid — fall back to rectangle.
-      return polygonArea(rectanglePlotPolygon(frontage, depth));
-    }
-    return polygonArea(rectangleToPolygon(frontage, depth, sFront, sRear, sSide));
-  }, [project.plotArea, project.plotFrontage, project.plotDepth, project.setbackFront, project.setbackRear, project.setbackSide, project.setbackUniform, project.setbackPerEdge, project.plotMode, project.plotPolygon]);
+    const podiumSet = project.podiumSetbackM ?? 3;
+    const plotPoly = project.plotMode === "polygon" && project.plotPolygon && project.plotPolygon.length >= 3
+      ? project.plotPolygon
+      : rectanglePlotPolygon(frontage, depth);
+    if (podiumSet <= 0) return polygonArea(plotPoly);
+    return polygonArea(offsetPolygon(plotPoly, plotPoly.map(() => podiumSet)));
+  }, [project.plotArea, project.plotFrontage, project.plotDepth, project.podiumSetbackM, project.plotMode, project.plotPolygon]);
 
   return (
     <div className="grid gap-6">

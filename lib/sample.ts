@@ -100,9 +100,9 @@ export const PRODUCTION_CITY_SAMPLE: Project = {
   notes: "",
   plotFrontage: 80,
   plotDepth: 84.55,
-  setbackFront: 6,
-  setbackRear: 3,
-  setbackSide: 3,
+  groundSetbackM: 3,
+  podiumSetbackM: 3,
+  towerSetbackM: 6,
 };
 
 export function newId(prefix = "p"): string {

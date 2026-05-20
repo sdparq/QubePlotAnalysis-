@@ -131,44 +131,15 @@ export interface Project {
   plotMode?: "rectangular" | "polygon";
   plotFrontage?: number;
   plotDepth?: number;
-  setbackFront?: number;
-  setbackRear?: number;
-  setbackSide?: number;
   /** Polygon vertices in plot-local metres. Used when plotMode === "polygon". */
   plotPolygon?: { x: number; y: number }[];
-  /** Uniform setback applied to every polygon edge (m). Used as default if setbackPerEdge is not set. */
-  setbackUniform?: number;
-  /** Per-edge setback in metres. Length must match plotPolygon.length. Index i = setback of edge from vertex i to vertex i+1. */
-  setbackPerEdge?: number[];
-  /** Override for the 3D massing only — number of floors to extrude. Falls back to numFloors if undefined. */
-  massingFloors?: number;
-  /** Override for the 3D massing only — building footprint area per floor (m²). Falls back to GFA/floors. */
-  massingFloorArea?: number;
-  /** Building shape preset for the 3D massing. Defaults to "block". */
-  massingShape?: "block" | "podiumTower" | "courtyard" | "twinTowers" | "stepped" | "lShape" | "uShape";
-  /** Podium-and-tower preset parameters. */
-  podiumFloors?: number;
-  podiumCoverage?: number;          // 0..1 fraction of buildable area
-  towerCoverage?: number;           // 0..1 fraction of buildable area
-  towerPosition?: "C" | "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
-  /** Courtyard preset — fraction of the building footprint that is the central patio. */
-  courtyardRatio?: number;          // 0..0.6
-  /** Twin-towers preset. */
-  twinSeparation?: number;          // metres between tower centroids
-  twinCoverage?: number;            // 0..1 fraction of buildable area, per tower
-  /** Stepped / terraced preset. */
-  steppedSteps?: number;            // 2..6 — number of stepped levels
-  steppedShrink?: number;           // 0..0.5 — fraction the footprint shrinks per step
-  /** L-shape preset. */
-  lNotchPosition?: "NE" | "NW" | "SE" | "SW";
-  lNotchRatio?: number;             // 0..0.6 — fraction of the bbox cut from the chosen corner
-  /** U-shape preset. */
-  uOpening?: "N" | "S" | "E" | "W";
-  uArmRatio?: number;               // 0..0.5 — thickness of each arm relative to bbox
-  uNotchDepth?: number;             // 0..0.9 — depth of the central notch as fraction of bbox
-  /** Hard constraints used to score variants and flag the active massing. */
-  maxFAR?: number;
-  maxHeightM?: number;
+  /** Uniform setback (m) applied to the ground-floor footprint, measured inward
+   *  from the plot perimeter. Basements use 0 (full plot polygon). */
+  groundSetbackM?: number;
+  /** Uniform setback (m) applied to the podium floors footprint. */
+  podiumSetbackM?: number;
+  /** Uniform setback (m) applied to the tower (type floors) footprint. */
+  towerSetbackM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
   /** Maximum total built area (BUA, m²) the project must respect — sometimes
