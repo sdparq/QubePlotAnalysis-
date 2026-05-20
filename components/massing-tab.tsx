@@ -245,6 +245,18 @@ export default function MassingTab() {
                   primaryFootprint={towerPoly}
                   floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
                   edgeColors={edgeColors}
+                  building={{
+                    basementCount,
+                    basementHeightM,
+                    groundCount,
+                    groundHeightM,
+                    podiumCount,
+                    podiumHeightM,
+                    towerCount,
+                    towerHeightM,
+                    totalHeightAboveGroundM: totalH,
+                    towerFootprintM2: towerArea,
+                  }}
                   latitude={project.latitude!}
                   longitude={project.longitude!}
                   northHeadingDeg={project.northHeadingDeg ?? 0}

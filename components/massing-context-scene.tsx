@@ -22,6 +22,21 @@ export interface ContextSceneProps {
   floorHeight: number;
   primaryFootprint?: Point[];
   edgeColors?: string[];
+  /** Floor-breakdown summary used to brief the AI render so it draws the right
+   *  number of storeys, balconies and overall proportions. Optional — when
+   *  absent the renderer falls back to its generic prompt. */
+  building?: {
+    basementCount: number;
+    basementHeightM: number;
+    groundCount: number;
+    groundHeightM: number;
+    podiumCount: number;
+    podiumHeightM: number;
+    towerCount: number;
+    towerHeightM: number;
+    totalHeightAboveGroundM: number;
+    towerFootprintM2: number;
+  };
   latitude: number;
   longitude: number;
   /** Heading of plot's +Y axis relative to true north, degrees clockwise */
@@ -164,6 +179,7 @@ async function loadContextTiles(lat: number, lon: number, contextRadiusM: number
 export default function MassingContextScene(props: ContextSceneProps) {
   const {
     plot, volumes, floorHeight, edgeColors,
+    building,
     latitude, longitude, northHeadingDeg, buildingYOffsetM = 0,
     buildingXOffsetM = 0, buildingZOffsetM = 0,
     contextRadiusM = 350,
@@ -217,6 +233,32 @@ export default function MassingContextScene(props: ContextSceneProps) {
     try { return c.toDataURL("image/png"); } catch { return null; }
   }, []);
 
+  /** Build a concise GEOMETRY FACTS header from the project's floor breakdown.
+   *  Prepended to whatever prompt the user has — gives the model the exact
+   *  storey count and proportions so it stops inventing floors or warping the
+   *  silhouette. */
+  const geometryFacts = useMemo((): string => {
+    if (!building) return "";
+    const totalAbove = building.groundCount + building.podiumCount + building.towerCount;
+    const lines: string[] = [
+      "GEOMETRY FACTS (the project building, highlighted in the input image — preserve EXACTLY):",
+      `- ${totalAbove} floors above ground in total.`,
+      `- Ground: ${building.groundCount} floor(s) × ${building.groundHeightM.toFixed(1)} m height.`,
+    ];
+    if (building.podiumCount > 0) {
+      lines.push(`- Podium: ${building.podiumCount} floor(s) × ${building.podiumHeightM.toFixed(1)} m, sitting on top of the ground.`);
+    }
+    lines.push(`- Tower (residential): ${building.towerCount} typical floor(s) × ${building.towerHeightM.toFixed(1)} m. Draw exactly ${building.towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
+    if (building.basementCount > 0) {
+      lines.push(`- ${building.basementCount} basement(s) below ground — do NOT show them above ground.`);
+    }
+    lines.push(`- Total height above ground: ${building.totalHeightAboveGroundM.toFixed(1)} m.`);
+    lines.push(`- Tower footprint area: ${Math.round(building.towerFootprintM2).toLocaleString("en-US")} m².`);
+    lines.push("");
+    lines.push("CAMERA: reuse the EXACT camera angle, framing, zoom level and crop of the input image. Do not pan, do not zoom, do not change orientation. The project's silhouette in the output must overlay 1:1 with the silhouette in the input.");
+    return lines.join("\n");
+  }, [building]);
+
   const handleGeminiRender = useCallback(async (styleOverride?: AiStyle) => {
     if (!apiKey) {
       setKeyDialog({ open: true, draft: "" });
@@ -225,7 +267,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
     const png = captureCanvasPng();
     if (!png) { setAiError("Could not capture the viewer canvas."); return; }
     const style = styleOverride ?? aiStyle;
-    const prompt = (aiPrompts[style] ?? PROMPT_FOR[style]).trim() || PROMPT_FOR[style];
+    const basePrompt = (aiPrompts[style] ?? PROMPT_FOR[style]).trim() || PROMPT_FOR[style];
+    const prompt = geometryFacts ? `${geometryFacts}\n\n${basePrompt}` : basePrompt;
     if (styleOverride && styleOverride !== aiStyle) setAiStyle(styleOverride);
     setAiRendering(true);
     setAiError(null);
@@ -237,7 +280,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
     } finally {
       setAiRendering(false);
     }
-  }, [apiKey, aiPrompts, aiStyle, captureCanvasPng]);
+  }, [apiKey, aiPrompts, aiStyle, captureCanvasPng, geometryFacts]);
 
   const registerNeighborRef = useCallback((id: string, g: THREE.Group | null) => {
     setNeighborObjects((prev) => {
