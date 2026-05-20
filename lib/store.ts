@@ -17,7 +17,6 @@ interface State {
   duplicateProject: (id: string, newName?: string) => string;
   deleteProject: (id: string) => void;
   switchProject: (id: string) => void;
-  importProject: (p: Partial<Project>) => string;
 
   // Mutations on the active project
   setProject: (p: Project) => void;
@@ -119,14 +118,6 @@ export const useStore = create<State>()(
         set({ activeProjectId: id });
       },
 
-      importProject: (raw) => {
-        const now = Date.now();
-        const sample = freshSample();
-        // Merge with sample as defaults, then overwrite with imported fields, then assign fresh id
-        const merged: Project = { ...sample, ...raw, id: newId(), createdAt: now, updatedAt: now };
-        set((s) => ({ projects: { ...s.projects, [merged.id]: merged }, activeProjectId: merged.id }));
-        return merged.id;
-      },
 
       setProject: (p) => set((s) => updateActive(s, () => p)),
       patch: (patch) => set((s) => updateActive(s, (p) => ({ ...p, ...patch }))),
