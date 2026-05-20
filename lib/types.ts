@@ -133,13 +133,25 @@ export interface Project {
   plotDepth?: number;
   /** Polygon vertices in plot-local metres. Used when plotMode === "polygon". */
   plotPolygon?: { x: number; y: number }[];
-  /** Uniform setback (m) applied to the ground-floor footprint, measured inward
-   *  from the plot perimeter. Basements use 0 (full plot polygon). */
+  /** Uniform fallback setback (m) for the ground-floor footprint. Used when
+   *  `groundSetbackPerEdge` is not set or has a different length than the plot
+   *  polygon. Basements always use 0 (full plot polygon). */
   groundSetbackM?: number;
-  /** Uniform setback (m) applied to the podium floors footprint. */
+  /** Per-edge ground setback (m). Index i is the setback of the edge going
+   *  from vertex i to vertex i+1 in the plot polygon. */
+  groundSetbackPerEdge?: number[];
+  /** Uniform fallback setback (m) for the podium floors. */
   podiumSetbackM?: number;
-  /** Uniform setback (m) applied to the tower (type floors) footprint. */
+  /** Per-edge podium setback (m). */
+  podiumSetbackPerEdge?: number[];
+  /** Uniform fallback setback (m) for the tower (type) floors. */
   towerSetbackM?: number;
+  /** Per-edge tower setback (m). */
+  towerSetbackPerEdge?: number[];
+  /** Translate the tower footprint by (towerOffsetXM, towerOffsetYM) metres
+   *  after applying the setbacks. Lets the tower sit off-centre on the plot. */
+  towerOffsetXM?: number;
+  towerOffsetYM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
   /** Maximum total built area (BUA, m²) the project must respect — sometimes

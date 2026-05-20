@@ -12,6 +12,7 @@ import {
   polygonCentroid,
   polygonPerimeter,
   rectanglePlotPolygon,
+  translatePolygon,
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import type { Volume } from "@/lib/massing";
@@ -40,12 +41,20 @@ const MassingContextScene = dynamic(() => import("./massing-context-scene"), {
   ),
 });
 
-function tierPolygon(plot: Point[], setbackM: number): Point[] {
-  if (setbackM <= 0 || plot.length < 3) return plot;
-  return offsetPolygon(
-    plot,
-    plot.map(() => setbackM),
-  );
+/** Resolve a per-edge setback array for a tier:
+ *   - if the persisted perEdge array matches the plot polygon length, use it
+ *   - otherwise fall back to the uniform value on every edge */
+function resolvePerEdge(plot: Point[], uniform: number, perEdge: number[] | undefined): number[] {
+  if (perEdge && perEdge.length === plot.length) {
+    return perEdge.map((v) => Math.max(0, v));
+  }
+  return plot.map(() => Math.max(0, uniform));
+}
+
+function tierPolygon(plot: Point[], setbacks: number[]): Point[] {
+  if (plot.length < 3) return plot;
+  if (setbacks.every((s) => s <= 0)) return plot;
+  return offsetPolygon(plot, setbacks);
 }
 
 export default function MassingTab() {
@@ -65,14 +74,35 @@ export default function MassingTab() {
     return rectanglePlotPolygon(frontage, depth);
   }, [mode, project.plotPolygon, frontage, depth]);
 
-  // Per-tier setbacks (uniform on every edge).
-  const groundSet = project.groundSetbackM ?? 3;
-  const podiumSet = project.podiumSetbackM ?? 3;
-  const towerSet = project.towerSetbackM ?? 6;
+  // Per-tier setbacks. Each tier has a uniform fallback and an optional per-edge
+  // override. The user edits the per-edge values in the table below.
+  const groundUni = project.groundSetbackM ?? 3;
+  const podiumUni = project.podiumSetbackM ?? 3;
+  const towerUni = project.towerSetbackM ?? 6;
 
-  const groundPoly = useMemo(() => tierPolygon(plotPoly, groundSet), [plotPoly, groundSet]);
-  const podiumPoly = useMemo(() => tierPolygon(plotPoly, podiumSet), [plotPoly, podiumSet]);
-  const towerPoly = useMemo(() => tierPolygon(plotPoly, towerSet), [plotPoly, towerSet]);
+  const groundEdges = useMemo(
+    () => resolvePerEdge(plotPoly, groundUni, project.groundSetbackPerEdge),
+    [plotPoly, groundUni, project.groundSetbackPerEdge],
+  );
+  const podiumEdges = useMemo(
+    () => resolvePerEdge(plotPoly, podiumUni, project.podiumSetbackPerEdge),
+    [plotPoly, podiumUni, project.podiumSetbackPerEdge],
+  );
+  const towerEdges = useMemo(
+    () => resolvePerEdge(plotPoly, towerUni, project.towerSetbackPerEdge),
+    [plotPoly, towerUni, project.towerSetbackPerEdge],
+  );
+
+  const groundPoly = useMemo(() => tierPolygon(plotPoly, groundEdges), [plotPoly, groundEdges]);
+  const podiumPoly = useMemo(() => tierPolygon(plotPoly, podiumEdges), [plotPoly, podiumEdges]);
+  const towerPolyCentered = useMemo(() => tierPolygon(plotPoly, towerEdges), [plotPoly, towerEdges]);
+
+  const towerDx = project.towerOffsetXM ?? 0;
+  const towerDy = project.towerOffsetYM ?? 0;
+  const towerPoly = useMemo(
+    () => (towerDx === 0 && towerDy === 0 ? towerPolyCentered : translatePolygon(towerPolyCentered, towerDx, towerDy)),
+    [towerPolyCentered, towerDx, towerDy],
+  );
 
   const edgeColors = useMemo(
     () => (mode === "polygon" ? plotPoly.map((_, i) => edgeColor(i)) : undefined),
@@ -84,13 +114,21 @@ export default function MassingTab() {
   const podiumArea = polygonArea(podiumPoly);
   const towerArea = polygonArea(towerPoly);
 
-  // Tier heights — straight from Setup → floor breakdown.
+  // Tier heights — mirror the same fallbacks the Setup floor-breakdown card uses
+  // so unsaved defaults still render here. Ground in particular defaults to
+  // 1 × 4.5 m even when project.ground is undefined.
   const basementCount = project.basements?.count ?? 0;
-  const basementH = basementCount * (project.basements?.heightM ?? 0);
-  const groundCount = project.ground?.count ?? 0;
-  const groundH = groundCount * (project.ground?.heightM ?? 0);
+  const basementHeightM = project.basements?.heightM ?? 3.0;
+  const basementH = Math.max(0, basementCount) * Math.max(0, basementHeightM);
+
+  const groundCount = project.ground?.count ?? 1;
+  const groundHeightM = project.ground?.heightM ?? 4.5;
+  const groundH = Math.max(0, groundCount) * Math.max(0, groundHeightM);
+
   const podiumCount = project.podium?.count ?? 0;
-  const podiumH = podiumCount * (project.podium?.heightM ?? 0);
+  const podiumHeightM = project.podium?.heightM ?? 4.0;
+  const podiumH = Math.max(0, podiumCount) * Math.max(0, podiumHeightM);
+
   const towerCount = project.typeFloors?.count ?? project.numFloors;
   const towerHeightM = project.typeFloors?.heightM ?? project.floorHeight;
   const towerH = Math.max(0, towerCount) * Math.max(0, towerHeightM);
@@ -347,23 +385,36 @@ export default function MassingTab() {
           </div>
 
           <div className="grid gap-4 content-start">
-            <TierSetbacks
-              groundSet={groundSet}
-              podiumSet={podiumSet}
-              towerSet={towerSet}
+            <TierSummary
               groundCount={groundCount}
-              groundHeightM={project.ground?.heightM ?? 0}
+              groundHeightM={groundHeightM}
               podiumCount={podiumCount}
-              podiumHeightM={project.podium?.heightM ?? 0}
+              podiumHeightM={podiumHeightM}
               towerCount={towerCount}
               towerHeightM={towerHeightM}
               basementCount={basementCount}
-              basementHeightM={project.basements?.heightM ?? 0}
+              basementHeightM={basementHeightM}
               groundArea={groundArea}
               podiumArea={podiumArea}
               towerArea={towerArea}
               plotArea={plotPolyArea}
-              onSet={(field, v) => patch({ [field]: v } as Partial<typeof project>)}
+            />
+
+            <SetbacksTable
+              plotPoly={plotPoly}
+              groundEdges={groundEdges}
+              podiumEdges={podiumEdges}
+              towerEdges={towerEdges}
+              groundUni={groundUni}
+              podiumUni={podiumUni}
+              towerUni={towerUni}
+              onPatch={patch}
+            />
+
+            <TowerOffset
+              dx={towerDx}
+              dy={towerDy}
+              onPatch={patch}
             />
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-ink-200 pt-3">
@@ -427,71 +478,50 @@ export default function MassingTab() {
 /*                              Tier setbacks                                 */
 /* -------------------------------------------------------------------------- */
 
-function TierSetbacks({
-  groundSet, podiumSet, towerSet,
+function TierSummary({
   groundCount, groundHeightM,
   podiumCount, podiumHeightM,
   towerCount, towerHeightM,
   basementCount, basementHeightM,
   groundArea, podiumArea, towerArea, plotArea,
-  onSet,
 }: {
-  groundSet: number; podiumSet: number; towerSet: number;
   groundCount: number; groundHeightM: number;
   podiumCount: number; podiumHeightM: number;
   towerCount: number; towerHeightM: number;
   basementCount: number; basementHeightM: number;
   groundArea: number; podiumArea: number; towerArea: number; plotArea: number;
-  onSet: (field: "groundSetbackM" | "podiumSetbackM" | "towerSetbackM", v: number) => void;
 }) {
+  const rows: Array<{ label: string; floors: number; heightM: number; footprint: number; kind: "basement" | "ground" | "podium" | "tower" }> = [
+    { label: "Basement", floors: basementCount, heightM: basementHeightM, footprint: plotArea, kind: "basement" },
+    { label: "Ground", floors: groundCount, heightM: groundHeightM, footprint: groundArea, kind: "ground" },
+    { label: "Podium", floors: podiumCount, heightM: podiumHeightM, footprint: podiumArea, kind: "podium" },
+    { label: "Tower (type floors)", floors: towerCount, heightM: towerHeightM, footprint: towerArea, kind: "tower" },
+  ];
+  const swatch: Record<typeof rows[number]["kind"], string> = {
+    basement: "#bdb9ad",
+    ground: "#8a9a76",
+    podium: "#a3b08a",
+    tower: "#647d57",
+  };
   return (
     <div className="border border-ink-200">
-      <div className="grid grid-cols-[1fr_80px_70px_70px_90px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+      <div className="grid grid-cols-[1fr_70px_70px_90px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
         <div>Tier</div>
-        <div className="text-right">Setback m</div>
         <div className="text-right">Floors</div>
         <div className="text-right">Floor h m</div>
         <div className="text-right">Footprint m²</div>
       </div>
-
-      <TierRow
-        label="Basement"
-        sublabel="follows plot line"
-        setback={0}
-        floors={basementCount}
-        heightM={basementHeightM}
-        footprint={plotArea}
-        kind="basement"
-        readOnlySetback
-      />
-      <TierRow
-        label="Ground"
-        setback={groundSet}
-        floors={groundCount}
-        heightM={groundHeightM}
-        footprint={groundArea}
-        kind="ground"
-        onSetback={(v) => onSet("groundSetbackM", Math.max(0, v))}
-      />
-      <TierRow
-        label="Podium"
-        setback={podiumSet}
-        floors={podiumCount}
-        heightM={podiumHeightM}
-        footprint={podiumArea}
-        kind="podium"
-        onSetback={(v) => onSet("podiumSetbackM", Math.max(0, v))}
-      />
-      <TierRow
-        label="Tower (type floors)"
-        setback={towerSet}
-        floors={towerCount}
-        heightM={towerHeightM}
-        footprint={towerArea}
-        kind="tower"
-        onSetback={(v) => onSet("towerSetbackM", Math.max(0, v))}
-      />
-
+      {rows.map((r) => (
+        <div key={r.kind} className="grid grid-cols-[1fr_70px_70px_90px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-block w-3 h-3 shrink-0" style={{ backgroundColor: swatch[r.kind] }} />
+            <span className="text-ink-900 truncate">{r.label}</span>
+          </div>
+          <div className="text-right text-ink-700">{r.floors > 0 ? r.floors : "—"}</div>
+          <div className="text-right text-ink-700">{r.heightM > 0 ? r.heightM.toFixed(2) : "—"}</div>
+          <div className="text-right text-ink-900">{r.footprint > 0 ? Math.round(r.footprint).toLocaleString("en-US") : "—"}</div>
+        </div>
+      ))}
       <div className="px-3 py-2 text-[10.5px] text-ink-500 leading-snug border-t border-ink-100">
         Floor counts and heights come from <strong>Setup → Floor breakdown</strong>. Edit there to change them.
       </div>
@@ -499,56 +529,164 @@ function TierSetbacks({
   );
 }
 
-function TierRow({
-  label, sublabel, setback, floors, heightM, footprint, kind, onSetback, readOnlySetback,
+function SetbacksTable({
+  plotPoly, groundEdges, podiumEdges, towerEdges,
+  groundUni, podiumUni, towerUni,
+  onPatch,
 }: {
-  label: string;
-  sublabel?: string;
-  setback: number;
-  floors: number;
-  heightM: number;
-  footprint: number;
-  kind: "basement" | "ground" | "podium" | "tower";
-  onSetback?: (v: number) => void;
-  readOnlySetback?: boolean;
+  plotPoly: Point[];
+  groundEdges: number[];
+  podiumEdges: number[];
+  towerEdges: number[];
+  groundUni: number;
+  podiumUni: number;
+  towerUni: number;
+  onPatch: (p: Partial<ReturnType<typeof useProject>>) => void;
 }) {
-  const swatch: Record<typeof kind, string> = {
-    basement: "#bdb9ad",
-    ground: "#8a9a76",
-    podium: "#a3b08a",
-    tower: "#647d57",
-  };
+  const lengths = edgeLengths(plotPoly);
+
+  function updateEdge(tier: "ground" | "podium" | "tower", i: number, v: number) {
+    const safe = Math.max(0, v);
+    const baseUniform = tier === "ground" ? groundUni : tier === "podium" ? podiumUni : towerUni;
+    const baseArray = tier === "ground" ? groundEdges : tier === "podium" ? podiumEdges : towerEdges;
+    const next = baseArray.length === plotPoly.length ? [...baseArray] : plotPoly.map(() => baseUniform);
+    next[i] = safe;
+    const field = tier === "ground" ? "groundSetbackPerEdge" : tier === "podium" ? "podiumSetbackPerEdge" : "towerSetbackPerEdge";
+    onPatch({ [field]: next } as Partial<ReturnType<typeof useProject>>);
+  }
+
+  function applyUniform(tier: "ground" | "podium" | "tower", v: number) {
+    const safe = Math.max(0, v);
+    const next = plotPoly.map(() => safe);
+    if (tier === "ground") onPatch({ groundSetbackM: safe, groundSetbackPerEdge: next });
+    else if (tier === "podium") onPatch({ podiumSetbackM: safe, podiumSetbackPerEdge: next });
+    else onPatch({ towerSetbackM: safe, towerSetbackPerEdge: next });
+  }
+
   return (
-    <div className="grid grid-cols-[1fr_80px_70px_70px_90px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-block w-3 h-3 shrink-0" style={{ backgroundColor: swatch[kind] }} />
-        <div className="min-w-0">
-          <div className="text-ink-900 truncate">{label}</div>
-          {sublabel && <div className="text-[10px] text-ink-500 leading-snug">{sublabel}</div>}
+    <div className="border border-ink-200">
+      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200">
+        <div className="eyebrow text-ink-500 text-[10px] mb-1.5">Setbacks per edge (m)</div>
+        <div className="grid grid-cols-[24px_28px_1fr_60px_60px_60px] gap-1 text-[10px] uppercase tracking-[0.08em] text-ink-500">
+          <span></span>
+          <span>#</span>
+          <span>Length</span>
+          <span className="text-right text-[#8a9a76]">Ground</span>
+          <span className="text-right text-[#a3b08a]">Podium</span>
+          <span className="text-right text-[#647d57]">Tower</span>
         </div>
       </div>
-      <div className="text-right">
-        {readOnlySetback ? (
-          <span className="text-ink-400">—</span>
-        ) : (
+      <div className="max-h-[280px] overflow-y-auto">
+        {plotPoly.map((_, i) => {
+          const color = edgeColor(i);
+          return (
+            <div key={i} className="grid grid-cols-[24px_28px_1fr_60px_60px_60px] gap-1 px-3 py-1 items-center text-[11.5px] tabular-nums border-b border-ink-100 last:border-b-0">
+              <span className="block w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+              <span className="text-[11px] text-ink-500">{i + 1}</span>
+              <span className="text-ink-700">{fmt2(lengths[i] ?? 0)} m</span>
+              <input
+                type="number"
+                step={0.5}
+                min={0}
+                className="cell-input text-right !py-0.5 !px-1.5"
+                value={Number((groundEdges[i] ?? groundUni).toFixed(1))}
+                onChange={(e) => updateEdge("ground", i, parseFloat(e.target.value) || 0)}
+              />
+              <input
+                type="number"
+                step={0.5}
+                min={0}
+                className="cell-input text-right !py-0.5 !px-1.5"
+                value={Number((podiumEdges[i] ?? podiumUni).toFixed(1))}
+                onChange={(e) => updateEdge("podium", i, parseFloat(e.target.value) || 0)}
+              />
+              <input
+                type="number"
+                step={0.5}
+                min={0}
+                className="cell-input text-right !py-0.5 !px-1.5"
+                value={Number((towerEdges[i] ?? towerUni).toFixed(1))}
+                onChange={(e) => updateEdge("tower", i, parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-[24px_28px_1fr_60px_60px_60px] gap-1 px-3 py-2 items-center text-[10.5px] uppercase tracking-[0.10em] text-ink-500 bg-bone-50/40 border-t border-ink-200">
+        <span></span>
+        <span></span>
+        <span>Apply uniform →</span>
+        <input
+          type="number"
+          step={0.5}
+          min={0}
+          className="cell-input text-right !py-0.5 !px-1.5"
+          value={Number(groundUni.toFixed(1))}
+          onChange={(e) => applyUniform("ground", parseFloat(e.target.value) || 0)}
+          title="Set every edge to this value for Ground"
+        />
+        <input
+          type="number"
+          step={0.5}
+          min={0}
+          className="cell-input text-right !py-0.5 !px-1.5"
+          value={Number(podiumUni.toFixed(1))}
+          onChange={(e) => applyUniform("podium", parseFloat(e.target.value) || 0)}
+          title="Set every edge to this value for Podium"
+        />
+        <input
+          type="number"
+          step={0.5}
+          min={0}
+          className="cell-input text-right !py-0.5 !px-1.5"
+          value={Number(towerUni.toFixed(1))}
+          onChange={(e) => applyUniform("tower", parseFloat(e.target.value) || 0)}
+          title="Set every edge to this value for Tower"
+        />
+      </div>
+      <p className="px-3 py-2 text-[10.5px] text-ink-500 leading-snug border-t border-ink-100">
+        Basement always follows the plot line (no setback). The colour swatch matches the edge in the
+        3D viewer and on the reference plan.
+      </p>
+    </div>
+  );
+}
+
+function TowerOffset({
+  dx, dy, onPatch,
+}: {
+  dx: number;
+  dy: number;
+  onPatch: (p: Partial<ReturnType<typeof useProject>>) => void;
+}) {
+  return (
+    <div className="border border-ink-200">
+      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200">
+        <div className="eyebrow text-ink-500 text-[10px]">Tower position offset (m)</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-3">
+        <Field label="X (right +)">
           <input
             type="number"
             step={0.5}
-            min={0}
-            className="cell-input text-right !py-1 !px-1.5 w-[70px]"
-            value={Number(setback.toFixed(1))}
-            onChange={(e) => {
-              const n = parseFloat(e.target.value);
-              if (Number.isFinite(n) && n >= 0) onSetback?.(n);
-            }}
+            className="cell-input text-right"
+            value={Number(dx.toFixed(2))}
+            onChange={(e) => onPatch({ towerOffsetXM: parseFloat(e.target.value) || 0 })}
           />
-        )}
+        </Field>
+        <Field label="Y (up +)">
+          <input
+            type="number"
+            step={0.5}
+            className="cell-input text-right"
+            value={Number(dy.toFixed(2))}
+            onChange={(e) => onPatch({ towerOffsetYM: parseFloat(e.target.value) || 0 })}
+          />
+        </Field>
       </div>
-      <div className="text-right text-ink-700">{floors > 0 ? floors : "—"}</div>
-      <div className="text-right text-ink-700">{heightM > 0 ? heightM.toFixed(2) : "—"}</div>
-      <div className="text-right text-ink-900">
-        {footprint > 0 ? Math.round(footprint).toLocaleString("en-US") : "—"}
-      </div>
+      <p className="px-3 pb-3 text-[10.5px] text-ink-500 leading-snug">
+        Shift the tower footprint after the setback offset. Leave at 0 for a centred tower.
+      </p>
     </div>
   );
 }
