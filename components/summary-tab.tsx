@@ -40,7 +40,6 @@ export default function SummaryTab() {
   const project = useProject();
 
   const target = project.targetGFA ?? 0;
-  const maxBUA = project.maxBUA ?? 0;
 
   // ── Residential breakdown ───────────────────────────────────────────────
   const residentialBuaTotal = useMemo(() => residentialBUA(project), [project]);
@@ -59,8 +58,6 @@ export default function SummaryTab() {
   const totalBUA = residentialBuaTotal + otherUses.reduce((s, u) => s + u.gfa, 0);
 
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
-  const buaOverMax = maxBUA > 0 && totalBUA > maxBUA + 1;
-
   // ── Build the table rows ────────────────────────────────────────────────
   type Row =
     | { type: "category"; label: string; bua: number; gfa: number }
@@ -118,9 +115,8 @@ export default function SummaryTab() {
         </div>
 
         {/* Headline stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
           <Stat label="Target GFA" value={target > 0 ? fmtM2(target) : "—"} sub={fmtSqft(target)} />
-          <Stat label="Max BUA" value={maxBUA > 0 ? fmtM2(maxBUA) : "—"} sub={maxBUA > 0 ? fmtSqft(maxBUA) : "Not set"} />
           <Stat
             label="Σ Project GFA"
             value={fmtM2(totalGFA)}
@@ -132,7 +128,6 @@ export default function SummaryTab() {
             label="Σ Project BUA"
             value={fmtM2(totalBUA)}
             sub={fmtSqft(totalBUA)}
-            bad={buaOverMax}
           />
         </div>
 
@@ -142,13 +137,6 @@ export default function SummaryTab() {
             Σ Project GFA = {fmtM2(totalGFA)} exceeds the Target GFA of {fmtM2(target)} by{" "}
             <strong>{fmtM2(totalGFA - target)}</strong>. Reduce a use allocation or rebalance
             in <em>Setup → GFA breakdown</em>.
-          </p>
-        )}
-        {buaOverMax && (
-          <p className="text-[11.5px] text-red-700 mb-3 leading-snug">
-            Σ Project BUA = {fmtM2(totalBUA)} exceeds the <strong>Max BUA</strong> of{" "}
-            {fmtM2(maxBUA)} by <strong>{fmtM2(totalBUA - maxBUA)}</strong>. Reduce Non-GFA
-            subcategories or relax the limit in Setup.
           </p>
         )}
 
