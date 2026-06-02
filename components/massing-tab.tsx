@@ -16,6 +16,7 @@ import {
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import type { Volume } from "@/lib/massing";
+import UnitDistribution from "./unit-distribution";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
   ssr: false,
@@ -481,6 +482,24 @@ export default function MassingTab() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="mb-4">
+          <h2 className="section-title">Unit distribution · per-floor plan</h2>
+          <p className="section-sub">
+            Esquema abstracto del reparto de viviendas en una planta tipo. Cada rectángulo es una
+            unidad; su área es proporcional al <em>interior</em> de su tipología y el color es la
+            categoría (Studio / 1BR / 2BR / …). Se usa la huella de la <strong>torre</strong> y la
+            matriz de <strong>Apartments</strong> como fuente de verdad.
+          </p>
+        </div>
+        <UnitDistribution
+          towerPoly={towerPoly}
+          program={project.program}
+          typologies={project.typologies}
+          numFloors={project.numFloors}
+        />
       </div>
     </div>
   );
