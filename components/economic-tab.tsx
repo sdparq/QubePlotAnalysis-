@@ -2,9 +2,10 @@
 import { useStore, useProject } from "@/lib/store";
 import { computeEconomic } from "@/lib/calc/economic";
 import { fmt0, fmt2, fmtMoney, fmtMoneyShort, fmtPct } from "@/lib/format";
+import { AED_RATES, rateForCurrency } from "@/lib/currency";
 import type { EconomicConfig } from "@/lib/types";
 
-const CURRENCIES = ["AED", "USD", "EUR", "SAR", "GBP"];
+const CURRENCIES = Object.keys(AED_RATES);
 
 export default function EconomicTab() {
   const project = useProject();
@@ -13,19 +14,29 @@ export default function EconomicTab() {
   const cfg = project.economic ?? {};
   const currency = r.currency;
 
+  // Stored values in EconomicConfig are AED; the UI displays / edits them in
+  // the currently selected currency. These two helpers translate at the edge.
+  const dispRate = rateForCurrency(currency);
+  const dispMoney = (aed: number) => aed * dispRate;
+  const storeMoney = (disp: number) => (dispRate > 0 ? disp / dispRate : disp);
+
   function setCfg(p: Partial<EconomicConfig>) {
     patch({ economic: { ...cfg, ...p } });
   }
-  function setTypologyPrice(typologyId: string, price: number) {
+  function setTypologyPrice(typologyId: string, priceInDisplayCcy: number) {
     const next = { ...(cfg.typologyPricing ?? {}) };
-    if (price > 0) next[typologyId] = price;
+    const aed = storeMoney(priceInDisplayCcy);
+    if (aed > 0) next[typologyId] = aed;
     else delete next[typologyId];
     setCfg({ typologyPricing: next });
   }
 
-  const constructionRateAuto = r.defaults.constructionRatePerBUA;
-  const constructionRateManual = cfg.constructionRatePerBUA ?? 0;
-  const constructionRateUsesAuto = constructionRateManual <= 0 && constructionRateAuto > 0;
+  // Auto / manual construction rate, both expressed in display currency for
+  // rendering. The stored value is always AED.
+  const constructionRateAuto = r.defaults.constructionRatePerBUA; // already in display ccy
+  const constructionRateManualAed = cfg.constructionRatePerBUA ?? 0;
+  const constructionRateManual = dispMoney(constructionRateManualAed);
+  const constructionRateUsesAuto = constructionRateManualAed <= 0 && constructionRateAuto > 0;
 
   return (
     <div className="grid gap-6">
@@ -88,6 +99,11 @@ export default function EconomicTab() {
                 <option key={c}>{c}</option>
               ))}
             </select>
+            {currency !== "AED" && (
+              <span className="text-[10.5px] text-ink-500 tabular-nums">
+                1 AED ≈ {dispRate.toFixed(4)} {currency}
+              </span>
+            )}
           </div>
         </div>
         {r.perTypologyRevenue.length === 0 ? (
@@ -118,8 +134,9 @@ export default function EconomicTab() {
             </thead>
             <tbody>
               {r.perTypologyRevenue.map((row) => {
-                const manual = cfg.typologyPricing?.[row.typology.id] ?? 0;
-                const usesAuto = !manual && row.pricePerM2Auto > 0;
+                const manualAed = cfg.typologyPricing?.[row.typology.id] ?? 0;
+                const manualDisp = dispMoney(manualAed);
+                const usesAuto = !manualAed && row.pricePerM2Auto > 0;
                 return (
                   <tr key={row.typology.id}>
                     <td className="font-medium text-ink-900">
@@ -135,7 +152,7 @@ export default function EconomicTab() {
                           min={0}
                           step={50}
                           className={`cell-input text-right ${usesAuto ? "text-ink-500 italic" : ""}`}
-                          value={manual || ""}
+                          value={manualDisp || ""}
                           placeholder={row.pricePerM2Auto > 0 ? fmt0(row.pricePerM2Auto) : "0"}
                           onChange={(e) => setTypologyPrice(row.typology.id, parseFloat(e.target.value) || 0)}
                         />
@@ -176,18 +193,18 @@ export default function EconomicTab() {
           </Field>
           <Field label={`Price per space (${currency})`}>
             <NumInput
-              value={cfg.parkingPricePerSpace ?? 0}
+              value={dispMoney(cfg.parkingPricePerSpace ?? 0)}
               step={1000}
               min={0}
-              onChange={(v) => setCfg({ parkingPricePerSpace: v })}
+              onChange={(v) => setCfg({ parkingPricePerSpace: storeMoney(v) })}
             />
           </Field>
           <Field label={`Retail / F&B revenue (${currency})`}>
             <NumInput
-              value={cfg.retailRevenue ?? 0}
+              value={dispMoney(cfg.retailRevenue ?? 0)}
               step={10000}
               min={0}
-              onChange={(v) => setCfg({ retailRevenue: v })}
+              onChange={(v) => setCfg({ retailRevenue: storeMoney(v) })}
             />
           </Field>
         </div>
@@ -210,10 +227,10 @@ export default function EconomicTab() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <Field label={`Land acquisition (${currency})`}>
             <NumInput
-              value={cfg.landCost ?? 0}
+              value={dispMoney(cfg.landCost ?? 0)}
               step={100000}
               min={0}
-              onChange={(v) => setCfg({ landCost: v })}
+              onChange={(v) => setCfg({ landCost: storeMoney(v) })}
             />
           </Field>
           <Field label={`Construction rate (${currency} / m² BUA)`}>
@@ -223,7 +240,7 @@ export default function EconomicTab() {
                 step={50}
                 min={0}
                 italic={constructionRateUsesAuto}
-                onChange={(v) => setCfg({ constructionRatePerBUA: v })}
+                onChange={(v) => setCfg({ constructionRatePerBUA: storeMoney(v) })}
               />
               {constructionRateUsesAuto && (
                 <span className="text-[10px] text-qube-700 mt-0.5">
@@ -242,10 +259,10 @@ export default function EconomicTab() {
           <PctField label="UAE corporate tax (% of profit)" value={cfg.corporateTaxPct ?? 0.09} onChange={(v) => setCfg({ corporateTaxPct: v })} />
           <Field label={`Tax exemption (${currency})`}>
             <NumInput
-              value={cfg.corporateTaxExemption ?? 0}
+              value={dispMoney(cfg.corporateTaxExemption ?? 0)}
               step={25000}
               min={0}
-              onChange={(v) => setCfg({ corporateTaxExemption: v })}
+              onChange={(v) => setCfg({ corporateTaxExemption: storeMoney(v) })}
             />
           </Field>
         </div>
@@ -331,7 +348,7 @@ export default function EconomicTab() {
           <Kpi label="Cost / m² GFA" value={fmtMoney(r.costPerM2GFA, currency)} />
           <Kpi label="Cost / m² BUA" value={fmtMoney(r.costPerM2BUA, currency)} />
           <Kpi label="Cost / m² sellable" value={fmtMoney(r.costPerM2Sellable, currency)} />
-          <Kpi label="Land / TDC" value={fmtPct(r.landSharePct)} sub={`${fmtMoneyShort(cfg.landCost ?? 0, currency)} of ${fmtMoneyShort(r.totalCost, currency)}`} />
+          <Kpi label="Land / TDC" value={fmtPct(r.landSharePct)} sub={`${fmtMoneyShort(dispMoney(cfg.landCost ?? 0), currency)} of ${fmtMoneyShort(r.totalCost, currency)}`} />
           <Kpi label="Sellable / GFA" value={fmtPct(r.totalGFA > 0 ? r.totalSellable / r.totalGFA : 0)} sub="Saleable efficiency" />
           <Kpi label="Sellable / BUA" value={fmtPct(r.totalBUA > 0 ? r.totalSellable / r.totalBUA : 0)} sub="On total built area" />
         </div>

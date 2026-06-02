@@ -1,5 +1,6 @@
 import type { Project, Typology, EconomicConfig } from "../types";
 import { computeProgram } from "./program";
+import { fromBase } from "../currency";
 import {
   DEFAULT_ZONE_CLASSES,
   classForZone,
@@ -273,35 +274,73 @@ export function computeEconomic(project: Project): EconomicResult {
   const costPerM2BUA = program.totalBUABuilding > 0 ? totalCost / program.totalBUABuilding : 0;
   const costPerM2Sellable = totalSellable > 0 ? totalCost / totalSellable : 0;
 
+  // All monetary figures above are in AED (the canonical storage currency).
+  // Convert them into the display currency the user picked in the UI. Ratios
+  // (margins, percentages) stay untouched. Defaults must also be converted so
+  // the auto-fill placeholders match.
+  const conv = (x: number) => fromBase(x, currency);
+  const convPricing = (p: Record<string, number>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(p)) out[k] = conv(v);
+    return out;
+  };
+
+  const perTypologyRevenueDisplay: TypologyRevenue[] = perTypologyRevenue.map((r) => ({
+    ...r,
+    pricePerM2: conv(r.pricePerM2),
+    pricePerUnit: conv(r.pricePerUnit),
+    totalRevenue: conv(r.totalRevenue),
+    pricePerM2Auto: conv(r.pricePerM2Auto),
+  }));
+
+  const costsDisplay: CostLine[] = costs.map((c) => {
+    if (c.key === "construction") {
+      const rateDisp = conv(rate);
+      return {
+        ...c,
+        amount: conv(c.amount),
+        basis: `BUA × ${rateDisp.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${currency}/m²${manualRate > 0 ? "" : " (auto)"}`,
+      };
+    }
+    return { ...c, amount: conv(c.amount) };
+  });
+
+  const defaultsDisplay: EconomicDefaults = {
+    ...defaults,
+    constructionRatePerBUA: conv(defaults.constructionRatePerBUA),
+    retailRevenue: conv(defaults.retailRevenue),
+    typologyPricing: convPricing(defaults.typologyPricing),
+  };
+
   return {
     currency,
-    perTypologyRevenue,
-    residentialRevenue,
-    parkingRevenue,
-    retailRevenue,
-    totalRevenue,
-    costs,
-    totalCost,
-    grossProfit,
-    corporateTax,
+    perTypologyRevenue: perTypologyRevenueDisplay,
+    residentialRevenue: conv(residentialRevenue),
+    parkingRevenue: conv(parkingRevenue),
+    retailRevenue: conv(retailRevenue),
+    totalRevenue: conv(totalRevenue),
+    costs: costsDisplay,
+    totalCost: conv(totalCost),
+    grossProfit: conv(grossProfit),
+    corporateTax: conv(corporateTax),
     corporateTaxRate,
-    corporateTaxExemption,
-    profit,
+    corporateTaxExemption: conv(corporateTaxExemption),
+    profit: conv(profit),
     marginOnCost,
     marginOnGDV,
     grossMarginOnCost,
     grossMarginOnGDV,
     landSharePct: totalCost > 0 ? landCost / totalCost : 0,
-    avgPricePerM2Sellable,
-    avgPricePerUnit,
-    costPerM2GFA,
-    costPerM2BUA,
-    costPerM2Sellable,
+    avgPricePerM2Sellable: conv(avgPricePerM2Sellable),
+    avgPricePerUnit: conv(avgPricePerUnit),
+    costPerM2GFA: conv(costPerM2GFA),
+    costPerM2BUA: conv(costPerM2BUA),
+    costPerM2Sellable: conv(costPerM2Sellable),
     totalUnits,
     totalGFA: program.totalGFABuilding,
     totalBUA: program.totalBUABuilding,
     totalSellable,
     detectedClass,
-    defaults,
+    defaults: defaultsDisplay,
   };
 }
