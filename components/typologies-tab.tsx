@@ -69,22 +69,50 @@ export default function TypologiesTab() {
     upsert({ ...t, ...partial });
   }
 
-  /** Mutate the project-level mix override and trigger a silent re-fill of the
-   *  Apartments matrix so the user sees the consequence of their tweak live.
-   *  Falls back gracefully when the auto-fill can't run (no Apartments GFA,
-   *  no detected class, etc.) — we still persist the % override. */
-  function setMixForCategory(cat: UnitCategory, pct: number) {
-    const safe = Math.max(0, Math.min(100, pct));
-    const nextMix = { ...(project.typologyMix ?? {}), [cat]: safe };
+  /** Persist a new project-level mix override and silently re-run the
+   *  Apartments auto-fill so the next tab reflects the change immediately. */
+  function patchAndRefill(nextMix: Partial<Record<UnitCategory, number>> | undefined) {
     const projAfter = { ...project, typologyMix: nextMix };
     const classMix = detectedClass ? library[detectedClass].typologyMix : null;
     if (classMix) {
       const resolved = resolveTypologyMix(projAfter, classMix);
       const fill = computeProgramAutoFill(projAfter, resolved);
       patch({ typologyMix: nextMix, program: fill?.cells ?? project.program });
-      return;
+    } else {
+      patch({ typologyMix: nextMix });
     }
-    patch({ typologyMix: nextMix });
+  }
+
+  function setMixForCategory(cat: UnitCategory, pct: number) {
+    const safe = Math.max(0, Math.min(100, pct));
+    patchAndRefill({ ...(project.typologyMix ?? {}), [cat]: safe });
+  }
+
+  function resetMixForCategory(cat: UnitCategory) {
+    const next = { ...(project.typologyMix ?? {}) };
+    delete next[cat];
+    patchAndRefill(Object.keys(next).length === 0 ? undefined : next);
+  }
+
+  function resetAllMix() {
+    patchAndRefill(undefined);
+  }
+
+  function normalizeMix() {
+    const classMix = detectedClass ? library[detectedClass].typologyMix : null;
+    if (!classMix) return;
+    const eff = CATEGORIES.map((c) => ({
+      cat: c,
+      pct: effectiveMixPctForCategory(project, classMix, c),
+    }));
+    const sum = eff.reduce((s, e) => s + e.pct, 0);
+    if (sum <= 0) return;
+    const factor = 100 / sum;
+    const next: Partial<Record<UnitCategory, number>> = {};
+    for (const e of eff) {
+      if (e.pct > 0) next[e.cat] = Number((e.pct * factor).toFixed(1));
+    }
+    patchAndRefill(next);
   }
 
   /**
@@ -236,6 +264,18 @@ export default function TypologiesTab() {
         </div>
       )}
 
+      {detectedClass && (
+        <UnitMixCard
+          library={library}
+          detectedClass={detectedClass}
+          project={project}
+          onSetCategory={setMixForCategory}
+          onResetCategory={resetMixForCategory}
+          onResetAll={resetAllMix}
+          onNormalize={normalizeMix}
+        />
+      )}
+
       <div className="card">
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
@@ -251,19 +291,17 @@ export default function TypologiesTab() {
             <table className="tbl w-full table-fixed">
               <colgroup>
                 <col />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 90 }} />
                 <col style={{ width: 110 }} />
                 <col style={{ width: 110 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 100 }} />
                 <col style={{ width: 80 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 70 }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Category</th>
-                  <th className="text-right">Mix %</th>
                   <th className="text-right">Total area (m²)</th>
                   <th className="text-right">Balcony %{detectedClass && ` · class ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
                   <th className="text-right">Occupancy</th>
@@ -290,30 +328,6 @@ export default function TypologiesTab() {
                       >
                         {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                       </select>
-                    </td>
-                    <td className="cell-edit">
-                      {(() => {
-                        const classMix = detectedClass ? library[detectedClass].typologyMix : null;
-                        const usesOverride = project.typologyMix?.[t.category] !== undefined;
-                        const value = classMix
-                          ? effectiveMixPctForCategory(project, classMix, t.category)
-                          : (project.typologyMix?.[t.category] ?? 0);
-                        return (
-                          <div className="relative">
-                            <input
-                              type="number"
-                              step={0.5}
-                              min={0}
-                              max={100}
-                              className={`cell-input text-right pr-7 ${usesOverride ? "" : "text-ink-500 italic"}`}
-                              value={Number(value.toFixed(1))}
-                              onChange={(e) => setMixForCategory(t.category, parseFloat(e.target.value) || 0)}
-                              title="% of total units this typology should target. Editing this re-fills the Apartments matrix automatically."
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-ink-400 pointer-events-none">%</span>
-                          </div>
-                        );
-                      })()}
                     </td>
                     <td className="cell-edit">
                       <input
@@ -363,6 +377,132 @@ export default function TypologiesTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function UnitMixCard({
+  library,
+  detectedClass,
+  project,
+  onSetCategory,
+  onResetCategory,
+  onResetAll,
+  onNormalize,
+}: {
+  library: ReturnType<typeof useZoneLibrary>["library"];
+  detectedClass: ZoneClass;
+  project: ReturnType<typeof useProject>;
+  onSetCategory: (cat: UnitCategory, pct: number) => void;
+  onResetCategory: (cat: UnitCategory) => void;
+  onResetAll: () => void;
+  onNormalize: () => void;
+}) {
+  const classMix = library[detectedClass].typologyMix;
+  const override = project.typologyMix ?? {};
+  const hasAnyOverride = Object.keys(override).length > 0;
+
+  const rows = CATEGORIES.map((cat) => {
+    const classPct = effectiveMixPctForCategory(
+      { ...project, typologyMix: undefined } as ReturnType<typeof useProject>,
+      classMix,
+      cat,
+    );
+    const effPct = effectiveMixPctForCategory(project, classMix, cat);
+    const isOverride = override[cat] !== undefined;
+    return { cat, classPct, effPct, isOverride };
+  });
+  const effSum = rows.reduce((s, r) => s + r.effPct, 0);
+  const offNorm = Math.abs(effSum - 100) > 0.5;
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+        <div>
+          <h2 className="section-title">Unit mix · this project</h2>
+          <p className="section-sub">
+            Override per-category {`% of total units`} just for this project. Editing any row
+            re-runs the Apartments auto-fill silently. Italic numbers are the class {detectedClass}{" "}
+            default; bold numbers are project overrides.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasAnyOverride && (
+            <button
+              className="text-[11px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
+              onClick={onResetAll}
+              title="Clear every override and fall back to class defaults"
+            >Reset to class {detectedClass}</button>
+          )}
+          {offNorm && (
+            <button
+              className="text-[11px] uppercase tracking-[0.10em] text-qube-700 hover:text-qube-900 underline"
+              onClick={onNormalize}
+              title="Scale every category proportionally so the sum equals 100%"
+            >Normalize to 100%</button>
+          )}
+        </div>
+      </div>
+
+      <div className="border border-ink-200">
+        <div className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+          <div>Category</div>
+          <div className="text-right">Class {detectedClass} default</div>
+          <div className="text-right">This project %</div>
+          <div></div>
+        </div>
+        {rows.map((r) => (
+          <div
+            key={r.cat}
+            className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
+          >
+            <div className="text-ink-900">{r.cat}</div>
+            <div className="text-right text-ink-500">{r.classPct.toFixed(1)}%</div>
+            <div className="text-right">
+              <div className="relative inline-block">
+                <input
+                  type="number"
+                  step={0.5}
+                  min={0}
+                  max={100}
+                  className={`cell-input text-right pr-6 !py-1 !px-1.5 w-[90px] ${
+                    r.isOverride ? "text-ink-900 font-medium" : "text-ink-500 italic"
+                  }`}
+                  value={Number(r.effPct.toFixed(1))}
+                  onChange={(e) => onSetCategory(r.cat, parseFloat(e.target.value) || 0)}
+                />
+                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9.5px] text-ink-400 pointer-events-none">%</span>
+              </div>
+            </div>
+            <div className="text-right">
+              {r.isOverride ? (
+                <button
+                  onClick={() => onResetCategory(r.cat)}
+                  className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-qube-700"
+                  title="Revert this category to the class default"
+                >Reset</button>
+              ) : (
+                <span className="text-[10px] text-ink-300">default</span>
+              )}
+            </div>
+          </div>
+        ))}
+        <div className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 items-center text-[11.5px] tabular-nums bg-bone-50/40 border-t border-ink-200">
+          <div className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Sum</div>
+          <div className="text-right text-ink-500">100.0%</div>
+          <div className={`text-right ${offNorm ? "text-amber-700 font-medium" : "text-ink-700"}`}>
+            {effSum.toFixed(1)}%
+          </div>
+          <div></div>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-ink-500 mt-3 leading-snug">
+        The mix drives the Apartments auto-fill: total units N = Apartments GFA / average interior area
+        weighted by these %s, then units<sub>cat</sub> = round(N × %<sub>cat</sub> / 100). Categories
+        with no typology in this project contribute zero — add a typology of that category above if you
+        want it to count.
+      </p>
     </div>
   );
 }
