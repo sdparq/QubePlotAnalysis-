@@ -124,6 +124,10 @@ export interface Project {
    *  auto-seeded on first project open). Stops the auto-seed effect from
    *  re-applying the class mix after the user has emptied the list. */
   typologiesSeeded?: boolean;
+  /** Per-category typology mix override (0..100 percentages). When a category
+   *  has a value here it replaces the class default in the Apartments auto-fill.
+   *  Categories without a value fall back to the class library. */
+  typologyMix?: Partial<Record<UnitCategory, number>>;
   program: ProgramCell[];
   commonAreas: CommonArea[];
   parking: ParkingLevel[];

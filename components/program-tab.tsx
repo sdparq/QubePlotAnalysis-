@@ -6,6 +6,7 @@ import { fmt0, fmt2 } from "@/lib/format";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone, TYPOLOGY_KEYS, type TypologyKey } from "@/lib/zone-classes";
 import { residentialSubGFA } from "@/lib/calc/gfa";
+import { computeProgramAutoFill, resolveTypologyMix } from "@/lib/calc/program-autofill";
 import {
   type Typology,
   type UnitCategory,
@@ -61,7 +62,7 @@ export default function ProgramTab() {
       {detectedClass && (
         <AutoFillPanel
           letter={detectedClass}
-          mix={library[detectedClass].typologyMix}
+          mix={resolveTypologyMix(project, library[detectedClass].typologyMix)}
           numFloors={project.numFloors}
           typologies={project.typologies}
           apartmentsGFA={apartmentsGFA}

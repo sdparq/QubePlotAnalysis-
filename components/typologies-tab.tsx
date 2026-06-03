@@ -9,6 +9,11 @@ import {
   type TypologyKey,
   type ZoneClass,
 } from "@/lib/zone-classes";
+import {
+  computeProgramAutoFill,
+  effectiveMixPctForCategory,
+  resolveTypologyMix,
+} from "@/lib/calc/program-autofill";
 
 const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penthouse"];
 
@@ -60,8 +65,26 @@ export default function TypologiesTab() {
     });
   }
 
-  function update(t: Typology, patch: Partial<Typology>) {
-    upsert({ ...t, ...patch });
+  function update(t: Typology, partial: Partial<Typology>) {
+    upsert({ ...t, ...partial });
+  }
+
+  /** Mutate the project-level mix override and trigger a silent re-fill of the
+   *  Apartments matrix so the user sees the consequence of their tweak live.
+   *  Falls back gracefully when the auto-fill can't run (no Apartments GFA,
+   *  no detected class, etc.) — we still persist the % override. */
+  function setMixForCategory(cat: UnitCategory, pct: number) {
+    const safe = Math.max(0, Math.min(100, pct));
+    const nextMix = { ...(project.typologyMix ?? {}), [cat]: safe };
+    const projAfter = { ...project, typologyMix: nextMix };
+    const classMix = detectedClass ? library[detectedClass].typologyMix : null;
+    if (classMix) {
+      const resolved = resolveTypologyMix(projAfter, classMix);
+      const fill = computeProgramAutoFill(projAfter, resolved);
+      patch({ typologyMix: nextMix, program: fill?.cells ?? project.program });
+      return;
+    }
+    patch({ typologyMix: nextMix });
   }
 
   /**
@@ -228,17 +251,19 @@ export default function TypologiesTab() {
             <table className="tbl w-full table-fixed">
               <colgroup>
                 <col />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
                 <col style={{ width: 90 }} />
-                <col style={{ width: 100 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 110 }} />
                 <col style={{ width: 80 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 70 }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Category</th>
+                  <th className="text-right">Mix %</th>
                   <th className="text-right">Total area (m²)</th>
                   <th className="text-right">Balcony %{detectedClass && ` · class ${(library[detectedClass].balconyPctOfNsa * 100).toFixed(0)}%`}</th>
                   <th className="text-right">Occupancy</th>
@@ -265,6 +290,30 @@ export default function TypologiesTab() {
                       >
                         {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                       </select>
+                    </td>
+                    <td className="cell-edit">
+                      {(() => {
+                        const classMix = detectedClass ? library[detectedClass].typologyMix : null;
+                        const usesOverride = project.typologyMix?.[t.category] !== undefined;
+                        const value = classMix
+                          ? effectiveMixPctForCategory(project, classMix, t.category)
+                          : (project.typologyMix?.[t.category] ?? 0);
+                        return (
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step={0.5}
+                              min={0}
+                              max={100}
+                              className={`cell-input text-right pr-7 ${usesOverride ? "" : "text-ink-500 italic"}`}
+                              value={Number(value.toFixed(1))}
+                              onChange={(e) => setMixForCategory(t.category, parseFloat(e.target.value) || 0)}
+                              title="% of total units this typology should target. Editing this re-fills the Apartments matrix automatically."
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-ink-400 pointer-events-none">%</span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="cell-edit">
                       <input
