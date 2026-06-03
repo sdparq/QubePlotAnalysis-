@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { Typology, UnitCategory } from "@/lib/types";
 import { useZoneLibrary } from "@/lib/use-zone-library";
@@ -40,6 +40,7 @@ export default function TypologiesTab() {
   const project = useProject();
   const upsert = useStore((s) => s.upsertTypology);
   const remove = useStore((s) => s.removeTypology);
+  const patch = useStore((s) => s.patch);
   const { library } = useZoneLibrary();
 
   const detectedClass: ZoneClass | null = useMemo(
@@ -141,7 +142,23 @@ export default function TypologiesTab() {
       for (const t of [...project.typologies]) remove(t.id);
     }
     for (const t of created) upsert(t);
+    if (!project.typologiesSeeded) patch({ typologiesSeeded: true });
   }
+
+  // Auto-seed the typology list the first time a project lands on this tab with
+  // a recognised zone class and no typologies yet. Sets `typologiesSeeded` so
+  // we never re-fill silently — if the user deletes everything they stay empty.
+  useEffect(() => {
+    if (project.typologiesSeeded) return;
+    if (project.typologies.length > 0) {
+      patch({ typologiesSeeded: true });
+      return;
+    }
+    if (!detectedClass) return;
+    applyClassMix(detectedClass);
+    // applyClassMix already patches `typologiesSeeded: true` when the list was empty.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, project.typologiesSeeded, project.typologies.length, detectedClass]);
 
   return (
     <div className="grid gap-6">

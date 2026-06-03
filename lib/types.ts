@@ -120,6 +120,10 @@ export interface Project {
   shaftPerUnit: number;
   prmPercent: number;
   typologies: Typology[];
+  /** True once the class-mix has been applied at least once (manually or
+   *  auto-seeded on first project open). Stops the auto-seed effect from
+   *  re-applying the class mix after the user has emptied the list. */
+  typologiesSeeded?: boolean;
   program: ProgramCell[];
   commonAreas: CommonArea[];
   parking: ParkingLevel[];
