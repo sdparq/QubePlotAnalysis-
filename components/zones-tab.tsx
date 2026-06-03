@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ALL_CLASS_LETTERS,
   TYPOLOGY_KEYS,
@@ -149,27 +149,59 @@ function LocationsMatrix({
 }) {
   return (
     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-      {ALL_CLASS_LETTERS.map((letter) => {
-        const row = library[letter];
-        return (
-          <div key={letter} className="border border-ink-200 p-3 grid gap-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-[18px] font-light text-qube-700">{letter}</span>
-              <span className="text-[11px] text-ink-500">{row.name}</span>
-            </div>
-            <textarea
-              className="cell-input text-[11.5px] leading-snug font-mono"
-              rows={Math.max(5, row.locations.length + 1)}
-              value={row.locations.join("\n")}
-              onChange={(e) =>
-                update(letter, { locations: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })
-              }
-              placeholder="One zone per line"
-            />
-            <div className="text-[10.5px] text-ink-500">{row.locations.length} zones</div>
-          </div>
-        );
-      })}
+      {ALL_CLASS_LETTERS.map((letter) => (
+        <LocationsCard
+          key={letter}
+          letter={letter}
+          row={library[letter]}
+          onCommit={(list) => update(letter, { locations: list })}
+        />
+      ))}
+    </div>
+  );
+}
+
+function LocationsCard({
+  letter, row, onCommit,
+}: {
+  letter: ZoneClass;
+  row: ZoneClassRow;
+  onCommit: (list: string[]) => void;
+}) {
+  const stored = row.locations.join("\n");
+  const [draft, setDraft] = useState(stored);
+  const [editing, setEditing] = useState(false);
+
+  // Keep the local draft in sync when the stored list changes from elsewhere
+  // (e.g. an import or another tab) and we're not currently typing.
+  useEffect(() => {
+    if (!editing) setDraft(stored);
+  }, [stored, editing]);
+
+  function commit() {
+    setEditing(false);
+    const list = draft.split("\n").map((s) => s.trim()).filter(Boolean);
+    onCommit(list);
+  }
+
+  const liveCount = draft.split("\n").map((s) => s.trim()).filter(Boolean).length;
+
+  return (
+    <div className="border border-ink-200 p-3 grid gap-2">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[18px] font-light text-qube-700">{letter}</span>
+        <span className="text-[11px] text-ink-500">{row.name}</span>
+      </div>
+      <textarea
+        className="cell-input text-[11.5px] leading-snug font-mono"
+        rows={Math.max(5, draft.split("\n").length + 1)}
+        value={draft}
+        onFocus={() => setEditing(true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        placeholder="One zone per line"
+      />
+      <div className="text-[10.5px] text-ink-500">{liveCount} zones</div>
     </div>
   );
 }
