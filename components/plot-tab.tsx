@@ -34,6 +34,10 @@ export default function PlotTab() {
   const [autoCalib, setAutoCalib] = useState<AutoCalibrationResult | null>(null);
   const [autoCalibTried, setAutoCalibTried] = useState(false);
 
+  // Whether the current traced polygon was picked automatically by the
+  // yellow-fill/red-stroke parcel detector (drives the little note in Step 1).
+  const [autoPicked, setAutoPicked] = useState(false);
+
   async function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
@@ -41,6 +45,8 @@ export default function PlotTab() {
     try {
       setPhase("rendering");
       const result = await processParcel(file);
+      const autoPoly =
+        result.autoParcelIndex !== null ? result.candidatePolygons[result.autoParcelIndex] : null;
       const next: ParcelInfo = {
         fileName: file.name,
         fileType: file.type || "image/jpeg",
@@ -48,14 +54,22 @@ export default function PlotTab() {
         uploadedAt: Date.now(),
         imageNaturalWidth: result.imageNaturalWidth,
         imageNaturalHeight: result.imageNaturalHeight,
+        // The DLD parcel highlight was recognised — trace it without asking.
+        tracePolygonPx: autoPoly ?? undefined,
       };
       patch({ parcel: next });
       setCandidates(result.candidatePolygons);
       setTextItems(result.textItems);
       setAutoCalib(null);
       setAutoCalibTried(false);
-      // Auto-enter selecting mode if we found candidates
-      if (result.candidatePolygons.length > 0) {
+      setAutoPicked(!!autoPoly);
+      if (autoPoly) {
+        // Polygon locked in — go straight to scale detection. Pass the text
+        // items explicitly: the setTextItems above hasn't committed yet.
+        setTraceMode("idle");
+        attemptAutoCalibration(autoPoly, result.textItems);
+      } else if (result.candidatePolygons.length > 0) {
+        // Fall back to manual pick among the ranked candidates.
         setTraceMode("selecting");
       }
       setPhase("done");
@@ -76,14 +90,15 @@ export default function PlotTab() {
     setTextItems([]);
     setAutoCalib(null);
     setAutoCalibTried(false);
+    setAutoPicked(false);
   }
 
   /** Try to read the plot's scale straight from the dimension labels printed
    *  on the PDF. Always shown to the user for confirmation before it's
    *  applied (see the "Auto-detected" panel in Step 2) — never commits
    *  silently. */
-  function attemptAutoCalibration(poly: Point[]) {
-    const result = tryAutoCalibrate(poly, textItems);
+  function attemptAutoCalibration(poly: Point[], items: PdfTextItem[] = textItems) {
+    const result = tryAutoCalibrate(poly, items);
     setAutoCalib(result);
     setAutoCalibTried(true);
   }
@@ -95,6 +110,7 @@ export default function PlotTab() {
     patch({ parcel: { ...parcel, tracePolygonPx: poly, calibration: undefined } });
     setTraceMode("idle");
     setCandidates([]);
+    setAutoPicked(false);
     attemptAutoCalibration(poly);
   }
 
@@ -104,6 +120,7 @@ export default function PlotTab() {
     setLivePoints([]);
     setAutoCalib(null);
     setAutoCalibTried(false);
+    setAutoPicked(false);
   }
   function cancelTrace() {
     setTraceMode("idle");
@@ -369,6 +386,11 @@ export default function PlotTab() {
                 )}
                 {hasTrace && (
                   <div className="mt-2 text-[11px] text-ink-500">
+                    {autoPicked && (
+                      <span className="text-qube-700 font-medium">
+                        ✓ Parcel auto-detected (yellow fill / red boundary) ·{" "}
+                      </span>
+                    )}
                     {parcel.tracePolygonPx!.length} vertices captured{isCalibrated ? "" : " · awaiting calibration"}
                   </div>
                 )}

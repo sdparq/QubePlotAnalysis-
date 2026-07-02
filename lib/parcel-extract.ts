@@ -1,4 +1,5 @@
 import { polygonArea, polygonBBox, type Point } from "./geom";
+import { parcelColorScore, type RGB } from "./parcel-colors";
 
 const MAX_DIM = 2400;
 const JPEG_QUALITY = 0.9;
@@ -19,8 +20,13 @@ export interface ProcessedParcel {
   imageDataUrl: string;
   imageNaturalWidth: number;
   imageNaturalHeight: number;
-  /** Closed vector polygons detected inside the source PDF, in image-pixel coords. Empty when not a vector PDF. */
+  /** Closed vector polygons detected inside the source PDF, in image-pixel
+   *  coords, ranked parcel-coloured first. Empty when not a vector PDF. */
   candidatePolygons: Point[][];
+  /** Index into `candidatePolygons` of the auto-detected subject parcel
+   *  (yellow highlight fill, red boundary — the DLD affection-plan style),
+   *  or null when no candidate is confidently the parcel. */
+  autoParcelIndex: number | null;
   /** Text runs detected on the PDF page (dimension labels, cotas…). Empty for images or text-less PDFs. */
   textItems: PdfTextItem[];
 }
@@ -53,6 +59,7 @@ async function imageToProcessed(file: File): Promise<ProcessedParcel> {
       imageNaturalWidth: finalCanvas.width,
       imageNaturalHeight: finalCanvas.height,
       candidatePolygons: [],
+      autoParcelIndex: null,
       textItems: [],
     };
   } finally {
@@ -80,15 +87,20 @@ async function pdfToProcessed(file: File): Promise<ProcessedParcel> {
   const ctx = canvas.getContext("2d")!;
   await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
-  // Extract paths in viewport pixel coords
-  let paths: Point[][] = [];
+  // Extract paths in viewport pixel coords, colour-tagged so the DLD-style
+  // parcel highlight (yellow fill, red boundary) can be auto-detected.
+  let candidates: TaggedPath[] = [];
+  let autoParcelIndex: number | null = null;
   try {
     const opList = await page.getOperatorList();
-    paths = extractPathsFromOpList(opList, pdfjsLib.OPS, viewport.transform);
-    paths = filterCandidates(paths, viewport.width, viewport.height);
+    const tagged = extractPathsFromOpList(opList, pdfjsLib.OPS, viewport.transform);
+    const ranked = filterCandidates(tagged, viewport.width, viewport.height);
+    candidates = ranked.candidates;
+    autoParcelIndex = ranked.autoParcelIndex;
   } catch (e) {
     console.warn("PDF path extraction failed:", e);
-    paths = [];
+    candidates = [];
+    autoParcelIndex = null;
   }
 
   // Extract text runs (dimension labels / cotas) in viewport pixel coords, for
@@ -110,8 +122,9 @@ async function pdfToProcessed(file: File): Promise<ProcessedParcel> {
   }
 
   const { canvas: finalCanvas, scale } = downscaleCanvasIfNeeded(canvas);
+  let polygons = candidates.map((c) => c.points);
   if (scale !== 1) {
-    paths = paths.map((p) => p.map((pt) => ({ x: pt.x * scale, y: pt.y * scale })));
+    polygons = polygons.map((p) => p.map((pt) => ({ x: pt.x * scale, y: pt.y * scale })));
     textItems = textItems.map((it) => ({ ...it, x: it.x * scale, y: it.y * scale }));
   }
 
@@ -119,7 +132,8 @@ async function pdfToProcessed(file: File): Promise<ProcessedParcel> {
     imageDataUrl: finalCanvas.toDataURL("image/jpeg", JPEG_QUALITY),
     imageNaturalWidth: finalCanvas.width,
     imageNaturalHeight: finalCanvas.height,
-    candidatePolygons: paths,
+    candidatePolygons: polygons,
+    autoParcelIndex,
     textItems,
   };
 }
@@ -131,10 +145,41 @@ function applyMatrix(m: number[], x: number, y: number): Point {
 
 /* ------------------------ Path extraction ------------------------ */
 
-function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number[]): Point[][] {
-  const paths: Point[][] = [];
+/** A closed path with the colours it was painted with, when known. */
+export interface TaggedPath {
+  points: Point[];
+  fill: RGB | null;
+  stroke: RGB | null;
+}
+
+function parseRgbArgs(args: any): RGB | null {
+  // pdf.js canvas receives setFill/StrokeRGBColor(r, g, b) with 0–255 values;
+  // the operator list stores them as a 3-element args array. Some builds pack
+  // them into a single nested array — handle both.
+  const a = Array.isArray(args) && args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+  if (!a || a.length < 3) return null;
+  const [r, g, b] = [Number(a[0]), Number(a[1]), Number(a[2])];
+  if (![r, g, b].every((v) => Number.isFinite(v))) return null;
+  // Normalise 0–1 floats (some colour spaces) to 0–255.
+  const scale = r <= 1 && g <= 1 && b <= 1 ? 255 : 1;
+  return [r * scale, g * scale, b * scale];
+}
+
+function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number[]): TaggedPath[] {
+  const paths: TaggedPath[] = [];
   let ctm: number[] = [1, 0, 0, 1, 0, 0];
-  const ctmStack: number[][] = [];
+  let fillColor: RGB | null = null;
+  let strokeColor: RGB | null = null;
+  const stateStack: Array<{ ctm: number[]; fill: RGB | null; stroke: RGB | null }> = [];
+
+  // Paint operators that can follow a constructPath. Tell us whether the
+  // just-built path was filled, stroked or both — and therefore which of the
+  // current colours actually apply to it.
+  const FILL_OPS = new Set([OPS.fill, OPS.eoFill].filter((v) => v !== undefined));
+  const STROKE_OPS = new Set([OPS.stroke, OPS.closeStroke].filter((v) => v !== undefined));
+  const FILL_STROKE_OPS = new Set(
+    [OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke].filter((v) => v !== undefined),
+  );
 
   function tx(x: number, y: number): Point {
     const a = ctm[0] * x + ctm[2] * y + ctm[4];
@@ -149,22 +194,43 @@ function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number
     const args = opList.argsArray[i];
 
     if (fn === OPS.save) {
-      ctmStack.push([...ctm]);
+      stateStack.push({ ctm: [...ctm], fill: fillColor, stroke: strokeColor });
     } else if (fn === OPS.restore) {
-      const popped = ctmStack.pop();
-      if (popped) ctm = popped;
+      const popped = stateStack.pop();
+      if (popped) {
+        ctm = popped.ctm;
+        fillColor = popped.fill;
+        strokeColor = popped.stroke;
+      }
     } else if (fn === OPS.transform) {
       // args = [a, b, c, d, e, f]
       ctm = mulMatrix(ctm, args as number[]);
+    } else if (fn === OPS.setFillRGBColor) {
+      fillColor = parseRgbArgs(args);
+    } else if (fn === OPS.setStrokeRGBColor) {
+      strokeColor = parseRgbArgs(args);
+    } else if (fn === OPS.setFillGray) {
+      const g = Number(args?.[0]);
+      if (Number.isFinite(g)) {
+        const v = g <= 1 ? g * 255 : g;
+        fillColor = [v, v, v];
+      }
+    } else if (fn === OPS.setStrokeGray) {
+      const g = Number(args?.[0]);
+      if (Number.isFinite(g)) {
+        const v = g <= 1 ? g * 255 : g;
+        strokeColor = [v, v, v];
+      }
     } else if (fn === OPS.constructPath) {
       // args = [pathOps[], pathArgs[], ...]
       const pathOps: number[] = args[0];
       const pathArgs: number[] = args[1];
+      const built: Point[][] = [];
       let currentPath: Point[] = [];
       let argIdx = 0;
 
       const pushIfClosed = () => {
-        if (currentPath.length >= 3) paths.push(currentPath);
+        if (currentPath.length >= 3) built.push(currentPath);
         currentPath = [];
       };
 
@@ -190,7 +256,7 @@ function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number
           currentPath.push(tx(x, y));
         } else if (op === OPS.closePath) {
           if (currentPath.length >= 3) {
-            paths.push(currentPath);
+            built.push(currentPath);
             currentPath = [];
           }
         } else if (op === OPS.rectangle) {
@@ -198,20 +264,51 @@ function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number
           const y = pathArgs[argIdx++];
           const w = pathArgs[argIdx++];
           const h = pathArgs[argIdx++];
-          paths.push([tx(x, y), tx(x + w, y), tx(x + w, y + h), tx(x, y + h)]);
+          built.push([tx(x, y), tx(x + w, y), tx(x + w, y + h), tx(x, y + h)]);
         }
       }
-      if (currentPath.length >= 3) paths.push(currentPath);
+      if (currentPath.length >= 3) built.push(currentPath);
+
+      // The paint op follows the path construction — it decides which colours
+      // this path was actually rendered with.
+      const nextFn = opList.fnArray[i + 1];
+      let fill: RGB | null = null;
+      let stroke: RGB | null = null;
+      if (FILL_STROKE_OPS.has(nextFn)) {
+        fill = fillColor;
+        stroke = strokeColor;
+      } else if (FILL_OPS.has(nextFn)) {
+        fill = fillColor;
+      } else if (STROKE_OPS.has(nextFn)) {
+        stroke = strokeColor;
+      } else {
+        // Unknown/absent paint op (clip paths etc.) — keep both as a hint.
+        fill = fillColor;
+        stroke = strokeColor;
+      }
+      for (const p of built) paths.push({ points: p, fill, stroke });
     }
   }
   return paths;
 }
 
-function filterCandidates(paths: Point[][], pageW: number, pageH: number): Point[][] {
+/** Filter + rank candidates. Parcel-coloured polygons (yellow fill / red
+ *  stroke) sort first, then by area. Returns the ranked candidates and the
+ *  index of a confidently auto-detected parcel (or null). */
+function filterCandidates(
+  paths: TaggedPath[],
+  pageW: number,
+  pageH: number,
+): { candidates: TaggedPath[]; autoParcelIndex: number | null } {
   const pageArea = pageW * pageH;
-  const filtered = paths
-    .filter((p) => p.length >= 3)
-    .map((p) => ({ points: p, area: polygonArea(p), bbox: polygonBBox(p) }))
+  const enriched = paths
+    .filter((p) => p.points.length >= 3)
+    .map((p) => ({
+      ...p,
+      area: polygonArea(p.points),
+      bbox: polygonBBox(p.points),
+      score: parcelColorScore(p.fill, p.stroke),
+    }))
     .filter(({ area, bbox }) => {
       if (area < MIN_CANDIDATE_AREA_PX) return false;
       // Drop page borders (cover most of the page)
@@ -220,9 +317,16 @@ function filterCandidates(paths: Point[][], pageW: number, pageH: number): Point
       if (bbox.w < 6 || bbox.h < 6) return false;
       return true;
     })
-    .sort((a, b) => b.area - a.area)
+    .sort((a, b) => b.score - a.score || b.area - a.area)
     .slice(0, MAX_CANDIDATES);
-  return filtered.map((c) => c.points);
+
+  // Auto-detect: the top candidate must have the yellow highlight fill
+  // (score ≥ 2) and be big enough that it can't be a legend swatch.
+  const top = enriched[0];
+  const autoParcelIndex =
+    top && top.score >= 2 && top.area >= pageArea * 0.003 ? 0 : null;
+
+  return { candidates: enriched.map(({ points, fill, stroke }) => ({ points, fill, stroke })), autoParcelIndex };
 }
 
 /* ------------------------ Helpers ------------------------ */
