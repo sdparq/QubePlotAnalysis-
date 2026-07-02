@@ -150,6 +150,9 @@ export interface Project {
   towerOffsetYM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
+  /** Max FAR (plot ratio) from the affection plan / zoning. Drives the
+   *  feasibility analysis: max GFA = plotArea × maxFAR. */
+  maxFAR?: number;
   /** Maximum total built area (BUA, m²) the project must respect — sometimes
    *  given as a plot-level constraint. When exceeded, the UI flags it. */
   maxBUA?: number;

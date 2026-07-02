@@ -86,6 +86,20 @@ export default function SetupTab() {
           <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
             <NumInput value={project.plotArea} onChange={(v) => patch({ plotArea: v })} />
           </Field>
+          <Field
+            label="Max FAR"
+            hint={
+              project.maxFAR && project.maxFAR > 0 && project.plotArea > 0
+                ? `Max GFA = ${Math.round(project.plotArea * project.maxFAR).toLocaleString("en-US")} m²`
+                : "del affection plan / zoning"
+            }
+          >
+            <NumInput
+              value={project.maxFAR ?? 0}
+              step={0.5}
+              onChange={(v) => patch({ maxFAR: v > 0 ? v : undefined })}
+            />
+          </Field>
           <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
             <NumInput
               value={project.targetGFA ?? 0}
