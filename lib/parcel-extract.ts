@@ -5,12 +5,24 @@ const JPEG_QUALITY = 0.9;
 const MAX_CANDIDATES = 40;
 const MIN_CANDIDATE_AREA_PX = 200;
 
+/** A run of text extracted from a PDF page, positioned in the same downscaled
+ *  image-pixel space as `candidatePolygons`. Used to auto-read dimension
+ *  labels printed next to plot edges (e.g. "51.49 (168.93 ft)") so the plot
+ *  can be scaled without the user clicking two reference points. */
+export interface PdfTextItem {
+  text: string;
+  x: number;
+  y: number;
+}
+
 export interface ProcessedParcel {
   imageDataUrl: string;
   imageNaturalWidth: number;
   imageNaturalHeight: number;
   /** Closed vector polygons detected inside the source PDF, in image-pixel coords. Empty when not a vector PDF. */
   candidatePolygons: Point[][];
+  /** Text runs detected on the PDF page (dimension labels, cotas…). Empty for images or text-less PDFs. */
+  textItems: PdfTextItem[];
 }
 
 /**
@@ -41,6 +53,7 @@ async function imageToProcessed(file: File): Promise<ProcessedParcel> {
       imageNaturalWidth: finalCanvas.width,
       imageNaturalHeight: finalCanvas.height,
       candidatePolygons: [],
+      textItems: [],
     };
   } finally {
     URL.revokeObjectURL(url);
@@ -78,9 +91,28 @@ async function pdfToProcessed(file: File): Promise<ProcessedParcel> {
     paths = [];
   }
 
+  // Extract text runs (dimension labels / cotas) in viewport pixel coords, for
+  // auto-calibration. Best-effort — a scanned/rasterised PDF has no text layer
+  // and this just comes back empty, falling back to manual calibration.
+  let textItems: PdfTextItem[] = [];
+  try {
+    const textContent = await page.getTextContent();
+    textItems = (textContent.items as any[])
+      .filter((it) => typeof it.str === "string" && it.str.trim().length > 0 && Array.isArray(it.transform))
+      .map((it) => {
+        const t = it.transform as number[];
+        const origin = applyMatrix(viewport.transform, t[4], t[5]);
+        return { text: it.str as string, x: origin.x, y: origin.y };
+      });
+  } catch (e) {
+    console.warn("PDF text extraction failed:", e);
+    textItems = [];
+  }
+
   const { canvas: finalCanvas, scale } = downscaleCanvasIfNeeded(canvas);
   if (scale !== 1) {
     paths = paths.map((p) => p.map((pt) => ({ x: pt.x * scale, y: pt.y * scale })));
+    textItems = textItems.map((it) => ({ ...it, x: it.x * scale, y: it.y * scale }));
   }
 
   return {
@@ -88,7 +120,13 @@ async function pdfToProcessed(file: File): Promise<ProcessedParcel> {
     imageNaturalWidth: finalCanvas.width,
     imageNaturalHeight: finalCanvas.height,
     candidatePolygons: paths,
+    textItems,
   };
+}
+
+/** Apply a PDF/canvas transform matrix [a,b,c,d,e,f] to a single point. */
+function applyMatrix(m: number[], x: number, y: number): Point {
+  return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
 }
 
 /* ------------------------ Path extraction ------------------------ */

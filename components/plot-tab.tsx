@@ -2,7 +2,8 @@
 import { useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { ParcelInfo } from "@/lib/types";
-import { processParcel } from "@/lib/parcel-extract";
+import { processParcel, type PdfTextItem } from "@/lib/parcel-extract";
+import { tryAutoCalibrate, type AutoCalibrationResult } from "@/lib/plot-auto-calibrate";
 import { polygonArea, polygonCentroid, type Point } from "@/lib/geom";
 import { fmt2 } from "@/lib/format";
 import PlanTrace, { type TraceMode } from "./plan-trace";
@@ -24,8 +25,14 @@ export default function PlotTab() {
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [calibInput, setCalibInput] = useState<string>("");
 
-  // Vector candidates detected from PDF on upload (not persisted)
+  // Vector candidates + text runs detected from PDF on upload (not persisted)
   const [candidates, setCandidates] = useState<Point[][]>([]);
+  const [textItems, setTextItems] = useState<PdfTextItem[]>([]);
+
+  // Auto-calibration attempt against the currently traced/selected polygon.
+  // Requires visual confirmation before it's applied — see StepBlock 2 below.
+  const [autoCalib, setAutoCalib] = useState<AutoCalibrationResult | null>(null);
+  const [autoCalibTried, setAutoCalibTried] = useState(false);
 
   async function handleFiles(files: FileList | null) {
     const file = files?.[0];
@@ -44,6 +51,9 @@ export default function PlotTab() {
       };
       patch({ parcel: next });
       setCandidates(result.candidatePolygons);
+      setTextItems(result.textItems);
+      setAutoCalib(null);
+      setAutoCalibTried(false);
       // Auto-enter selecting mode if we found candidates
       if (result.candidatePolygons.length > 0) {
         setTraceMode("selecting");
@@ -63,6 +73,19 @@ export default function PlotTab() {
     setTraceMode("idle");
     setLivePoints([]);
     setCandidates([]);
+    setTextItems([]);
+    setAutoCalib(null);
+    setAutoCalibTried(false);
+  }
+
+  /** Try to read the plot's scale straight from the dimension labels printed
+   *  on the PDF. Always shown to the user for confirmation before it's
+   *  applied (see the "Auto-detected" panel in Step 2) — never commits
+   *  silently. */
+  function attemptAutoCalibration(poly: Point[]) {
+    const result = tryAutoCalibrate(poly, textItems);
+    setAutoCalib(result);
+    setAutoCalibTried(true);
   }
 
   function selectCandidate(idx: number) {
@@ -72,12 +95,15 @@ export default function PlotTab() {
     patch({ parcel: { ...parcel, tracePolygonPx: poly, calibration: undefined } });
     setTraceMode("idle");
     setCandidates([]);
+    attemptAutoCalibration(poly);
   }
 
   /* ---------- Trace flow ---------- */
   function startTrace() {
     setTraceMode("tracing");
     setLivePoints([]);
+    setAutoCalib(null);
+    setAutoCalibTried(false);
   }
   function cancelTrace() {
     setTraceMode("idle");
@@ -93,6 +119,7 @@ export default function PlotTab() {
       parcel: { ...parcel, tracePolygonPx: livePoints, calibration: undefined },
     });
     setTraceMode("idle");
+    attemptAutoCalibration(livePoints);
     setLivePoints([]);
     // Polygon traced; user still needs to calibrate to get metres
   }
@@ -108,6 +135,7 @@ export default function PlotTab() {
         const final = livePoints;
         if (parcel) patch({ parcel: { ...parcel, tracePolygonPx: final, calibration: undefined } });
         setTraceMode("idle");
+        attemptAutoCalibration(final);
         setLivePoints([]);
         return;
       }
@@ -130,6 +158,27 @@ export default function PlotTab() {
     const next = livePoints.length < 2 ? [...livePoints, p] : [livePoints[1], p];
     setLivePoints(next);
   }
+  /** Shared core: convert the traced polygon (px) to metres given a
+   *  metres-per-pixel scale, recentre on its centroid (flipping Y so the
+   *  visual top becomes +y), and persist plot polygon + area + a calibration
+   *  record (used for the "Calibrated · X m ref" badge elsewhere). */
+  function commitScale(scale: number, calibration: { p1: Point; p2: Point; metres: number }) {
+    if (!parcel || !parcel.tracePolygonPx) return;
+    const inMetres = parcel.tracePolygonPx.map((p) => ({
+      x: p.x * scale,
+      y: -p.y * scale,
+    }));
+    const c = polygonCentroid(inMetres);
+    const recentred = inMetres.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+    const area = polygonArea(recentred);
+    patch({
+      parcel: { ...parcel, calibration },
+      plotMode: "polygon",
+      plotPolygon: recentred,
+      plotArea: project.plotArea > 0 ? project.plotArea : Math.round(area * 100) / 100,
+    });
+  }
+
   function applyCalibration() {
     if (!parcel || !parcel.tracePolygonPx) return;
     if (livePoints.length < 2) {
@@ -147,31 +196,40 @@ export default function PlotTab() {
       alert("Calibration points are too close together.");
       return;
     }
-    const scale = metres / distPx; // metres per pixel
-    // Convert traced polygon (px) -> metres, recentre on centroid, flip Y
-    const inMetres = parcel.tracePolygonPx.map((p) => ({
-      x: p.x * scale,
-      y: -p.y * scale, // flip so visual top becomes +y
-    }));
-    const c = polygonCentroid(inMetres);
-    const recentred = inMetres.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
-    const area = polygonArea(recentred);
-
-    patch({
-      parcel: { ...parcel, calibration: { p1, p2, metres } },
-      plotMode: "polygon",
-      plotPolygon: recentred,
-      plotArea: project.plotArea > 0 ? project.plotArea : Math.round(area * 100) / 100,
-    });
+    commitScale(metres / distPx, { p1, p2, metres });
     setTraceMode("idle");
     setLivePoints([]);
     setCalibInput("");
+    setAutoCalib(null);
+  }
+
+  /** Apply the auto-detected scale. Uses the matched edge whose implied scale
+   *  is closest to the overall median as the illustrative p1/p2 reference —
+   *  its metres value is derived from the applied scale (not the raw label)
+   *  so the "Calibrated · X m ref" badge stays exactly self-consistent. */
+  function applyAutoCalibration() {
+    if (!parcel || !parcel.tracePolygonPx || !autoCalib) return;
+    const best = [...autoCalib.matches].sort(
+      (a, b) => Math.abs(a.impliedScale - autoCalib.scale) - Math.abs(b.impliedScale - autoCalib.scale)
+    )[0];
+    const p1 = parcel.tracePolygonPx[best.edgeIndex];
+    const p2 = parcel.tracePolygonPx[(best.edgeIndex + 1) % parcel.tracePolygonPx.length];
+    const metres = autoCalib.scale * best.pixelLength;
+    commitScale(autoCalib.scale, { p1, p2, metres });
+    setAutoCalib(null);
+  }
+
+  function dismissAutoCalibration() {
+    setAutoCalib(null);
+    startCalibrate();
   }
 
   function clearTrace() {
     if (!parcel) return;
     if (!confirm("Clear traced polygon and calibration?")) return;
     patch({ parcel: { ...parcel, tracePolygonPx: undefined, calibration: undefined } });
+    setAutoCalib(null);
+    setAutoCalibTried(false);
   }
 
   /* ---------- derived ---------- */
@@ -321,10 +379,42 @@ export default function PlotTab() {
                 title="Calibrate scale"
                 done={isCalibrated}
                 disabled={!hasTrace}
-                description="Click two points on the drawing whose distance you can read from the cotas, then enter that distance in metres."
+                description={
+                  autoCalib?.confident && !isCalibrated
+                    ? "Escala detectada automáticamente a partir de las cotas del PDF — confirma antes de aplicar."
+                    : "Click two points on the drawing whose distance you can read from the cotas, then enter that distance in metres."
+                }
               >
                 {!hasTrace ? (
                   <div className="text-[11px] text-ink-400">Trace the polygon first</div>
+                ) : autoCalib?.confident && !isCalibrated && traceMode !== "calibrating" ? (
+                  <div className="grid gap-2">
+                    <div className="border border-qube-200 bg-qube-50 p-2">
+                      <div className="text-[10.5px] uppercase tracking-[0.10em] text-qube-800 font-medium mb-1">
+                        ✓ {autoCalib.matches.length} de {autoCalib.totalEdges} aristas coinciden
+                        {autoCalib.deviationPct > 0 && ` · desviación ${autoCalib.deviationPct.toFixed(1)}%`}
+                      </div>
+                      <div className="grid gap-0.5">
+                        {autoCalib.matches.map((m) => (
+                          <div key={m.edgeIndex} className="flex items-center justify-between text-[11px] text-ink-700 tabular-nums">
+                            <span>Arista {m.edgeIndex + 1} · &quot;{m.labelText}&quot;</span>
+                            <span>{m.labelMetres.toFixed(2)} m</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[10.5px] text-ink-500 mt-1">
+                        Escala: 1 px ≈ {autoCalib.scale.toFixed(4)} m
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="btn btn-primary btn-xs" onClick={applyAutoCalibration}>
+                        Apply detected scale
+                      </button>
+                      <button className="btn btn-secondary btn-xs" onClick={dismissAutoCalibration}>
+                        Calibrate manually instead
+                      </button>
+                    </div>
+                  </div>
                 ) : traceMode === "calibrating" ? (
                   <div className="grid gap-2">
                     <div className="text-[11px] text-ink-700">
@@ -360,6 +450,13 @@ export default function PlotTab() {
                     <button className="btn btn-primary btn-xs" onClick={startCalibrate}>
                       {isCalibrated ? "Re-calibrate" : "Calibrate"}
                     </button>
+                  </div>
+                )}
+                {!isCalibrated && traceMode !== "calibrating" && autoCalibTried && !autoCalib?.confident && (
+                  <div className="mt-2 text-[11px] text-ink-500">
+                    {autoCalib
+                      ? `Cotas detectadas pero poco consistentes (${autoCalib.matches.length} aristas, desviación ${autoCalib.deviationPct.toFixed(1)}%) — calibra a mano para estar seguro.`
+                      : "No se detectaron cotas legibles en el PDF — calibra a mano."}
                   </div>
                 )}
                 {isCalibrated && parcel.calibration && (
