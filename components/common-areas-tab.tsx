@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
 import {
-  residentialBUA,
   residentialGFATarget,
   residentialSubQuota,
 } from "@/lib/calc/gfa";
@@ -47,7 +46,6 @@ export default function CommonAreasTab() {
   const amenitiesGFA = residentialSubQuota(project, "amenities");
   const circulationGFA = residentialSubQuota(project, "circulation");
   const servicesM2 = residentialSubQuota(project, "services");
-  const residentialBUATotal = useMemo(() => residentialBUA(project), [project]);
 
   function commit(next: { amenitiesPct?: number; circulationPct?: number; servicesPct?: number }) {
     const nextRb = {
@@ -132,14 +130,6 @@ export default function CommonAreasTab() {
             onChange={(v) => commit({ servicesPct: Math.max(0, v) })}
           />
         </div>
-
-        {residentialBUATotal > 0 && project.maxBUA && project.maxBUA > 0 && residentialBUATotal > project.maxBUA + 1 && (
-          <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] mt-4 leading-snug">
-            Residential BUA = <strong>{Math.round(residentialBUATotal).toLocaleString("en-US")} m²</strong>{" "}
-            exceeds the project&apos;s <strong>Max BUA</strong> ({project.maxBUA.toLocaleString("en-US")} m²)
-            by {Math.round(residentialBUATotal - project.maxBUA).toLocaleString("en-US")} m².
-          </div>
-        )}
       </div>
     </div>
   );

@@ -13,11 +13,9 @@ import MassingTab from "@/components/massing-tab";
 import EconomicTab from "@/components/economic-tab";
 import ZonesTab from "@/components/zones-tab";
 import SummaryTab from "@/components/summary-tab";
-import AnalysisTab from "@/components/analysis-tab";
 import HeaderBar from "@/components/header-bar";
 
 const TABS = [
-  { id: "analysis", num: "★", label: "Analysis" },
   { id: "zones", num: "L", label: "Class Library" },
   { id: "plot", num: "00", label: "Plot" },
   { id: "setup", num: "01", label: "Setup" },
@@ -35,7 +33,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function Page() {
-  const [tab, setTab] = useState<TabId>("analysis");
+  const [tab, setTab] = useState<TabId>("setup");
   const [hydrated, setHydrated] = useState(false);
   const project = useProject();
 
@@ -70,7 +68,6 @@ export default function Page() {
       </nav>
       <main className="flex-1 w-full">
         <div className="max-w-7xl mx-auto px-6 py-8 min-w-0">
-          {tab === "analysis" && <AnalysisTab onGoTo={(id) => setTab(id as TabId)} />}
           {tab === "zones" && <ZonesTab />}
           {tab === "plot" && <PlotTab />}
           {tab === "setup" && <SetupTab />}

@@ -150,12 +150,6 @@ export interface Project {
   towerOffsetYM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
-  /** Max FAR (plot ratio) from the affection plan / zoning. Drives the
-   *  feasibility analysis: max GFA = plotArea × maxFAR. */
-  maxFAR?: number;
-  /** Maximum total built area (BUA, m²) the project must respect — sometimes
-   *  given as a plot-level constraint. When exceeded, the UI flags it. */
-  maxBUA?: number;
   /** Retail parking standard — m² of retail GFA per required parking space.
    *  Default 70 m² / space (QUBE Dubai convention: 1 plaza por cada 70 m²
    *  de retail). Editable in the Parking tab. */

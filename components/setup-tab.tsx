@@ -8,6 +8,8 @@ import {
   type GfaBreakdownItem,
   type GfaUseCategory,
 } from "@/lib/types";
+import { residentialGFATarget } from "@/lib/calc/gfa";
+import { computeMaxTowerFootprintM2 } from "@/lib/calc/tower-footprint";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import {
   ALL_CLASS_LETTERS,
@@ -86,32 +88,11 @@ export default function SetupTab() {
           <Field label="Plot area (m²)" hint={`≈ ${fmtSqft(project.plotArea)}`}>
             <NumInput value={project.plotArea} onChange={(v) => patch({ plotArea: v })} />
           </Field>
-          <Field
-            label="Max FAR"
-            hint={
-              project.maxFAR && project.maxFAR > 0 && project.plotArea > 0
-                ? `Max GFA = ${Math.round(project.plotArea * project.maxFAR).toLocaleString("en-US")} m²`
-                : "del affection plan / zoning"
-            }
-          >
-            <NumInput
-              value={project.maxFAR ?? 0}
-              step={0.5}
-              onChange={(v) => patch({ maxFAR: v > 0 ? v : undefined })}
-            />
-          </Field>
           <Field label="Target GFA (m²)" hint={`≈ ${fmtSqft(project.targetGFA ?? 0)}`}>
             <NumInput
               value={project.targetGFA ?? 0}
               step={10}
               onChange={(v) => patch({ targetGFA: v > 0 ? v : undefined })}
-            />
-          </Field>
-          <Field label="Max BUA (m²)" hint={`≈ ${fmtSqft(project.maxBUA ?? 0)}`}>
-            <NumInput
-              value={project.maxBUA ?? 0}
-              step={10}
-              onChange={(v) => patch({ maxBUA: v > 0 ? v : undefined })}
             />
           </Field>
           <Field label="Latitude">
@@ -233,15 +214,42 @@ function FloorBreakdownCard({
     patch(updates);
   }
 
-  const totalAboveGround = FLOOR_SECTIONS
-    .filter((s) => s.key !== "basements")
-    .reduce((sum, s) => sum + get(s.key, s).count, 0);
-  const totalHeightAbove = FLOOR_SECTIONS
-    .filter((s) => s.key !== "basements")
-    .reduce((sum, s) => {
+  // Type floors count is DERIVED, not typed in: residential GFA (Setup → GFA
+  // breakdown) spread over the maximum tower footprint (plot shrunk by the
+  // tower setback). The height stays a manual input — everything else about
+  // the tower follows from those two numbers.
+  const residentialGFA = residentialGFATarget(project);
+  const maxTowerFootprint = computeMaxTowerFootprintM2(project);
+  const typeFloorsSec = get("typeFloors", FLOOR_SECTIONS[3]);
+  const computedTowerFloors =
+    maxTowerFootprint > 0 ? Math.floor(residentialGFA / maxTowerFootprint) : 0;
+
+  // Keep the persisted count in sync so Program / Parking / Lifts / Massing —
+  // which all read project.typeFloors.count / project.numFloors directly —
+  // pick up the derived value without needing their own copy of this calc.
+  useEffect(() => {
+    if (maxTowerFootprint <= 0 || residentialGFA <= 0) return;
+    const nextCount = Math.max(1, computedTowerFloors);
+    if (typeFloorsSec.count === nextCount) return;
+    patch({
+      typeFloors: { count: nextCount, heightM: typeFloorsSec.heightM },
+      numFloors: nextCount,
+      floorHeight: typeFloorsSec.heightM > 0 ? typeFloorsSec.heightM : project.floorHeight,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedTowerFloors, maxTowerFootprint, residentialGFA]);
+
+  function setTypeFloorsHeight(heightM: number) {
+    setSection("typeFloors", { count: typeFloorsSec.count, heightM });
+  }
+
+  const nonTowerSections = FLOOR_SECTIONS.filter((s) => s.key !== "basements" && s.key !== "typeFloors");
+  const totalAboveGround = nonTowerSections.reduce((sum, s) => sum + get(s.key, s).count, 0) + typeFloorsSec.count;
+  const totalHeightAbove =
+    nonTowerSections.reduce((sum, s) => {
       const sec = get(s.key, s);
       return sum + sec.count * sec.heightM;
-    }, 0);
+    }, 0) + typeFloorsSec.count * typeFloorsSec.heightM;
   const basementSec = get("basements", FLOOR_SECTIONS[0]);
 
   return (
@@ -249,8 +257,9 @@ function FloorBreakdownCard({
       <div className="mb-5">
         <h2 className="section-title">Floor breakdown</h2>
         <p className="section-sub">
-          Tell the app how the building is stratified. Each section has its own number of
-          floors and floor-to-floor height. Type floors drive the residential Program matrix.
+          Tell the app how the building is stratified. Basements, ground and podium are your
+          call. Type floors are derived — the residential GFA spread over the maximum tower
+          footprint decides how many fit.
         </p>
       </div>
 
@@ -261,7 +270,7 @@ function FloorBreakdownCard({
           <div className="text-right">Height (m)</div>
           <div className="text-right">Total height</div>
         </div>
-        {FLOOR_SECTIONS.map((def) => {
+        {nonTowerSections.map((def) => {
           const sec = get(def.key, def);
           const totalH = sec.count * sec.heightM;
           return (
@@ -301,6 +310,33 @@ function FloorBreakdownCard({
             </div>
           );
         })}
+        <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 bg-qube-50/40">
+          <div>
+            <div className="text-ink-900">Type floors <span className="text-qube-700">· derived</span></div>
+            <div className="text-[10.5px] text-ink-500 leading-snug">
+              {maxTowerFootprint > 0 && residentialGFA > 0
+                ? `${Math.round(residentialGFA).toLocaleString("en-US")} m² residential ÷ ${Math.round(maxTowerFootprint).toLocaleString("en-US")} m² max tower footprint`
+                : "needs Target GFA (below) and a tower setback (Massing)"}
+            </div>
+          </div>
+          <div className="text-right text-ink-900 font-medium">{typeFloorsSec.count}</div>
+          <input
+            type="number"
+            step={0.1}
+            min={0}
+            className="cell-input text-right"
+            value={Number(typeFloorsSec.heightM.toFixed(2))}
+            onChange={(e) => {
+              const n = parseFloat(e.target.value);
+              setTypeFloorsHeight(Number.isFinite(n) ? n : 0);
+            }}
+          />
+          <div className="text-right text-ink-900">
+            {typeFloorsSec.count * typeFloorsSec.heightM > 0
+              ? `${(typeFloorsSec.count * typeFloorsSec.heightM).toFixed(1)} m`
+              : "—"}
+          </div>
+        </div>
         <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">
             Above ground (visible building)
