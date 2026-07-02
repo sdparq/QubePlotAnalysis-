@@ -1,5 +1,5 @@
 import type { Project, Typology } from "../types";
-import { commonAreaCategory, effectiveCommonAreaTotal } from "../types";
+import { deriveCommonAreas } from "./common-areas";
 
 export interface FloorSummary {
   floor: number;
@@ -100,16 +100,15 @@ export function computeProgram(project: Project): ProgramResult {
 
   const shaftsDeduction = totalUnits * project.shaftPerUnit;
 
-  let commonAreasGFA = 0;
-  let commonAreasBUAonly = 0;
-  let commonAreasOpen = 0;
-  for (const c of project.commonAreas) {
-    const total = effectiveCommonAreaTotal(c, project);
-    const cat = commonAreaCategory(c);
-    if (cat === "GFA") commonAreasGFA += total;
-    else if (cat === "BUA") commonAreasBUAonly += total;
-    else commonAreasOpen += total;
-  }
+  // Common areas are derived live from the Distribution percentages (new
+  // model) or summed from the persisted row list (legacy projects) — see
+  // deriveCommonAreas. Deriving live means the totals can never go stale when
+  // Setup (Target GFA / residential share) changes after the last
+  // Distribution edit.
+  const derived = deriveCommonAreas(project);
+  const commonAreasGFA = derived.commonAreasGFA;
+  const commonAreasBUAonly = derived.commonAreasBUAonly;
+  const commonAreasOpen = derived.commonAreasOpen;
   const commonAreasNonGFA = commonAreasBUAonly + commonAreasOpen;
 
   const totalGFABuilding = totalInteriorGFA + commonAreasGFA - shaftsDeduction;
@@ -118,19 +117,11 @@ export function computeProgram(project: Project): ProgramResult {
   // amenities are not counted.
   const totalBUABuilding = totalInteriorGFA + totalBalcony + commonAreasGFA + commonAreasBUAonly;
 
-  const circulationKeywords = /lobby|corridor|stair|lift/i;
-  const servicesKeywords = /mep|service|pump|electric/i;
-
-  let circulationGFA = 0;
-  let servicesGFA = 0;
-  let amenitiesGFAarea = 0;
-  for (const c of project.commonAreas) {
-    if (commonAreaCategory(c) !== "GFA") continue;
-    const total = effectiveCommonAreaTotal(c, project);
-    if (circulationKeywords.test(c.name)) circulationGFA += total;
-    else if (servicesKeywords.test(c.name)) servicesGFA += total;
-    else amenitiesGFAarea += total;
-  }
+  const circulationGFA = derived.circulationGFA;
+  // In the Distribution model services is BUA-only — reported here as its BUA
+  // value so exports and dashboards still show the MEP/shafts allowance.
+  const servicesGFA = derived.servicesArea;
+  const amenitiesGFAarea = derived.amenitiesGFA;
 
   const residentialNetGFA = totalInteriorGFA - shaftsDeduction;
   const denom = totalGFABuilding || 1;

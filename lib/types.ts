@@ -41,18 +41,6 @@ export function commonAreaCategory(c: CommonArea): CommonAreaCategory {
   return "GFA";
 }
 
-/** Resolve the effective total m² of a common area, taking into account the project's input mode. */
-export function effectiveCommonAreaTotal(
-  c: CommonArea,
-  project: { commonAreasInputMode?: "absolute" | "percentage"; targetGFA?: number }
-): number {
-  if (project.commonAreasInputMode === "percentage") {
-    const target = project.targetGFA ?? 0;
-    return (c.area || 0) * target;
-  }
-  return (c.area || 0) * (c.floors || 1);
-}
-
 export interface ParkingLevel {
   id: string;
   name: string;
@@ -275,7 +263,10 @@ export interface ResidentialSubItem {
 export type ResidentialBreakdown = Record<ResidentialSubCategory, ResidentialSubItem>;
 
 export const DEFAULT_RESIDENTIAL_BREAKDOWN: ResidentialBreakdown = {
-  apartments: { pct: 79, countsAsGFA: true },
+  // apartments.pct is never read directly — the effective share is derived as
+  // 100 − amenities − circulation (services is BUA-only and doesn't compete).
+  // Kept in sync here (89) so any accidental direct read stays coherent.
+  apartments: { pct: 89, countsAsGFA: true },
   amenities:  { pct:  1, countsAsGFA: true },
   circulation:{ pct: 10, countsAsGFA: true },
   services:   { pct: 10, countsAsGFA: true },

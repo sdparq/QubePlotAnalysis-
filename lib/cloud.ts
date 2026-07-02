@@ -154,6 +154,21 @@ export async function deleteCloudProject(cloudId: string): Promise<void> {
 
 /* --------------------------- Auto-save hook ------------------------------ */
 
+/** Depth counter for changes that COME FROM the cloud (initial sync, opening a
+ *  cloud project). While > 0, the auto-saver treats store updates as already
+ *  persisted — it refreshes its baseline instead of scheduling an echo upload
+ *  that would pointlessly bump `updated_at` and could clobber concurrent
+ *  edits from another device. */
+let cloudApplyDepth = 0;
+export function applyingCloudChange<T>(fn: () => T): T {
+  cloudApplyDepth++;
+  try {
+    return fn();
+  } finally {
+    cloudApplyDepth--;
+  }
+}
+
 /** Debounced auto-saver for the active project. Only saves projects that
  *  already have a cloudId (i.e. were created or pulled from the cloud). */
 export function useCloudAutoSave(opts: {
@@ -162,21 +177,32 @@ export function useCloudAutoSave(opts: {
 }) {
   const { user, onStatus } = opts;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSentRef = useRef<string>("");
+  // Snapshot of the project waiting to be uploaded. Captured at schedule time
+  // so a project switch can't redirect the pending save to the wrong project.
+  const pendingRef = useRef<Project | null>(null);
+  // Serialisation of the last successfully uploaded state, keyed by cloudId so
+  // baselines from different projects can't collide.
+  const lastSentRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (!user || !isCloudEnabled) return;
 
     const flush = async () => {
-      const st = useStore.getState();
-      const p = st.projects[st.activeProjectId];
+      const p = pendingRef.current;
+      pendingRef.current = null;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
       if (!p || !p.cloudId) return;
       const serialised = JSON.stringify(p);
-      if (serialised === lastSentRef.current) return;
-      lastSentRef.current = serialised;
+      if (serialised === lastSentRef.current.get(p.cloudId)) return;
       onStatus("saving");
       try {
         await upsertCloudProject(p);
+        // Only mark as sent AFTER success — a failed upload must retry on the
+        // next change (or next flush) instead of being silently swallowed.
+        lastSentRef.current.set(p.cloudId, serialised);
         onStatus("saved");
       } catch (err) {
         console.error("cloud save failed", err);
@@ -184,30 +210,40 @@ export function useCloudAutoSave(opts: {
       }
     };
 
-    const schedule = () => {
+    const schedule = (p: Project) => {
+      pendingRef.current = p;
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(flush, 1500);
     };
 
-    // Prime the baseline so the initial pull doesn't immediately bounce back.
-    const initial = useStore.getState();
-    const initialActive = initial.projects[initial.activeProjectId];
-    lastSentRef.current = initialActive ? JSON.stringify(initialActive) : "";
-
     const unsub = useStore.subscribe((state, prev) => {
       const cur = state.projects[state.activeProjectId];
       if (!cur) return;
+      // Changes applied FROM the cloud are already persisted — adopt them as
+      // the baseline rather than echoing them back up.
+      if (cloudApplyDepth > 0) {
+        if (cur.cloudId) lastSentRef.current.set(cur.cloudId, JSON.stringify(cur));
+        return;
+      }
       if (state.activeProjectId !== prev.activeProjectId) {
-        lastSentRef.current = JSON.stringify(cur);
+        // Project switch: if an edit to the previous project is still waiting
+        // on the debounce, upload it now instead of dropping it.
+        if (pendingRef.current) void flush();
         return;
       }
       if (cur === prev.projects[prev.activeProjectId]) return;
-      schedule();
+      schedule(cur);
     });
 
     return () => {
+      // Last-gasp flush on unmount / sign-out so a just-made edit isn't lost.
+      if (pendingRef.current) void flush();
       if (timerRef.current) clearTimeout(timerRef.current);
       unsub();
     };
-  }, [user, onStatus]);
+    // Keyed on user.id (not the object): Supabase token refreshes mint a new
+    // user object and would otherwise tear down + re-prime this effect,
+    // discarding a pending debounce.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, onStatus]);
 }

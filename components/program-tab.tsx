@@ -62,20 +62,15 @@ export default function ProgramTab() {
       {detectedClass && (
         <AutoFillPanel
           letter={detectedClass}
+          project={project}
           mix={resolveTypologyMix(project, library[detectedClass].typologyMix)}
-          numFloors={project.numFloors}
-          typologies={project.typologies}
           apartmentsGFA={apartmentsGFA}
-          existingProgramCount={project.program.length}
-          onApply={(cellsByFloor) => {
+          onApply={(cells) => {
             for (const c of [...project.program]) {
               setCell(c.floor, c.typologyId, 0);
             }
-            for (const [floorStr, cells] of Object.entries(cellsByFloor)) {
-              const floor = parseInt(floorStr, 10);
-              for (const { typologyId, count } of cells) {
-                if (count > 0) setCell(floor, typologyId, count);
-              }
+            for (const { floor, typologyId, count } of cells) {
+              if (count > 0) setCell(floor, typologyId, count);
             }
           }}
         />
@@ -190,15 +185,16 @@ export default function ProgramTab() {
 
 interface AutoFillPanelProps {
   letter: ReturnType<typeof classForZone>;
+  project: ReturnType<typeof useProject>;
   mix: Record<TypologyKey, number>;
-  numFloors: number;
-  typologies: Typology[];
   apartmentsGFA: number;
-  existingProgramCount: number;
-  onApply: (cellsByFloor: Record<number, { typologyId: string; count: number }[]>) => void;
+  onApply: (cells: { floor: number; typologyId: string; count: number }[]) => void;
 }
 
-function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, existingProgramCount, onApply }: AutoFillPanelProps) {
+function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFillPanelProps) {
+  const { typologies, numFloors } = project;
+  const existingProgramCount = project.program.length;
+
   // Mix entries whose category has no typology in the project — those units
   // would be dropped. Flag them so the user can add the missing typology.
   const droppedKeys: TypologyKey[] = [];
@@ -209,27 +205,11 @@ function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, exis
   }
   const droppedShare = droppedKeys.reduce((s, k) => s + mix[k], 0);
 
-  // Per-typology target. typologyMix is a share of TOTAL UNITS (sums to ~1),
-  // not a share of GFA. Compute total units N from the weighted-average
-  // interior area, then split by mix share.
-  const targets = useMemo(() => {
-    const rows = typologies.map((t) => {
-      const k = TYPOLOGY_KEYS.find((kk) => CATEGORY_FOR_TYPOLOGY_KEY[kk] === t.category);
-      const pct = k ? mix[k] : 0;
-      const sameCat = typologies.filter((x) => x.category === t.category).length || 1;
-      const unitShare = pct / sameCat;
-      return { typology: t, unitShare, sameCat };
-    });
-    const avgArea = rows.reduce((s, r) => s + r.unitShare * r.typology.internalArea, 0);
-    const N = avgArea > 0 ? apartmentsGFA / avgArea : 0;
-    return rows.map((r) => {
-      const units = Math.round(N * r.unitShare);
-      const allocatedGFA = units * r.typology.internalArea;
-      return { typology: r.typology, units, allocatedGFA, sameCat: r.sameCat };
-    });
-  }, [typologies, mix, apartmentsGFA]);
-
-  const totalUnits = targets.reduce((s, x) => s + x.units, 0);
+  // Single source of truth — the same helper the Typologies mix editor uses,
+  // so the preview here and the silent re-fill there can never drift apart.
+  const fill = useMemo(() => computeProgramAutoFill(project, mix), [project, mix]);
+  const targets = fill?.perTypology ?? [];
+  const totalUnits = fill?.totalUnits ?? 0;
   const actualInteriorGFA = targets.reduce((s, x) => s + x.units * x.typology.internalArea, 0);
   const interiorGFADrift = actualInteriorGFA - apartmentsGFA;
 
@@ -238,7 +218,7 @@ function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, exis
       alert("Set the Residential GFA in the Setup tab first (GFA breakdown → Residential).");
       return;
     }
-    if (totalUnits <= 0) {
+    if (!fill || totalUnits <= 0) {
       alert("Unit counts would all round to zero — typology interior areas are too large for the Apartments GFA target.");
       return;
     }
@@ -248,34 +228,7 @@ function AutoFillPanel({ letter, mix, numFloors, typologies, apartmentsGFA, exis
       );
       if (!ok) return;
     }
-    const cellsByFloor: Record<number, { typologyId: string; count: number }[]> = {};
-    for (let f = 1; f <= numFloors; f++) cellsByFloor[f] = [];
-    // Per-floor running totals — we always drop the "remainder" extras on the
-    // floor that currently has the fewest units so floor totals end up as
-    // equal as possible regardless of how each typology rounds.
-    const floorTotal: number[] = Array(numFloors + 1).fill(0);
-    for (const { typology, units } of targets) {
-      if (units <= 0) continue;
-      const perFloor = Math.floor(units / Math.max(1, numFloors));
-      const remainder = units - perFloor * numFloors;
-      if (perFloor > 0) {
-        for (let f = 1; f <= numFloors; f++) {
-          cellsByFloor[f].push({ typologyId: typology.id, count: perFloor });
-          floorTotal[f] += perFloor;
-        }
-      }
-      if (remainder > 0) {
-        const floors = Array.from({ length: numFloors }, (_, i) => i + 1)
-          .sort((a, b) => floorTotal[a] - floorTotal[b] || a - b);
-        for (const f of floors.slice(0, remainder)) {
-          const existing = cellsByFloor[f].find((c) => c.typologyId === typology.id);
-          if (existing) existing.count += 1;
-          else cellsByFloor[f].push({ typologyId: typology.id, count: 1 });
-          floorTotal[f] += 1;
-        }
-      }
-    }
-    onApply(cellsByFloor);
+    onApply(fill.cells);
   }
 
   return (

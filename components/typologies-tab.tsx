@@ -157,7 +157,7 @@ export default function TypologiesTab() {
    * SqFt → m²), split between interior and balcony using `balconyPctOfNsa`.
    * Iteration order follows TYPOLOGY_KEYS so Studio is first.
    */
-  function applyClassMix(letter: ZoneClass) {
+  function applyClassMix(letter: ZoneClass, opts?: { silent?: boolean }) {
     const row = library[letter];
     const balconyShare = row.balconyPctOfNsa;
     const created: Typology[] = [];
@@ -182,7 +182,10 @@ export default function TypologiesTab() {
       });
     }
     if (created.length === 0) {
-      alert("This class has no positive mix entries to apply.");
+      // Mark as seeded even when nothing was created — otherwise the auto-seed
+      // effect retries (and alerts) on every mount of this tab.
+      if (!project.typologiesSeeded) patch({ typologiesSeeded: true });
+      if (!opts?.silent) alert("This class has no positive mix entries to apply.");
       return;
     }
     if (project.typologies.length > 0) {
@@ -206,7 +209,7 @@ export default function TypologiesTab() {
       return;
     }
     if (!detectedClass) return;
-    applyClassMix(detectedClass);
+    applyClassMix(detectedClass, { silent: true });
     // applyClassMix already patches `typologiesSeeded: true` when the list was empty.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, project.typologiesSeeded, project.typologies.length, detectedClass]);

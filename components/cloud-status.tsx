@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import {
   type CloudProjectSummary,
   type SaveStatus,
+  applyingCloudChange,
   deleteCloudProject,
   listCloudProjects,
   loadCloudProject,
@@ -101,6 +102,8 @@ export default function CloudStatus() {
   }, [user, open, cloudList, refresh]);
 
   // Initial sync once on sign-in: fetch list, pull anything newer in cloud.
+  // Keyed on user.id so Supabase token refreshes (new user object, same id)
+  // don't re-trigger a full sync.
   useEffect(() => {
     if (!user) {
       setCloudList(null);
@@ -119,7 +122,9 @@ export default function CloudStatus() {
             try {
               const full = await loadCloudProject(row.id);
               if (cancelled) return;
-              useStore.getState().upsertFromCloud(full);
+              // Mark as a cloud-sourced change so the auto-saver adopts it as
+              // its baseline instead of echoing it straight back up.
+              applyingCloudChange(() => useStore.getState().upsertFromCloud(full));
             } catch (e) {
               console.error("pull failed", e);
             }
@@ -132,7 +137,8 @@ export default function CloudStatus() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   if (!enabled) return null;
 
@@ -193,7 +199,7 @@ export default function CloudStatus() {
   async function handleOpenCloud(id: string) {
     try {
       const full = await loadCloudProject(id);
-      upsertFromCloud(full, { activate: true });
+      applyingCloudChange(() => upsertFromCloud(full, { activate: true }));
       setOpen(false);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to open");

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { Project } from "./types";
-import { effectiveCommonAreaTotal } from "./types";
+import { deriveCommonAreas } from "./calc/common-areas";
 import { analyze } from "./calc";
 
 const HDR_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } } as const;
@@ -130,9 +130,9 @@ export async function exportToExcel(project: Project) {
   wsProg.lastRow!.font = BOLD;
   wsProg.addRow(["Element", "Area (m²)", "Floors", "Total (m²)", "Counts as GFA", "Notes"]);
   applyHeader(wsProg.lastRow!);
-  for (const c of project.commonAreas) {
-    const cat = (c.category ?? (c.countAsGFA === false ? "OPEN" : "GFA"));
-    const totalArea = effectiveCommonAreaTotal(c, project);
+  for (const c of deriveCommonAreas(project).flat) {
+    const cat = c.category ?? (c.countAsGFA === false ? "OPEN" : "GFA");
+    const totalArea = (c.area || 0) * (c.floors || 1);
     wsProg.addRow([c.name, c.area, c.floors, Number(totalArea.toFixed(2)), cat, c.notes ?? ""]);
   }
   wsProg.addRow(["Subtotal · GFA", "", "", Number(r.program.commonAreasGFA.toFixed(2))]);
