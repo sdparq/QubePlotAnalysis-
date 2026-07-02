@@ -6,6 +6,7 @@ import {
   residentialGFATarget,
   residentialSubQuota,
 } from "@/lib/calc/gfa";
+import { computePlotTierFootprints } from "@/lib/calc/plot-tiers";
 import {
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -68,8 +69,12 @@ export default function CommonAreasTab() {
   const apartmentsGFA = (apartmentsPct / 100) * residentialGFA;
   const totalCommonGFA = amenitiesGFA + circulationGFA;
 
+  const tiers = useMemo(() => computePlotTierFootprints(project), [project]);
+
   return (
     <div className="grid gap-6">
+      <TierFootprintCard tiers={tiers} />
+
       <div className="card">
         <div className="mb-5">
           <h2 className="section-title">Distribution · residential GFA → apartments / common areas</h2>
@@ -129,6 +134,71 @@ export default function CommonAreasTab() {
             kind="BUA"
             onChange={(v) => commit({ servicesPct: Math.max(0, v) })}
           />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TierFootprintCard({ tiers }: { tiers: ReturnType<typeof computePlotTierFootprints> }) {
+  const rows: Array<{ key: "ground" | "podium" | "tower"; label: string; hint: string }> = [
+    { key: "ground", label: "Ground floor", hint: "plot shrunk by the ground setback" },
+    { key: "podium", label: "Podium", hint: "plot shrunk by the podium setback" },
+    { key: "tower",  label: "Tower",  hint: "plot shrunk by the tower setback" },
+  ];
+  const totalGFA = tiers.ground.gfaM2 + tiers.podium.gfaM2 + tiers.tower.gfaM2;
+  const hasFootprint = tiers.ground.footprintM2 > 0 || tiers.podium.footprintM2 > 0 || tiers.tower.footprintM2 > 0;
+
+  return (
+    <div className="card">
+      <div className="mb-4">
+        <h2 className="section-title">Footprint by tier</h2>
+        <p className="section-sub">
+          Superficie estructural disponible en cada franja del edificio, derivada del solar y los setbacks
+          (Massing) × plantas (Setup → Floor breakdown). Úsalo para contrastar el reparto de usos: retail
+          suele ir en Ground + Podium, residencial en Tower.
+        </p>
+      </div>
+
+      {!hasFootprint && (
+        <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] mb-4 leading-snug">
+          Sin huella todavía — define <strong>Plot area</strong> (Setup) y los setbacks de cada tier en{" "}
+          <strong>Massing</strong>.
+        </div>
+      )}
+
+      <div className="border border-ink-200">
+        <div className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+          <div>Tier</div>
+          <div className="text-right">Footprint m²</div>
+          <div className="text-right">Floors</div>
+          <div className="text-right">Height m</div>
+          <div className="text-right">GFA m²</div>
+        </div>
+        {rows.map((r) => {
+          const t = tiers[r.key];
+          return (
+            <div
+              key={r.key}
+              className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
+            >
+              <div>
+                <div className="text-ink-900">{r.label}</div>
+                <div className="text-[10.5px] text-ink-500 leading-snug">{r.hint}</div>
+              </div>
+              <div className="text-right text-ink-900">{t.footprintM2 > 0 ? Math.round(t.footprintM2).toLocaleString("en-US") : "—"}</div>
+              <div className="text-right text-ink-700">{t.floors > 0 ? t.floors : "—"}</div>
+              <div className="text-right text-ink-700">{t.heightM > 0 ? t.heightM.toFixed(2) : "—"}</div>
+              <div className="text-right text-qube-800 font-medium">{t.gfaM2 > 0 ? Math.round(t.gfaM2).toLocaleString("en-US") : "—"}</div>
+            </div>
+          );
+        })}
+        <div className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
+          <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total structural GFA</div>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div className="text-right text-qube-800">{totalGFA > 0 ? Math.round(totalGFA).toLocaleString("en-US") : "—"}</div>
         </div>
       </div>
     </div>

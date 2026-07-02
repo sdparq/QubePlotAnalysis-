@@ -9,7 +9,7 @@ import {
   type GfaUseCategory,
 } from "@/lib/types";
 import { residentialGFATarget } from "@/lib/calc/gfa";
-import { computeMaxTowerFootprintM2 } from "@/lib/calc/tower-footprint";
+import { computeMaxTowerFootprintM2 } from "@/lib/calc/plot-tiers";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import {
   ALL_CLASS_LETTERS,
