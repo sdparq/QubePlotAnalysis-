@@ -210,26 +210,8 @@ export async function exportToExcel(project: Project) {
   wsL.addRow([`Service (${r.lifts.serviceMin.description})`, r.lifts.serviceMin.ratedKg, r.lifts.serviceMin.persons, `${r.lifts.serviceMin.cabinW_mm}×${r.lifts.serviceMin.cabinD_mm}`, `${r.lifts.serviceMin.doorW_mm}×${r.lifts.serviceMin.doorH_mm}`]);
   setColWidths(wsL, [38, 18, 14, 22, 22]);
 
-  // ===== 4.Garbage Room =====
-  const wsG = wb.addWorksheet("4.Garbage Room");
-  wsG.addRow([`WASTE ROOM DIMENSIONING — ${project.name.toUpperCase()}`]);
-  wsG.getCell("A1").font = { bold: true, size: 14 };
-  wsG.addRow([]);
-  wsG.addRow(["Parameter", "Value", "Unit", "Notes"]);
-  applyHeader(wsG.lastRow!);
-  wsG.addRow(["Residential GFA", Number(r.garbage.residentialGFA.toFixed(2)), "m²", "From Program"]);
-  wsG.addRow(["Daily waste generation", r.garbage.dailyWasteKg, "kg/day", "12 kg/100m²/day × GFA"]);
-  wsG.addRow(["Storage capacity (2 days)", r.garbage.storageKg, "kg", ""]);
-  wsG.addRow(["Volume required", r.garbage.volumeRequiredM3, "m³", "÷ 150 kg/m³"]);
-  wsG.addRow(["N° containers (2.5 m³)", r.garbage.containers, "units", ""]);
-  wsG.addRow(["Room width", r.garbage.roomWidthM, "m", "N × 1.37 + (N+1) × 0.15"]);
-  wsG.addRow(["Room depth", r.garbage.roomDepthM, "m", "2.04 + 0.6 clearance"]);
-  wsG.addRow(["TOTAL ROOM AREA", r.garbage.roomAreaM2, "m²", ""]);
-  applySubtotal(wsG.lastRow!);
-  setColWidths(wsG, [32, 16, 10, 36]);
-
-  // ===== 5.Conclusions =====
-  const wsC = wb.addWorksheet("5.Conclusions");
+  // ===== 4.Conclusions =====
+  const wsC = wb.addWorksheet("4.Conclusions");
   wsC.addRow([`PROJECT ANALYSIS — ${project.name.toUpperCase()}`]);
   wsC.getCell("A1").font = { bold: true, size: 14 };
   wsC.addRow([]);
@@ -239,7 +221,6 @@ export async function exportToExcel(project: Project) {
     ["Parking total", r.parking.grandBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availableTotal} available vs ${r.parking.grandRequiredWithPOD} required incl. POD (${r.parking.grandBalance >= 0 ? "+" : ""}${r.parking.grandBalance})`],
     ["POD parking", r.parking.podBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availablePOD} available vs ${r.parking.requiredPOD} required`],
     ["Lifts", "INFO", `Recommended ${r.lifts.liftsRecommended} (${r.lifts.governing})`],
-    ["Garbage room", "INFO", `${r.garbage.containers} containers · ${r.garbage.roomAreaM2.toFixed(2)} m²`],
     ["GFA / FAR", "INFO", `Total GFA ${r.program.totalGFABuilding.toFixed(2)} m² · FAR ${r.program.far.toFixed(3)}`],
   ];
   checks.forEach((c) => wsC.addRow(c));

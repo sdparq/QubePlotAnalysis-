@@ -37,14 +37,4 @@ describe("Production City — parity vs Excel", () => {
     expect(r.lifts.liftsRecommended).toBeGreaterThanOrEqual(0);
     expect(r.lifts.governing).toMatch(/D\.8\.8|VT Consultant/);
   });
-
-  it("garbage room (Dubai DM) matches Excel", () => {
-    expect(r.garbage.dailyWasteKg).toBeCloseTo(2130.57, 2);
-    expect(r.garbage.storageKg).toBeCloseTo(4261.14, 2);
-    expect(r.garbage.volumeRequiredM3).toBeCloseTo(28.41, 2);
-    expect(r.garbage.containers).toBe(12);
-    expect(r.garbage.roomWidthM).toBeCloseTo(18.39, 2);
-    expect(r.garbage.roomDepthM).toBeCloseTo(2.64, 2);
-    expect(r.garbage.roomAreaM2).toBeCloseTo(48.55, 2);
-  });
 });
