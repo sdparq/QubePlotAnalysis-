@@ -205,8 +205,8 @@ export interface Project {
   nearbyHeightOverrides?: Record<string, number>;
   /** OSM way ids of surrounding buildings the user wants hidden from the In-context view */
   nearbyHidden?: string[];
-  /** Tile basemap style for the In-context view */
-  contextMapStyle?: "topo" | "satellite" | "schematic";
+  /** Tile basemap style for the In-context view. "photoreal" streams Google Photorealistic 3D Tiles. */
+  contextMapStyle?: "topo" | "satellite" | "schematic" | "photoreal";
   /** Manual building XZ offset in metres (east/north) for fine alignment with the basemap. */
   contextOffsetXM?: number;
   contextOffsetZM?: number;
