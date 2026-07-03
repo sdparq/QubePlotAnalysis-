@@ -190,13 +190,22 @@ export default function TypologiesTab() {
     }
     if (project.typologies.length > 0) {
       const ok = confirm(
-        `Replace the existing ${project.typologies.length} typology(ies) with ${created.length} new ones from class ${letter}? The Program matrix will be cleared.`,
+        `Replace the existing ${project.typologies.length} typology(ies) with ${created.length} new ones from class ${letter}? The Program matrix will be refilled.`,
       );
       if (!ok) return;
       for (const t of [...project.typologies]) remove(t.id);
     }
     for (const t of created) upsert(t);
     if (!project.typologiesSeeded) patch({ typologiesSeeded: true });
+
+    // Immediately auto-fill the Apartments matrix from the new typology list —
+    // otherwise Program (and everything downstream: Parking, Lifts, Areas
+    // Summary) stays empty until the user separately visits Program and clicks
+    // "Apply to N floors" there, which reads as "typologies aren't applying".
+    const projAfter = { ...project, typologies: created };
+    const resolvedMix = resolveTypologyMix(projAfter, row.typologyMix);
+    const fill = computeProgramAutoFill(projAfter, resolvedMix);
+    patch({ program: fill?.cells ?? [] });
   }
 
   // Auto-seed the typology list the first time a project lands on this tab with
