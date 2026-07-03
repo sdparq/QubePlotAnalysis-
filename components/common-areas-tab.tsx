@@ -1,12 +1,12 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
 import {
   residentialGFATarget,
   residentialSubQuota,
 } from "@/lib/calc/gfa";
-import { computePlotTierFootprints } from "@/lib/calc/plot-tiers";
+import { computeTowerYield } from "@/lib/calc/tower-yield";
 import {
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -69,11 +69,36 @@ export default function CommonAreasTab() {
   const apartmentsGFA = (apartmentsPct / 100) * residentialGFA;
   const totalCommonGFA = amenitiesGFA + circulationGFA;
 
-  const tiers = useMemo(() => computePlotTierFootprints(project), [project]);
+  const yield_ = useMemo(() => computeTowerYield(project), [project]);
+
+  // Keep the persisted tower floor count in sync so Program / Parking / Lifts
+  // / Massing — which all read project.typeFloors.count / project.numFloors
+  // directly — pick up the derived value without their own copy of this calc.
+  useEffect(() => {
+    if (yield_.towerFootprintM2 <= 0 || yield_.residentialGFA <= 0) return;
+    const nextCount = Math.max(1, yield_.towerFloors);
+    const curHeight = project.typeFloors?.heightM ?? project.floorHeight;
+    if ((project.typeFloors?.count ?? project.numFloors) === nextCount) return;
+    patch({
+      typeFloors: { count: nextCount, heightM: curHeight },
+      numFloors: nextCount,
+      floorHeight: curHeight > 0 ? curHeight : project.floorHeight,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yield_.towerFloors, yield_.towerFootprintM2, yield_.residentialGFA]);
+
+  function setFootprint(field: "groundFootprintM2" | "podiumFootprintM2" | "towerFootprintM2", v: number) {
+    patch({ [field]: v > 0 ? v : undefined });
+  }
 
   return (
     <div className="grid gap-6">
-      <TierFootprintCard tiers={tiers} />
+      <TowerYieldCard
+        yield_={yield_}
+        maxTowerFloors={project.maxTowerFloors}
+        onSetFootprint={setFootprint}
+        onSetMaxTowerFloors={(v) => patch({ maxTowerFloors: v > 0 ? v : undefined })}
+      />
 
       <div className="card">
         <div className="mb-5">
@@ -140,66 +165,143 @@ export default function CommonAreasTab() {
   );
 }
 
-function TierFootprintCard({ tiers }: { tiers: ReturnType<typeof computePlotTierFootprints> }) {
-  const rows: Array<{ key: "ground" | "podium" | "tower"; label: string; hint: string }> = [
-    { key: "ground", label: "Ground floor", hint: "plot shrunk by the ground setback" },
-    { key: "podium", label: "Podium", hint: "plot shrunk by the podium setback" },
-    { key: "tower",  label: "Tower",  hint: "plot shrunk by the tower setback" },
-  ];
-  const totalGFA = tiers.ground.gfaM2 + tiers.podium.gfaM2 + tiers.tower.gfaM2;
-  const hasFootprint = tiers.ground.footprintM2 > 0 || tiers.podium.footprintM2 > 0 || tiers.tower.footprintM2 > 0;
+function TowerYieldCard({
+  yield_, maxTowerFloors, onSetFootprint, onSetMaxTowerFloors,
+}: {
+  yield_: ReturnType<typeof computeTowerYield>;
+  maxTowerFloors: number | undefined;
+  onSetFootprint: (field: "groundFootprintM2" | "podiumFootprintM2" | "towerFootprintM2", v: number) => void;
+  onSetMaxTowerFloors: (v: number) => void;
+}) {
+  const y = yield_;
 
   return (
     <div className="card">
       <div className="mb-4">
-        <h2 className="section-title">Footprint by tier</h2>
+        <h2 className="section-title">Tower floors · from residential GFA</h2>
         <p className="section-sub">
-          Superficie estructural disponible en cada franja del edificio, derivada del solar y los setbacks
-          (Massing) × plantas (Setup → Floor breakdown). Úsalo para contrastar el reparto de usos: retail
-          suele ir en Ground + Podium, residencial en Tower.
+          Escribe la huella de cada tramo tal y como la conoces de tu propio estudio de zoning —
+          no se calcula desde el solar de Massing (para evitar arrastrar errores de trazado). El
+          nº de plantas de la torre sale de dividir el <strong>GFA residencial</strong> entre la{" "}
+          <strong>huella de torre</strong>; Ground y Podium son informativos, para contrastar con
+          el retail/commercial de Setup.
         </p>
       </div>
 
-      {!hasFootprint && (
-        <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] mb-4 leading-snug">
-          Sin huella todavía — define <strong>Plot area</strong> (Setup) y los setbacks de cada tier en{" "}
-          <strong>Massing</strong>.
+      <div className="border border-ink-200 mb-4">
+        <div className="grid grid-cols-[1fr_130px_70px_120px] gap-2 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+          <div>Tier</div>
+          <div className="text-right">Footprint m² (manual)</div>
+          <div className="text-right">Floors</div>
+          <div className="text-right">GFA m²</div>
+        </div>
+
+        <FootprintRow
+          label="Ground floor"
+          hint="Informativo — contrasta con retail/commercial de Setup."
+          value={y.groundFootprintM2}
+          floors={y.groundCount}
+          gfa={y.groundGFA}
+          onChange={(v) => onSetFootprint("groundFootprintM2", v)}
+        />
+        <FootprintRow
+          label="Podium"
+          hint={`Informativo · × ${y.podiumCount} podium level(s) (Setup → Floor breakdown).`}
+          value={y.podiumFootprintM2}
+          floors={y.podiumCount}
+          gfa={y.podiumGFA}
+          onChange={(v) => onSetFootprint("podiumFootprintM2", v)}
+        />
+        <FootprintRow
+          label="Tower (per floor)"
+          hint="Decide el nº de plantas de la torre — ver debajo."
+          value={y.towerFootprintM2}
+          floors={y.towerFloors}
+          gfa={y.towerGFA}
+          highlight
+          onChange={(v) => onSetFootprint("towerFootprintM2", v)}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <Stat label="Residential GFA" value={y.residentialGFA > 0 ? `${fmt0(y.residentialGFA)} m²` : "—"} />
+        <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="sin cap" />
+        <div className="border border-ink-200 bg-white p-3">
+          <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>
+          <input
+            type="number"
+            step={1}
+            min={0}
+            className="cell-input text-right !text-[18px] font-light tabular-nums mt-0.5 w-full"
+            value={maxTowerFloors ?? ""}
+            placeholder="sin límite"
+            onChange={(e) => {
+              const n = parseFloat(e.target.value);
+              onSetMaxTowerFloors(Number.isFinite(n) ? n : 0);
+            }}
+          />
+          <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">Deja vacío si es unlimited</div>
+        </div>
+        <Stat
+          label="Tower floors (final)"
+          value={y.towerFootprintM2 > 0 ? `${fmt0(y.towerFloors)}` : "—"}
+          sub={y.exceedsMax ? "clamped al máximo" : "aplicado al proyecto"}
+        />
+      </div>
+
+      {y.towerFootprintM2 <= 0 && (
+        <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] leading-snug">
+          Escribe la huella de torre por planta para calcular cuántas plantas hacen falta.
         </div>
       )}
 
-      <div className="border border-ink-200">
-        <div className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
-          <div>Tier</div>
-          <div className="text-right">Footprint m²</div>
-          <div className="text-right">Floors</div>
-          <div className="text-right">Height m</div>
-          <div className="text-right">GFA m²</div>
+      {y.exceedsMax && (
+        <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug">
+          Con el máximo de <strong>{y.maxTowerFloors}</strong> plantas sólo caben{" "}
+          <strong>{fmt0(y.towerGFA)} m²</strong> de los <strong>{fmt0(y.residentialGFA)} m²</strong> de
+          GFA residencial — faltan <strong>{fmt0(y.gfaShort)} m²</strong> ({y.floorsShort} planta
+          {y.floorsShort === 1 ? "" : "s"}). Reduce el GFA residencial en Setup, agranda la huella de
+          torre, o si el solar realmente lo permite, sube el máximo de plantas.
         </div>
-        {rows.map((r) => {
-          const t = tiers[r.key];
-          return (
-            <div
-              key={r.key}
-              className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
-            >
-              <div>
-                <div className="text-ink-900">{r.label}</div>
-                <div className="text-[10.5px] text-ink-500 leading-snug">{r.hint}</div>
-              </div>
-              <div className="text-right text-ink-900">{t.footprintM2 > 0 ? Math.round(t.footprintM2).toLocaleString("en-US") : "—"}</div>
-              <div className="text-right text-ink-700">{t.floors > 0 ? t.floors : "—"}</div>
-              <div className="text-right text-ink-700">{t.heightM > 0 ? t.heightM.toFixed(2) : "—"}</div>
-              <div className="text-right text-qube-800 font-medium">{t.gfaM2 > 0 ? Math.round(t.gfaM2).toLocaleString("en-US") : "—"}</div>
-            </div>
-          );
-        })}
-        <div className="grid grid-cols-[1fr_110px_70px_90px_120px] gap-2 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
-          <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">Total structural GFA</div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div className="text-right text-qube-800">{totalGFA > 0 ? Math.round(totalGFA).toLocaleString("en-US") : "—"}</div>
-        </div>
+      )}
+    </div>
+  );
+}
+
+function FootprintRow({
+  label, hint, value, floors, gfa, highlight, onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  floors: number;
+  gfa: number;
+  highlight?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className={`grid grid-cols-[1fr_130px_70px_120px] gap-2 px-3 py-2.5 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0 ${highlight ? "bg-qube-50/40" : ""}`}>
+      <div>
+        <div className="text-ink-900">{label}</div>
+        <div className="text-[10.5px] text-ink-500 leading-snug">{hint}</div>
+      </div>
+      <div className="text-right">
+        <input
+          type="number"
+          step={10}
+          min={0}
+          className="cell-input text-right !py-1 !px-1.5 w-[120px]"
+          value={value || ""}
+          placeholder="0"
+          onChange={(e) => {
+            const n = parseFloat(e.target.value);
+            onChange(Number.isFinite(n) ? n : 0);
+          }}
+        />
+      </div>
+      <div className="text-right text-ink-700">{floors > 0 ? floors : "—"}</div>
+      <div className={`text-right font-medium ${highlight ? "text-qube-800" : "text-ink-900"}`}>
+        {gfa > 0 ? Math.round(gfa).toLocaleString("en-US") : "—"}
       </div>
     </div>
   );

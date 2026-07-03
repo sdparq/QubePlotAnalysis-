@@ -8,8 +8,6 @@ import {
   type GfaBreakdownItem,
   type GfaUseCategory,
 } from "@/lib/types";
-import { residentialGFATarget } from "@/lib/calc/gfa";
-import { computeMaxTowerFootprintM2 } from "@/lib/calc/plot-tiers";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import {
   ALL_CLASS_LETTERS,
@@ -214,30 +212,10 @@ function FloorBreakdownCard({
     patch(updates);
   }
 
-  // Type floors count is DERIVED, not typed in: residential GFA (Setup → GFA
-  // breakdown) spread over the maximum tower footprint (plot shrunk by the
-  // tower setback). The height stays a manual input — everything else about
-  // the tower follows from those two numbers.
-  const residentialGFA = residentialGFATarget(project);
-  const maxTowerFootprint = computeMaxTowerFootprintM2(project);
+  // Type floors count is DERIVED in Distribution (residential GFA ÷ the tower
+  // floor-plate area entered there), not typed in here. This card just
+  // displays the current value; the height stays a manual input.
   const typeFloorsSec = get("typeFloors", FLOOR_SECTIONS[3]);
-  const computedTowerFloors =
-    maxTowerFootprint > 0 ? Math.floor(residentialGFA / maxTowerFootprint) : 0;
-
-  // Keep the persisted count in sync so Program / Parking / Lifts / Massing —
-  // which all read project.typeFloors.count / project.numFloors directly —
-  // pick up the derived value without needing their own copy of this calc.
-  useEffect(() => {
-    if (maxTowerFootprint <= 0 || residentialGFA <= 0) return;
-    const nextCount = Math.max(1, computedTowerFloors);
-    if (typeFloorsSec.count === nextCount) return;
-    patch({
-      typeFloors: { count: nextCount, heightM: typeFloorsSec.heightM },
-      numFloors: nextCount,
-      floorHeight: typeFloorsSec.heightM > 0 ? typeFloorsSec.heightM : project.floorHeight,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [computedTowerFloors, maxTowerFootprint, residentialGFA]);
 
   function setTypeFloorsHeight(heightM: number) {
     setSection("typeFloors", { count: typeFloorsSec.count, heightM });
@@ -258,8 +236,8 @@ function FloorBreakdownCard({
         <h2 className="section-title">Floor breakdown</h2>
         <p className="section-sub">
           Tell the app how the building is stratified. Basements, ground and podium are your
-          call. Type floors are derived — the residential GFA spread over the maximum tower
-          footprint decides how many fit.
+          call. Type floors are derived in <strong>Distribution</strong> — residential GFA ÷ the
+          tower floor-plate area entered there decides how many fit.
         </p>
       </div>
 
@@ -314,9 +292,7 @@ function FloorBreakdownCard({
           <div>
             <div className="text-ink-900">Type floors <span className="text-qube-700">· derived</span></div>
             <div className="text-[10.5px] text-ink-500 leading-snug">
-              {maxTowerFootprint > 0 && residentialGFA > 0
-                ? `${Math.round(residentialGFA).toLocaleString("en-US")} m² residential ÷ ${Math.round(maxTowerFootprint).toLocaleString("en-US")} m² max tower footprint`
-                : "needs Target GFA (below) and a tower setback (Massing)"}
+              Set the tower floor-plate area in <strong>Distribution</strong> to compute this.
             </div>
           </div>
           <div className="text-right text-ink-900 font-medium">{typeFloorsSec.count}</div>

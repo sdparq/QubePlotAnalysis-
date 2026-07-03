@@ -150,6 +150,20 @@ export interface Project {
   towerOffsetYM?: number;
   /** Target GFA (m²) used as the reference when commonAreasInputMode === "percentage". */
   targetGFA?: number;
+  /** Manual floor-plate areas (m²), entered directly in Distribution instead
+   *  of derived from the plot polygon + setbacks in Massing (which can carry
+   *  tracing/calibration error). Ground and podium are informational — cross-
+   *  check against the retail/commercial GFA in Setup's breakdown. Tower is
+   *  load-bearing: the residential GFA divided by this figure is how many
+   *  tower floors get computed. */
+  groundFootprintM2?: number;
+  podiumFootprintM2?: number;
+  towerFootprintM2?: number;
+  /** Optional hard cap on tower floor count (zoning / DCAA height limit given
+   *  as a floor count rather than a FAR or metre height). When the GFA-driven
+   *  floor count would exceed this, the tower is clamped to the cap and
+   *  Distribution flags that the residential GFA doesn't fully fit. */
+  maxTowerFloors?: number;
   /** Retail parking standard — m² of retail GFA per required parking space.
    *  Default 70 m² / space (QUBE Dubai convention: 1 plaza por cada 70 m²
    *  de retail). Editable in the Parking tab. */
