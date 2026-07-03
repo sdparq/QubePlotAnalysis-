@@ -283,6 +283,30 @@ export const DEFAULT_ZONE_CLASSES: Record<ZoneClass, ZoneClassRow> = {
   G: buildDefaultClass("G"),
 };
 
+function stripDubaiPrefix(name: string): string {
+  return name.replace(/^dubai\s+/, "");
+}
+
+/** Trailing "(ABBR)" content, lowercased — e.g. "jumeirah lake towers (jlt)" -> "jlt". */
+function trailingAbbreviation(name: string): string | null {
+  const m = name.match(/\(([^)]+)\)\s*$/);
+  return m ? m[1].trim().toLowerCase() : null;
+}
+
+/** Two zone names refer to the same place if either is a prefix of the other
+ *  (after optionally stripping a leading "Dubai "), or one is exactly the
+ *  other's parenthesised abbreviation (e.g. "JLT" vs "Jumeirah Lake Towers (JLT)"). */
+function zoneNamesMatch(a: string, b: string): boolean {
+  if (a === b || a.startsWith(b) || b.startsWith(a)) return true;
+  const aBare = stripDubaiPrefix(a);
+  const bBare = stripDubaiPrefix(b);
+  if (aBare === bBare || aBare.startsWith(bBare) || bBare.startsWith(aBare)) return true;
+  const aAbbr = trailingAbbreviation(a);
+  const bAbbr = trailingAbbreviation(b);
+  if (aAbbr === b || bAbbr === a) return true;
+  return false;
+}
+
 /** Find the class that contains the given zone name (case-insensitive, prefix match). */
 export function classForZone(
   zoneName: string | undefined | null,
@@ -294,11 +318,10 @@ export function classForZone(
   for (const letter of ALL_CLASS_LETTERS) {
     const locs = library[letter].locations;
     for (const loc of locs) {
-      const a = loc.toLowerCase();
-      // exact or one-side-prefix match (zone may be "Dubai Marina" or "Dubai Marina (water view)")
-      if (a === target || a.startsWith(target) || target.startsWith(a)) {
-        return letter;
-      }
+      // exact/prefix match, tolerant of a "Dubai " prefix or a "(ABBR)" suffix
+      // difference between the project's zone field and the library's naming
+      // (e.g. "Production City (IMPZ)" vs "Dubai Production City (IMPZ)").
+      if (zoneNamesMatch(target, loc.toLowerCase())) return letter;
     }
   }
   return null;
