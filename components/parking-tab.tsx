@@ -277,6 +277,7 @@ export default function ParkingTab() {
         {(() => {
           const plotArea = project.plotArea ?? 0;
           const basementCount = project.basements?.count ?? 0;
+          const basementHeightM = project.basements?.heightM ?? 3.0;
           // Other parking floor plans — fully editable. Falls back to the
           // legacy podium fields when the project predates this UI so saved
           // projects keep their numbers.
@@ -293,9 +294,48 @@ export default function ParkingTab() {
           const enough = balance >= 0 && availTotal > 0;
           const basementsNeededAlone = plotArea > 0 ? Math.ceil(required / plotArea) : 0;
           const otherFloorsNeededAlone = otherPerFloor > 0 ? Math.ceil(required / otherPerFloor) : 0;
+          // How many basements are actually needed GIVEN what's already
+          // planned on the other parking floors — the number this card
+          // answers. Read-only suggestion; Setup → Floor breakdown remains
+          // the source of truth for basementCount (a click here syncs it).
+          const remainingForBasements = Math.max(0, required - otherSurface);
+          const basementsNeeded = plotArea > 0 && remainingForBasements > 0
+            ? Math.ceil(remainingForBasements / plotArea)
+            : 0;
+          const basementsMatch = basementCount === basementsNeeded;
+          function applyBasementsNeeded() {
+            patch({ basements: { count: basementsNeeded, heightM: basementHeightM } });
+          }
           return (
             <>
               <div className="grid gap-2">
+                {/* Basements needed — headline answer */}
+                <div className="border border-ink-200 bg-white p-3 flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="eyebrow text-ink-500 text-[10px]">Basements needed</div>
+                    <div className={`text-[22px] font-light tabular-nums mt-0.5 ${basementsMatch ? "text-emerald-700" : "text-amber-700"}`}>
+                      {plotArea > 0 ? basementsNeeded : "—"}
+                    </div>
+                    <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
+                      {plotArea > 0
+                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(plotArea)} m² plot, after ${fmt0(otherSurface)} m² already planned on other floors.`
+                        : "Set Plot area in Setup to compute this."}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] text-ink-500">
+                      Configured in Setup: <strong className="text-ink-900">{basementCount}</strong>
+                    </div>
+                    {!basementsMatch && plotArea > 0 && (
+                      <button className="btn btn-primary btn-xs mt-1" onClick={applyBasementsNeeded}>
+                        Apply {basementsNeeded} basement{basementsNeeded === 1 ? "" : "s"}
+                      </button>
+                    )}
+                    {basementsMatch && plotArea > 0 && (
+                      <div className="text-[10.5px] text-emerald-700 mt-1">✓ matches Setup</div>
+                    )}
+                  </div>
+                </div>
                 {/* Inputs row */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <Stat
