@@ -124,7 +124,7 @@ export default function SetupTab() {
         </div>
         <p className="text-[11px] text-ink-500 mt-3">
           Target GFA powers the percentage input mode in Common Areas (leave 0 if you prefer m²). Latitude / longitude
-          unlock the In-context Massing view that streams Google Photorealistic 3D Tiles around the plot.
+          unlock the In-context Massing view with a basemap and the surrounding buildings around the plot.
         </p>
       </div>
 

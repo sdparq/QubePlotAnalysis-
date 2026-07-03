@@ -194,7 +194,7 @@ export interface Project {
   commonAreasInputMode?: "absolute" | "percentage";
   /** Real-estate economic analysis configuration. */
   economic?: EconomicConfig;
-  /** Geographic location of the plot, used for the Photorealistic 3D Tiles in-context view. */
+  /** Geographic location of the plot, used for the in-context Massing view (basemap + surrounding buildings). */
   latitude?: number;
   longitude?: number;
   /** Heading of the plot's local +y axis relative to true north, in degrees clockwise. 0 = +y points north. */
@@ -205,8 +205,8 @@ export interface Project {
   nearbyHeightOverrides?: Record<string, number>;
   /** OSM way ids of surrounding buildings the user wants hidden from the In-context view */
   nearbyHidden?: string[];
-  /** Tile basemap style for the In-context view. "photoreal" streams Google Photorealistic 3D Tiles. */
-  contextMapStyle?: "topo" | "satellite" | "schematic" | "photoreal";
+  /** Tile basemap style for the In-context view */
+  contextMapStyle?: "topo" | "satellite" | "schematic";
   /** Manual building XZ offset in metres (east/north) for fine alignment with the basemap. */
   contextOffsetXM?: number;
   contextOffsetZM?: number;

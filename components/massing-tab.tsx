@@ -286,7 +286,12 @@ export default function MassingTab() {
                   buildingYOffsetM={project.groundElevationM ?? 0}
                   buildingXOffsetM={project.contextOffsetXM ?? 0}
                   buildingZOffsetM={project.contextOffsetZM ?? 0}
-                  mapStyle={project.contextMapStyle ?? "topo"}
+                  mapStyle={
+                    // Older saves may carry the removed "photoreal" style — fall back to topo.
+                    project.contextMapStyle === "topo" || project.contextMapStyle === "satellite" || project.contextMapStyle === "schematic"
+                      ? project.contextMapStyle
+                      : "topo"
+                  }
                   nearbyHeightOverrides={project.nearbyHeightOverrides}
                   nearbyHidden={project.nearbyHidden}
                   customNeighbors={project.customNeighbors}

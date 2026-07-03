@@ -1,5 +1,5 @@
 "use client";
-import { Canvas, type ThreeEvent } from "@react-three/fiber";
+import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Edges, Line, TransformControls } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -8,7 +8,6 @@ import { polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import type { CustomNeighbor } from "@/lib/types";
 import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
-import GoogleTiles from "./google-3d-tiles";
 
 type AiStyle = "scheme" | "hyperreal";
 const PROMPT_FOR: Record<AiStyle, string> = {
@@ -54,13 +53,13 @@ export interface ContextSceneProps {
   /** OSM way ids hidden from the scene */
   nearbyHidden?: string[];
   /** Map style to use for the basemap */
-  mapStyle?: "topo" | "satellite" | "schematic" | "photoreal";
+  mapStyle?: "topo" | "satellite" | "schematic";
   /** User-defined extra neighbours */
   customNeighbors?: CustomNeighbor[];
   /** Persist user edits */
   onSetHeight?: (osmId: string, height: number) => void;
   onToggleHide?: (osmId: string, hide: boolean) => void;
-  onSetMapStyle?: (style: "topo" | "satellite" | "schematic" | "photoreal") => void;
+  onSetMapStyle?: (style: "topo" | "satellite" | "schematic") => void;
   onSetBuildingOffset?: (x: number, z: number) => void;
   onAddCustomNeighbor?: (centerX: number, centerZ: number) => string;
   onUpdateCustomNeighbor?: (id: string, partial: Partial<CustomNeighbor>) => void;
@@ -70,11 +69,9 @@ export interface ContextSceneProps {
   onShuffleTowers?: (minH: number, maxH: number) => void;
 }
 
-type MapStyle = "topo" | "satellite" | "schematic" | "photoreal";
-/** Styles served as flat raster tiles (everything except the 3D photoreal mode). */
-type RasterStyle = Exclude<MapStyle, "photoreal">;
+type MapStyle = "topo" | "satellite" | "schematic";
 
-function tileUrl(style: RasterStyle, z: number, x: number, y: number): string {
+function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
   if (style === "satellite") {
     return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   }
@@ -119,7 +116,7 @@ interface ContextGround {
   planeZ: number;
 }
 
-async function loadContextTiles(lat: number, lon: number, contextRadiusM: number, style: RasterStyle): Promise<ContextGround> {
+async function loadContextTiles(lat: number, lon: number, contextRadiusM: number, style: MapStyle): Promise<ContextGround> {
   const targetSizeM = 2 * contextRadiusM;
   const z = Math.max(
     13,
@@ -196,23 +193,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
   } = props;
   const [placeMode, setPlaceMode] = useState(false);
   const [addNeighbourMode, setAddNeighbourMode] = useState(false);
-
-  // ---- Google Photorealistic 3D Tiles ("Real 3D" basemap) ----
-  const [googleKey, setGoogleKey] = useState<string>("");
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem("qube.googleTiles.apiKey");
-    if (saved) setGoogleKey(saved);
-  }, []);
-  const [googleKeyDialog, setGoogleKeyDialog] = useState<{ open: boolean; draft: string }>({ open: false, draft: "" });
-  const persistGoogleKey = useCallback((k: string) => {
-    setGoogleKey(k);
-    try { window.localStorage.setItem("qube.googleTiles.apiKey", k); } catch {}
-  }, []);
-  const [tilesReady, setTilesReady] = useState(false);
-  const [tilesError, setTilesError] = useState<string | null>(null);
-  const [tileAttributions, setTileAttributions] = useState<string>("");
-  const isPhotoreal = mapStyle === "photoreal" && !!googleKey;
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate");
   const [isDragging, setIsDragging] = useState(false);
   const [neighborObjects, setNeighborObjects] = useState<Map<string, THREE.Group>>(new Map());
@@ -325,9 +305,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
     let cancelled = false;
     setGround(null);
     setGroundError(null);
-    setTilesReady(false);
-    setTilesError(null);
-    if (mapStyle === "photoreal") return; // 3D tiles stream themselves; no raster basemap
     loadContextTiles(latitude, longitude, contextRadiusM, mapStyle)
       .then((g) => { if (!cancelled) setGround(g); })
       .catch((e: Error) => { if (!cancelled) setGroundError(e.message); });
@@ -395,33 +372,6 @@ export default function MassingContextScene(props: ContextSceneProps) {
         <ambientLight intensity={0.8} />
         <directionalLight position={[300, 500, 200]} intensity={0.85} castShadow />
 
-        {isPhotoreal && (
-          <GoogleTiles
-            apiKey={googleKey}
-            latitude={latitude}
-            longitude={longitude}
-            onReady={() => setTilesReady(true)}
-            onError={(m) => setTilesError((prev) => prev ?? m)}
-            onAttributions={setTileAttributions}
-            onClick={
-              placeMode || addNeighbourMode
-                ? (e: ThreeEvent<MouseEvent>) => {
-                    if (placeMode && onSetBuildingOffset) {
-                      e.stopPropagation();
-                      onSetBuildingOffset(e.point.x, e.point.z);
-                      setPlaceMode(false);
-                    } else if (addNeighbourMode && onAddCustomNeighbor) {
-                      e.stopPropagation();
-                      const newId = onAddCustomNeighbor(e.point.x, e.point.z);
-                      setAddNeighbourMode(false);
-                      setSelection({ kind: "custom", id: newId });
-                    }
-                  }
-                : undefined
-            }
-          />
-        )}
-
         {ground && (
           <mesh
             rotation={[-Math.PI / 2, 0, 0]}
@@ -448,8 +398,8 @@ export default function MassingContextScene(props: ContextSceneProps) {
           </mesh>
         )}
 
-        {/* Surrounding white volumes from OSM (hidden in photoreal mode — real buildings are baked into the tiles) */}
-        {!isPhotoreal && osmBuildings.map((b) => {
+        {/* Surrounding white volumes from OSM */}
+        {osmBuildings.map((b) => {
           if (hidden.has(b.id)) return null;
           const h = nearbyHeightOverrides[b.id] ?? b.defaultHeight;
           return (
@@ -593,7 +543,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
         />
       </Canvas>
 
-      {mapStyle !== "photoreal" && !ground && !groundError && (
+      {!ground && !groundError && (
         <div className="absolute top-2 left-2 px-2 py-1 bg-white/85 text-[10.5px] uppercase tracking-[0.10em] text-ink-700 border border-ink-200">
           Loading basemap tiles…
         </div>
@@ -603,57 +553,21 @@ export default function MassingContextScene(props: ContextSceneProps) {
           Could not load tiles: {groundError}
         </div>
       )}
-      {mapStyle === "photoreal" && !googleKey && (
-        <div className="absolute bottom-8 left-2 max-w-[300px] px-2 py-1 bg-amber-50/95 text-[10.5px] text-amber-900 border border-amber-200 leading-snug">
-          Real 3D needs a Google Map Tiles API key on this device.{" "}
-          <button
-            className="underline"
-            onClick={() => setGoogleKeyDialog({ open: true, draft: "" })}
-          >Set key</button>
-        </div>
-      )}
-      {isPhotoreal && !tilesReady && !tilesError && (
-        <div className="absolute bottom-8 left-2 px-2 py-1 bg-white/85 text-[10.5px] uppercase tracking-[0.10em] text-ink-700 border border-ink-200">
-          Streaming photorealistic 3D tiles…
-        </div>
-      )}
-      {isPhotoreal && tilesError && (
-        <div className="absolute bottom-8 left-2 max-w-[320px] px-2 py-1 bg-red-50 text-[10.5px] text-red-800 border border-red-200 leading-snug">
-          3D tiles error: {tilesError}. Check that your key has the <strong>Map Tiles API</strong> enabled.
-          <button
-            className="ml-1 underline text-red-900"
-            onClick={() => setGoogleKeyDialog({ open: true, draft: googleKey })}
-          >Replace key</button>
-        </div>
-      )}
 
       {/* Map style + position controls (top-left, only when no building is selected) */}
-      {!selectedOsm && !selectedCustom && (ground || mapStyle === "photoreal") && (
+      {!selectedOsm && !selectedCustom && ground && (
         <div className="absolute top-2 left-2 grid gap-2 max-w-[260px]">
           <div className="inline-flex border border-ink-200 bg-white/95 shadow-sm">
-            {(["topo", "satellite", "schematic", "photoreal"] as MapStyle[]).map((s) => (
+            {(["topo", "satellite", "schematic"] as MapStyle[]).map((s) => (
               <button
                 key={s}
-                onClick={() => {
-                  if (s === "photoreal" && !googleKey) {
-                    setGoogleKeyDialog({ open: true, draft: "" });
-                    return;
-                  }
-                  onSetMapStyle?.(s);
-                }}
-                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] whitespace-nowrap transition-colors ${
+                onClick={() => onSetMapStyle?.(s)}
+                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
                   mapStyle === s ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
                 }`}
-                title={s === "photoreal" ? "Google Photorealistic 3D Tiles — real 3D buildings and terrain (needs a Google Maps key)" : undefined}
-              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : s === "schematic" ? "Schematic" : "Real 3D"}</button>
+              >{s === "topo" ? "Topo" : s === "satellite" ? "Satellite" : "Schematic"}</button>
             ))}
           </div>
-          {isPhotoreal && (
-            <button
-              className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
-              onClick={() => setGoogleKeyDialog({ open: true, draft: googleKey })}
-            >Replace Google tiles key</button>
-          )}
 
           {onSetBuildingOffset && (
             <div className="bg-white/95 border border-ink-200 shadow-sm p-2 grid gap-1.5">
@@ -704,9 +618,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
           )}
 
           <div className="px-2 py-1 bg-white/85 text-[10px] text-ink-700 border border-ink-200">
-            {isPhotoreal
-              ? `Real environment · ${customNeighbors.length} custom volume${customNeighbors.length === 1 ? "" : "s"}`
-              : `${osmBuildings.length + customNeighbors.length} surrounding buildings · click any to edit`}
+            {osmBuildings.length + customNeighbors.length} surrounding buildings · click any to edit
           </div>
           {onAddCustomNeighbor && (
             <button
@@ -984,79 +896,9 @@ export default function MassingContextScene(props: ContextSceneProps) {
         </div>
       )}
 
-      <div className="absolute bottom-2 right-2 max-w-[70%] truncate px-2 py-0.5 bg-white/85 text-[9px] text-ink-700 border border-ink-200">
-        {isPhotoreal
-          ? `Photorealistic 3D Tiles © Google${tileAttributions ? ` · ${tileAttributions}` : ""}`
-          : "© Esri · Maxar · Earthstar Geographics · GIS User Community · Buildings © OpenStreetMap · Render via Google Gemini"}
+      <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-white/85 text-[9px] text-ink-700 border border-ink-200">
+        © Esri · Maxar · Earthstar Geographics · GIS User Community · Buildings © OpenStreetMap · Render via Google Gemini
       </div>
-
-      {/* Google Map Tiles API key dialog */}
-      {googleKeyDialog.open && (
-        <div className="absolute inset-0 z-30 bg-ink-900/55 flex items-center justify-center p-4">
-          <div className="bg-white border border-ink-200 shadow-lg max-w-[440px] w-full p-4 grid gap-3">
-            <div>
-              <div className="eyebrow text-ink-500">Google Maps Platform</div>
-              <h3 className="text-[15px] font-medium text-ink-900 mt-1">Map Tiles API key</h3>
-              <p className="text-[11.5px] text-ink-500 mt-1 leading-snug">
-                The Real 3D basemap streams Google&apos;s <strong>Photorealistic 3D Tiles</strong> —
-                the same real buildings you see in Google Earth, with full coverage of Dubai.
-                Create a key at{" "}
-                <a
-                  href="https://console.cloud.google.com/google/maps-apis"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-qube-700 hover:text-qube-900 underline"
-                >console.cloud.google.com</a>{" "}
-                with the <strong>Map Tiles API</strong> enabled (free monthly quota applies).
-                Stored only in your browser.
-              </p>
-            </div>
-            <input
-              type="password"
-              autoFocus
-              spellCheck={false}
-              className="cell-input"
-              placeholder="AIza…"
-              value={googleKeyDialog.draft}
-              onChange={(e) => setGoogleKeyDialog((s) => ({ ...s, draft: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && googleKeyDialog.draft.trim()) {
-                  persistGoogleKey(googleKeyDialog.draft.trim());
-                  setGoogleKeyDialog({ open: false, draft: "" });
-                  setTilesError(null);
-                  onSetMapStyle?.("photoreal");
-                }
-              }}
-            />
-            <div className="flex items-center justify-end gap-2">
-              {googleKey && (
-                <button
-                  className="text-[11px] text-red-700 hover:text-red-900 underline mr-auto"
-                  onClick={() => {
-                    persistGoogleKey("");
-                    setGoogleKeyDialog({ open: false, draft: "" });
-                    onSetMapStyle?.("satellite");
-                  }}
-                >Forget key</button>
-              )}
-              <button
-                className="px-3 py-1.5 text-[11px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 hover:bg-bone-50"
-                onClick={() => setGoogleKeyDialog({ open: false, draft: "" })}
-              >Cancel</button>
-              <button
-                className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
-                disabled={!googleKeyDialog.draft.trim()}
-                onClick={() => {
-                  persistGoogleKey(googleKeyDialog.draft.trim());
-                  setGoogleKeyDialog({ open: false, draft: "" });
-                  setTilesError(null);
-                  onSetMapStyle?.("photoreal");
-                }}
-              >Save & activate</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* API key dialog */}
       {keyDialog.open && (
