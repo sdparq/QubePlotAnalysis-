@@ -169,6 +169,9 @@ export default function MassingTab() {
     panelWidthM: project.facade?.panelWidthM ?? 3.2,
     balconyDepthM: project.facade?.balconyDepthM ?? 1.8,
     balconyEveryNBays: project.facade?.balconyEveryNBays ?? 2,
+    solidPanelRatio: project.facade?.solidPanelRatio ?? 0.25,
+    balconyLayout: project.facade?.balconyLayout ?? "rhythm",
+    patternSeed: project.facade?.patternSeed ?? 1,
   } as const;
 
   function patchFacade(partial: Partial<NonNullable<typeof project.facade>>) {
@@ -825,11 +828,21 @@ function SetbacksTable({
   );
 }
 
+interface FacadePanelParams {
+  mode: "massing" | "residential";
+  panelWidthM: number;
+  balconyDepthM: number;
+  balconyEveryNBays: number;
+  solidPanelRatio: number;
+  balconyLayout: "rhythm" | "random";
+  patternSeed: number;
+}
+
 function FacadePanel({
   params, onPatch,
 }: {
-  params: { mode: "massing" | "residential"; panelWidthM: number; balconyDepthM: number; balconyEveryNBays: number };
-  onPatch: (p: Partial<{ mode: "massing" | "residential"; panelWidthM: number; balconyDepthM: number; balconyEveryNBays: number }>) => void;
+  params: FacadePanelParams;
+  onPatch: (p: Partial<FacadePanelParams>) => void;
 }) {
   const residential = params.mode === "residential";
   return (
@@ -894,13 +907,50 @@ function FacadePanel({
                   const n = parseInt(e.target.value, 10);
                   if (Number.isFinite(n) && n >= 1) onPatch({ balconyEveryNBays: n });
                 }}
-                title="A balcony on every Nth facade bay"
+                title="A balcony on every Nth facade bay (or 1/N probability in random layout)"
               />
             </Field>
           </div>
+          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+            <Field label="Solid panels %">
+              <input
+                type="number"
+                step={5}
+                min={0}
+                max={100}
+                className="cell-input text-right"
+                value={Math.round(params.solidPanelRatio * 100)}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0 && n <= 100) onPatch({ solidPanelRatio: n / 100 });
+                }}
+                title="Share of facade cells filled with a solid precast panel instead of glazing"
+              />
+            </Field>
+            <Field label="Balcony layout">
+              <div className="inline-flex border border-ink-200 bg-white">
+                {([["rhythm", "Rhythm"], ["random", "Random"]] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => onPatch({ balconyLayout: id })}
+                    className={`px-2.5 py-[7px] text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                      params.balconyLayout === id ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+                    }`}
+                    title={id === "rhythm" ? "Balconies stack in regular columns" : "Balconies scattered randomly across the facade"}
+                  >{label}</button>
+                ))}
+              </div>
+            </Field>
+          </div>
+          <button
+            className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white text-ink-800 hover:bg-bone-50 transition-colors"
+            onClick={() => onPatch({ patternSeed: Math.floor(Math.random() * 100000) + 1 })}
+            title="Re-roll the random pattern of solid panels and scattered balconies"
+          >⤲ Shuffle pattern</button>
           <p className="text-[10.5px] text-ink-500 leading-snug">
-            Applies to the tower: floor slabs, recessed glazing, mullions on the bay rhythm and
-            balconies on every Nth bay. Ground and podium keep the massing look.
+            Applies to the tower: floor slabs, recessed glazing, mullions on the bay rhythm,
+            solid panels scattered at the given share, and balconies. Ground and podium keep
+            the massing look.
           </p>
         </div>
       )}

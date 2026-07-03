@@ -16,6 +16,21 @@ export interface FacadeParams {
   panelWidthM: number;
   balconyDepthM: number;
   balconyEveryNBays: number;
+  /** Fraction (0–1) of facade cells that get a solid precast panel instead of glazing. */
+  solidPanelRatio: number;
+  /** "rhythm" = balconies stack in columns on every Nth bay; "random" = scattered per cell with 1/N probability. */
+  balconyLayout: "rhythm" | "random";
+  /** Seed for the deterministic random pattern. */
+  patternSeed: number;
+}
+
+/** Deterministic per-cell hash → [0,1). Stable across renders for a given seed. */
+function cellRand(seed: number, i: number, j: number, salt = 0): number {
+  let h = (seed | 0) ^ Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(j + 1, 0x85ebca6b) ^ Math.imul(salt + 1, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 export interface SceneProps {
@@ -504,7 +519,7 @@ function ResidentialFacade({
   floorHeight: number;
   params: FacadeParams;
 }) {
-  const { panelWidthM, balconyDepthM, balconyEveryNBays } = params;
+  const { panelWidthM, balconyDepthM, balconyEveryNBays, solidPanelRatio, balconyLayout, patternSeed } = params;
   const height = toY - fromY;
   const floors = Math.max(1, Math.round(height / Math.max(0.1, floorHeight)));
   const floorH = height / floors;
@@ -539,10 +554,12 @@ function ResidentialFacade({
     return s;
   }, [polygon, hole]);
 
-  const { mullions, balconySlabs, rails } = useMemo(() => {
+  const { mullions, balconySlabs, rails, solidsLight, solidsDark } = useMemo(() => {
     const mullions: THREE.Matrix4[] = [];
     const balconySlabs: THREE.Matrix4[] = [];
     const rails: THREE.Matrix4[] = [];
+    const solidsLight: THREE.Matrix4[] = [];
+    const solidsDark: THREE.Matrix4[] = [];
     const pos = new THREE.Vector3();
     const quat = new THREE.Quaternion();
     const scale = new THREE.Vector3();
@@ -552,8 +569,11 @@ function ResidentialFacade({
     const outSign = ccw ? 1 : -1; // outward normal = (uy,-ux) for CCW polygons (local xy)
     const panelW = Math.max(1, panelWidthM);
     const everyN = Math.max(1, Math.round(balconyEveryNBays));
+    const solidRatio = Math.min(1, Math.max(0, solidPanelRatio));
+    const seed = Math.floor(patternSeed) || 1;
     const mullionH = floorH - SLAB_T;
-    let bayCounter = 0;
+    const panelH = floorH - SLAB_T;
+    let globalBay = 0;
 
     for (let e = 0; e < polygon.length; e++) {
       const a = polygon[e];
@@ -568,49 +588,58 @@ function ResidentialFacade({
       const ny = -ux * outSign;
       // Yaw that aligns the box's local X with the edge direction in world space.
       const yaw = Math.atan2(uy, ux);
+      quat.setFromAxisAngle(yAxis, yaw);
       const bays = Math.max(1, Math.round(len / panelW));
       const bayLen = len / bays;
 
-      // Vertical mullions at every bay division (skip the end vertex — the
-      // next edge contributes its own corner mullion).
-      for (let k = 0; k < bays; k++) {
+      for (let k = 0; k < bays; k++, globalBay++) {
+        // Vertical mullion at the bay start (the next edge contributes its own corner mullion).
         const px = a.x + ux * bayLen * k + nx * 0.02;
         const py = a.y + uy * bayLen * k + ny * 0.02;
         for (let f = 0; f < floors; f++) {
           const yMid = fromY + f * floorH + SLAB_T + mullionH / 2;
           pos.set(px, yMid, -py);
-          quat.setFromAxisAngle(yAxis, yaw);
           scale.set(MULLION_W, mullionH, MULLION_W);
           mullions.push(new THREE.Matrix4().compose(pos, quat, scale));
         }
-      }
 
-      // Balconies on every Nth bay.
-      if (balconyDepthM > 0.05) {
-        for (let k = 0; k < bays; k++) {
-          const isBalconyBay = bayCounter % everyN === 0;
-          bayCounter++;
-          if (!isBalconyBay) continue;
-          const cx = a.x + ux * bayLen * (k + 0.5);
-          const cy = a.y + uy * bayLen * (k + 0.5);
-          const w = bayLen * 0.9;
-          for (let f = 1; f < floors; f++) {
-            const yBase = fromY + f * floorH;
-            // slab
-            pos.set(cx + nx * (balconyDepthM / 2), yBase + 0.07, -(cy + ny * (balconyDepthM / 2)));
-            quat.setFromAxisAngle(yAxis, yaw);
-            scale.set(w, 0.14, balconyDepthM);
-            balconySlabs.push(new THREE.Matrix4().compose(pos, quat, scale));
-            // glass balustrade on the outer edge
-            pos.set(cx + nx * (balconyDepthM - 0.03), yBase + 0.14 + RAIL_H / 2, -(cy + ny * (balconyDepthM - 0.03)));
-            scale.set(w, RAIL_H, 0.05);
-            rails.push(new THREE.Matrix4().compose(pos, quat, scale));
+        const cx = a.x + ux * bayLen * (k + 0.5);
+        const cy = a.y + uy * bayLen * (k + 0.5);
+        const w = bayLen * 0.9;
+
+        for (let f = 0; f < floors; f++) {
+          // Solid precast panel instead of glazing on a random subset of cells.
+          const isSolid = solidRatio > 0 && cellRand(seed, globalBay, f) < solidRatio;
+          if (isSolid) {
+            const yMid = fromY + f * floorH + SLAB_T + panelH / 2;
+            pos.set(cx, yMid, -cy);
+            scale.set(Math.max(0.3, bayLen - MULLION_W), panelH, 0.16);
+            const m = new THREE.Matrix4().compose(pos, quat, scale);
+            if (cellRand(seed, globalBay, f, 2) < 0.7) solidsLight.push(m);
+            else solidsDark.push(m);
           }
+
+          // Balconies: never on the tower's base floor line or on solid cells.
+          if (f === 0 || isSolid || balconyDepthM <= 0.05) continue;
+          const hasBalcony =
+            balconyLayout === "random"
+              ? cellRand(seed, globalBay, f, 1) < 1 / everyN
+              : globalBay % everyN === 0;
+          if (!hasBalcony) continue;
+          const yBase = fromY + f * floorH;
+          // slab
+          pos.set(cx + nx * (balconyDepthM / 2), yBase + 0.07, -(cy + ny * (balconyDepthM / 2)));
+          scale.set(w, 0.14, balconyDepthM);
+          balconySlabs.push(new THREE.Matrix4().compose(pos, quat, scale));
+          // glass balustrade on the outer edge
+          pos.set(cx + nx * (balconyDepthM - 0.03), yBase + 0.14 + RAIL_H / 2, -(cy + ny * (balconyDepthM - 0.03)));
+          scale.set(w, RAIL_H, 0.05);
+          rails.push(new THREE.Matrix4().compose(pos, quat, scale));
         }
       }
     }
-    return { mullions, balconySlabs, rails };
-  }, [polygon, fromY, floors, floorH, panelWidthM, balconyDepthM, balconyEveryNBays]);
+    return { mullions, balconySlabs, rails, solidsLight, solidsDark };
+  }, [polygon, fromY, floors, floorH, panelWidthM, balconyDepthM, balconyEveryNBays, solidPanelRatio, balconyLayout, patternSeed]);
 
   return (
     <group>
@@ -641,6 +670,8 @@ function ResidentialFacade({
           );
         })}
       <InstancedBoxes matrices={mullions} color="#e9e5d8" roughness={0.7} />
+      <InstancedBoxes matrices={solidsLight} color="#e6e0d0" roughness={0.85} />
+      <InstancedBoxes matrices={solidsDark} color="#b9b2a0" roughness={0.85} />
       <InstancedBoxes matrices={balconySlabs} color="#ddd8ca" roughness={0.85} />
       <InstancedBoxes matrices={rails} color="#9fb7ae" roughness={0.15} metalness={0.2} opacity={0.45} />
     </group>

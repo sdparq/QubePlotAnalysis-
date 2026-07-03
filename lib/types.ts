@@ -206,8 +206,14 @@ export interface FacadeConfig {
   panelWidthM?: number;
   /** Balcony slab depth (m). 0 hides balconies. Default 1.8. */
   balconyDepthM?: number;
-  /** A balcony is placed on every Nth facade bay. Default 2. */
+  /** A balcony is placed on every Nth facade bay (rhythm mode) or with 1/N probability (random mode). Default 2. */
   balconyEveryNBays?: number;
+  /** Fraction (0–1) of facade cells filled with a solid precast panel instead of glazing. Default 0.25. */
+  solidPanelRatio?: number;
+  /** "rhythm" = balconies stack in regular columns; "random" = scattered per cell. Default "rhythm". */
+  balconyLayout?: "rhythm" | "random";
+  /** Seed for the deterministic random pattern (solids + random balconies). */
+  patternSeed?: number;
 }
 
 export interface FloorSection {
