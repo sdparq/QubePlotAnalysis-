@@ -1,11 +1,14 @@
 "use client";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Grid, Edges, Line } from "@react-three/drei";
-import { useMemo } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { OrbitControls, Grid, Edges, Line, ContactShadows, Html } from "@react-three/drei";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Point } from "@/lib/geom";
 import { polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
+
+export type ViewPresetKind = "iso" | "front" | "top";
 
 export interface SceneProps {
   plot: Point[];           // Plot polygon in plot-local metres
@@ -19,10 +22,28 @@ export interface SceneProps {
   showFrontMarker?: boolean;
   /** Optional per-edge colors for the plot outline. */
   edgeColors?: string[];
+  /** Labels aligned by index with `volumes`, shown as floating chips beside each tier. */
+  volumeLabels?: string[];
+  /** Show dimension line + tier labels. */
+  showAnnotations?: boolean;
+  /** Camera preset request; bump `nonce` to re-trigger the same preset. */
+  viewPreset?: { kind: ViewPresetKind; nonce: number } | null;
+  /** Slow turntable rotation. */
+  autoRotate?: boolean;
+  /** Receives a function that renders a frame and returns it as a PNG data-URL. */
+  captureRef?: MutableRefObject<(() => string) | null>;
+}
+
+interface CameraGoal {
+  pos: THREE.Vector3;
+  tgt: THREE.Vector3;
 }
 
 export default function MassingScene(props: SceneProps) {
-  const { plot, buildable, volumes, floorHeight, primaryFootprint, showFrontMarker, edgeColors } = props;
+  const {
+    plot, buildable, volumes, floorHeight, showFrontMarker, edgeColors,
+    volumeLabels, showAnnotations = true, viewPreset, autoRotate, captureRef,
+  } = props;
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -33,6 +54,9 @@ export default function MassingScene(props: SceneProps) {
 
   const plotShape = useMemo(() => polyToShape(plot), [plot]);
   const buildableShape = useMemo(() => (buildable.length >= 3 ? polyToShape(buildable) : null), [buildable]);
+
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const goalRef = useRef<CameraGoal | null>(null);
 
   const volumeShapes = useMemo(
     () =>
@@ -67,6 +91,19 @@ export default function MassingScene(props: SceneProps) {
     return out;
   }, [volumes, floorHeight]);
 
+  // Annotation anchors: dimension line on the right of the plot, tier chips on the left.
+  const annotPad = Math.max(2.5, maxDim * 0.08);
+  const dimX = bbox.maxX + annotPad;
+  const labelX = bbox.minX - annotPad;
+  const tierBoundaries = useMemo(() => {
+    const ys = new Set<number>([0]);
+    volumes.forEach((v) => {
+      if (v.fromY >= 0) ys.add(v.fromY);
+      if (v.toY > 0) ys.add(v.toY);
+    });
+    return Array.from(ys).sort((a, b) => a - b);
+  }, [volumes]);
+
   return (
     <Canvas
       shadows
@@ -74,33 +111,48 @@ export default function MassingScene(props: SceneProps) {
         position: [centroid.x + camDist * 0.85, camDist * 0.7, -centroid.y + camDist],
         fov: 40,
         near: 0.5,
-        far: maxDim * 10,
+        far: maxDim * 12,
       }}
-      style={{ background: "#f6f4ee" }}
+      gl={{ alpha: true, antialias: true }}
+      style={{
+        background:
+          "radial-gradient(120% 90% at 50% 0%, #f4f5ef 0%, #f6f4ee 45%, #eceadf 100%)",
+      }}
       dpr={[1, 2]}
     >
-      <ambientLight intensity={0.55} />
+      <fog attach="fog" args={["#f0eee6", camDist * 1.6, camDist * 5.5]} />
+
+      {/* Lighting rig: warm key with shadows, cool fill, soft sky bounce */}
+      <hemisphereLight args={["#f7f5ec", "#cfcaba", 0.5]} />
+      <ambientLight intensity={0.32} />
       <directionalLight
-        position={[centroid.x + maxDim * 0.6, maxDim * 1.4, -centroid.y + maxDim * 0.4]}
-        intensity={1.1}
+        position={[centroid.x + maxDim * 0.7, maxDim * 1.5, -centroid.y + maxDim * 0.45]}
+        intensity={1.25}
+        color="#fff6e8"
         castShadow
         shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0002}
         shadow-camera-left={-maxDim}
         shadow-camera-right={maxDim}
         shadow-camera-top={maxDim}
         shadow-camera-bottom={-maxDim}
       />
+      <directionalLight
+        position={[centroid.x - maxDim * 0.8, maxDim * 0.6, -centroid.y - maxDim * 0.6]}
+        intensity={0.35}
+        color="#e3e9f2"
+      />
 
       <Grid
         args={[maxDim * 4, maxDim * 4]}
         cellSize={1}
-        cellThickness={0.4}
-        cellColor="#dcd8d0"
+        cellThickness={0.3}
+        cellColor="#e2dfd5"
         sectionSize={10}
-        sectionThickness={0.8}
-        sectionColor="#b8b5ad"
+        sectionThickness={0.7}
+        sectionColor="#c6c2b4"
         fadeDistance={maxDim * 3}
-        fadeStrength={1.4}
+        fadeStrength={1.6}
         position={[centroid.x, -0.001, -centroid.y]}
         infiniteGrid
       />
@@ -108,16 +160,27 @@ export default function MassingScene(props: SceneProps) {
       {plotShape && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
           <shapeGeometry args={[plotShape]} />
-          <meshStandardMaterial color="#ede9df" />
+          <meshStandardMaterial color="#ede9df" roughness={0.95} />
         </mesh>
       )}
 
       {buildableShape && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
           <shapeGeometry args={[buildableShape]} />
-          <meshStandardMaterial color="#bccab0" opacity={0.9} transparent />
+          <meshStandardMaterial color="#bccab0" opacity={0.9} transparent roughness={0.9} />
         </mesh>
       )}
+
+      {/* Soft ambient-occlusion style grounding under the building */}
+      <ContactShadows
+        position={[centroid.x, 0.018, -centroid.y]}
+        scale={maxDim * 2.6}
+        far={Math.max(12, topY * 0.6)}
+        blur={2.4}
+        opacity={0.3}
+        resolution={1024}
+        color="#2a3020"
+      />
 
       {/* Plot outline */}
       {edgeColors && edgeColors.length === plot.length ? (
@@ -145,10 +208,12 @@ export default function MassingScene(props: SceneProps) {
             receiveShadow
           >
             <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-            <meshStandardMaterial
+            <meshPhysicalMaterial
               color={colours.fill}
-              roughness={0.6}
-              metalness={0.1}
+              roughness={colours.roughness}
+              metalness={0.05}
+              clearcoat={v.kind === "tower" ? 0.25 : 0}
+              clearcoatRoughness={0.7}
               transparent={colours.opacity < 1}
               opacity={colours.opacity}
             />
@@ -162,18 +227,147 @@ export default function MassingScene(props: SceneProps) {
         <FloorRing key={`fr-${i}`} y={r.y} polygon={r.polygon} hole={r.hole} emphasis={r.emphasis} />
       ))}
 
+      {/* Annotations: height dimension line + tier chips */}
+      {showAnnotations && topY > 0 && (
+        <HeightDimension x={dimX} z={-centroid.y} topY={topY} boundaries={tierBoundaries} maxDim={maxDim} />
+      )}
+      {showAnnotations && volumeLabels && volumeLabels.length === volumes.length &&
+        volumes.map((v, i) => {
+          const label = volumeLabels[i];
+          if (!label) return null;
+          const midY = (v.fromY + v.toY) / 2;
+          return (
+            <Html
+              key={`vl-${i}`}
+              position={[labelX, midY, -centroid.y]}
+              center
+              zIndexRange={[10, 0]}
+              style={{ pointerEvents: "none" }}
+            >
+              <div className="px-1.5 py-0.5 bg-white/90 border border-[#dcd8d0] text-[9px] font-medium uppercase tracking-[0.14em] text-[#2a2a2a] whitespace-nowrap shadow-sm">
+                {label}
+              </div>
+            </Html>
+          );
+        })}
+
       {showFrontMarker && <FrontMarker plot={plot} />}
 
+      <CameraRig
+        preset={viewPreset ?? null}
+        goalRef={goalRef}
+        controlsRef={controlsRef}
+        centroid={centroid}
+        topY={topY}
+        camDist={camDist}
+      />
+      {captureRef && <CaptureBridge captureRef={captureRef} />}
+
       <OrbitControls
+        ref={controlsRef}
+        makeDefault
         enablePan
         enableZoom
         enableRotate
+        enableDamping
+        dampingFactor={0.08}
+        autoRotate={!!autoRotate}
+        autoRotateSpeed={0.8}
+        onStart={() => { goalRef.current = null; }}
         target={[centroid.x, topY / 3, -centroid.y]}
         maxPolarAngle={Math.PI / 2 - 0.03}
         minDistance={5}
         maxDistance={maxDim * 5}
       />
     </Canvas>
+  );
+}
+
+/** Smoothly flies the camera to a requested preset; user interaction cancels the flight. */
+function CameraRig({
+  preset, goalRef, controlsRef, centroid, topY, camDist,
+}: {
+  preset: { kind: ViewPresetKind; nonce: number } | null;
+  goalRef: MutableRefObject<CameraGoal | null>;
+  controlsRef: MutableRefObject<OrbitControlsImpl | null>;
+  centroid: Point;
+  topY: number;
+  camDist: number;
+}) {
+  const camera = useThree((s) => s.camera);
+
+  useEffect(() => {
+    if (!preset) return;
+    const tgt = new THREE.Vector3(centroid.x, topY / 3, -centroid.y);
+    let pos: THREE.Vector3;
+    if (preset.kind === "top") {
+      // Slight z offset keeps OrbitControls away from the polar singularity.
+      pos = new THREE.Vector3(centroid.x, camDist * 1.5, -centroid.y + camDist * 0.02);
+      tgt.setY(0);
+    } else if (preset.kind === "front") {
+      pos = new THREE.Vector3(centroid.x, Math.max(topY * 0.45, camDist * 0.12), -centroid.y + camDist * 1.2);
+    } else {
+      pos = new THREE.Vector3(centroid.x + camDist * 0.85, camDist * 0.7, -centroid.y + camDist);
+    }
+    goalRef.current = { pos, tgt };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.nonce, preset?.kind]);
+
+  useFrame((_, delta) => {
+    const g = goalRef.current;
+    const controls = controlsRef.current;
+    if (!g || !controls) return;
+    // Time-based damping so the flight speed is framerate-independent.
+    const k = 1 - Math.exp(-5.5 * Math.min(delta, 0.1));
+    camera.position.lerp(g.pos, k);
+    controls.target.lerp(g.tgt, k);
+    if (camera.position.distanceTo(g.pos) < 0.1) {
+      camera.position.copy(g.pos);
+      controls.target.copy(g.tgt);
+      goalRef.current = null;
+    }
+    controls.update();
+  });
+
+  return null;
+}
+
+/** Exposes a render-and-capture function so the tab can offer a PNG download. */
+function CaptureBridge({ captureRef }: { captureRef: MutableRefObject<(() => string) | null> }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    captureRef.current = () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL("image/png");
+    };
+    return () => { captureRef.current = null; };
+  }, [gl, scene, camera, captureRef]);
+  return null;
+}
+
+function HeightDimension({
+  x, z, topY, boundaries, maxDim,
+}: {
+  x: number;
+  z: number;
+  topY: number;
+  boundaries: number[];
+  maxDim: number;
+}) {
+  const tick = Math.max(0.6, maxDim * 0.015);
+  const color = "#8a8a8a";
+  return (
+    <>
+      <Line points={[[x, 0, z], [x, topY, z]]} color={color} lineWidth={1} />
+      {boundaries.map((y, i) => (
+        <Line key={`tick-${i}`} points={[[x - tick, y, z], [x + tick, y, z]]} color={color} lineWidth={1} />
+      ))}
+      <Html position={[x, topY, z]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+        <div className="px-1.5 py-0.5 -translate-y-4 bg-[#0e0e0e]/85 text-[9.5px] font-semibold tabular-nums tracking-[0.08em] text-[#f6f4ee] whitespace-nowrap shadow-sm">
+          +{topY.toFixed(1)} m
+        </div>
+      </Html>
+    </>
   );
 }
 
@@ -188,38 +382,40 @@ function FloorRing({
   hole?: Point[];
   emphasis: boolean;
 }) {
-  const color = emphasis ? "#0a0a0a" : "#2a3525";
-  const width = emphasis ? 2.6 : 1.4;
-  const opacity = emphasis ? 0.95 : 0.7;
-  const ringPoints = (poly: Point[]): [number, number, number][] => {
-    const r: [number, number, number][] = poly.map((p) => [p.x, y, -p.y] as [number, number, number]);
-    r.push([poly[0].x, y, -poly[0].y]);
+  const color = emphasis ? "#1c2417" : "#2a3525";
+  const width = emphasis ? 2 : 1;
+  const opacity = emphasis ? 0.85 : 0.45;
+  // Push the ring slightly outside the facade (or inside for holes) so it
+  // hugs the visible surface without z-fighting, and stays depth-tested —
+  // rings read as facade floor lines instead of an x-ray overlay.
+  const ringPoints = (poly: Point[], grow: number): [number, number, number][] => {
+    const c = polygonCentroid(poly);
+    const shifted = poly.map((p) => {
+      const dx = p.x - c.x;
+      const dy = p.y - c.y;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / len) * grow, y: p.y + (dy / len) * grow };
+    });
+    const r: [number, number, number][] = shifted.map((p) => [p.x, y, -p.y] as [number, number, number]);
+    r.push([shifted[0].x, y, -shifted[0].y]);
     return r;
   };
-  // depthTest:false + high renderOrder makes the rings draw on top of the
-  // building mesh, so floor markers don't disappear into the solid volume.
   return (
     <>
       <Line
-        points={ringPoints(polygon)}
+        points={ringPoints(polygon, 0.08)}
         color={color}
         lineWidth={width}
         transparent
         opacity={opacity}
-        depthTest={false}
-        depthWrite={false}
-        renderOrder={2}
       />
       {hole && hole.length >= 3 && (
         <Line
-          points={ringPoints(hole)}
+          points={ringPoints(hole, -0.08)}
           color={color}
           lineWidth={width}
           transparent
           opacity={opacity}
-          depthTest={false}
-          depthWrite={false}
-          renderOrder={2}
         />
       )}
     </>
@@ -258,13 +454,13 @@ function FrontMarker({ plot }: { plot: Point[] }) {
 function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {
   switch (kind) {
     case "ground":
-      return { fill: "#8a9a76", edge: "#3a4a30", opacity: 1 };
+      return { fill: "#8a9a76", edge: "#3a4a30", opacity: 1, roughness: 0.75 };
     case "podium":
-      return { fill: "#a3b08a", edge: "#3a4a30", opacity: 1 };
+      return { fill: "#a3b08a", edge: "#3a4a30", opacity: 1, roughness: 0.75 };
     case "basement":
-      return { fill: "#bdb9ad", edge: "#5a564c", opacity: 0.6 };
+      return { fill: "#bdb9ad", edge: "#5a564c", opacity: 0.55, roughness: 0.9 };
     case "tower":
     default:
-      return { fill: "#647d57", edge: "#33422e", opacity: 1 };
+      return { fill: "#647d57", edge: "#33422e", opacity: 1, roughness: 0.5 };
   }
 }

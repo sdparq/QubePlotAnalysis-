@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt2 } from "@/lib/format";
 import PlanTrace from "./plan-trace";
@@ -135,30 +135,53 @@ export default function MassingTab() {
 
   const totalH = groundH + podiumH + towerH;
 
-  const sceneVolumes: Volume[] = useMemo(() => {
+  const { sceneVolumes, volumeLabels } = useMemo(() => {
     const out: Volume[] = [];
+    const labels: string[] = [];
     if (basementH > 0 && plotPoly.length >= 3) {
       out.push({ polygon: plotPoly, fromY: -basementH, toY: 0, kind: "basement" });
+      labels.push(basementCount > 1 ? `Basement · ${basementCount}F` : "Basement");
     }
     let y = 0;
     if (groundH > 0 && groundPoly.length >= 3) {
       out.push({ polygon: groundPoly, fromY: y, toY: y + groundH, kind: "ground" });
+      labels.push(groundCount > 1 ? `Ground · ${groundCount}F` : "Ground");
       y += groundH;
     }
     if (podiumH > 0 && podiumPoly.length >= 3) {
       out.push({ polygon: podiumPoly, fromY: y, toY: y + podiumH, kind: "podium" });
+      labels.push(podiumCount > 1 ? `Podium · ${podiumCount}F` : "Podium");
       y += podiumH;
     }
     if (towerH > 0 && towerPoly.length >= 3) {
       out.push({ polygon: towerPoly, fromY: y, toY: y + towerH, kind: "tower" });
+      labels.push(`Tower · ${towerCount}F`);
     }
-    return out;
-  }, [plotPoly, groundPoly, podiumPoly, towerPoly, basementH, groundH, podiumH, towerH]);
+    return { sceneVolumes: out, volumeLabels: labels };
+  }, [plotPoly, groundPoly, podiumPoly, towerPoly, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, towerCount]);
 
   const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * towerCount;
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
 
   const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
+  const [viewPreset, setViewPreset] = useState<{ kind: "iso" | "front" | "top"; nonce: number } | null>(null);
+  const [autoRotate, setAutoRotate] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const captureRef = useRef<(() => string) | null>(null);
+
+  function requestPreset(kind: "iso" | "front" | "top") {
+    setAutoRotate(false);
+    setViewPreset((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1 }));
+  }
+
+  function downloadSnapshot() {
+    const data = captureRef.current?.();
+    if (!data) return;
+    const a = document.createElement("a");
+    a.href = data;
+    a.download = `${project.name.replace(/\s+/g, "-").toLowerCase() || "project"}-massing.png`;
+    a.click();
+  }
   const hasGeoCoords =
     typeof project.latitude === "number" && typeof project.longitude === "number"
       && project.latitude !== 0 && project.longitude !== 0;
@@ -348,6 +371,11 @@ export default function MassingTab() {
                   floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
                   showFrontMarker={mode === "rectangular"}
                   edgeColors={edgeColors}
+                  volumeLabels={volumeLabels}
+                  showAnnotations={showAnnotations}
+                  viewPreset={viewPreset}
+                  autoRotate={autoRotate}
+                  captureRef={captureRef}
                 />
               )}
               <div className="absolute top-2 right-2 inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
@@ -369,6 +397,39 @@ export default function MassingTab() {
               {!canShowContext && (
                 <div className="absolute top-12 right-2 max-w-[260px] bg-amber-50/95 border border-amber-200 px-3 py-2 text-[10.5px] text-amber-900 leading-snug shadow-sm">
                   Set latitude / longitude in <strong>Setup</strong> to enable the in-context view.
+                </div>
+              )}
+              {viewMode === "studio" && (
+                <div className="absolute bottom-2 left-2 flex items-stretch gap-1.5 flex-wrap">
+                  <div className="inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
+                    {([["iso", "Iso"], ["front", "Front"], ["top", "Top"]] as const).map(([kind, label]) => (
+                      <button
+                        key={kind}
+                        onClick={() => requestPreset(kind)}
+                        className="px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 transition-colors"
+                        title={`${label} view`}
+                      >{label}</button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setAutoRotate((v) => !v)}
+                    className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
+                      autoRotate ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
+                    }`}
+                    title="Slow turntable rotation"
+                  >⟳ Orbit</button>
+                  <button
+                    onClick={() => setShowAnnotations((v) => !v)}
+                    className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
+                      showAnnotations ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
+                    }`}
+                    title="Toggle height dimension and tier labels"
+                  >Dims</button>
+                  <button
+                    onClick={downloadSnapshot}
+                    className="px-3 py-1.5 border border-ink-200 bg-white/90 backdrop-blur-sm text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 shadow-sm transition-colors"
+                    title="Download the current view as a PNG image"
+                  >↓ PNG</button>
                 </div>
               )}
             </div>
@@ -429,13 +490,17 @@ export default function MassingTab() {
               onPatch={patch}
             />
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-ink-200 pt-3">
-              <Stat label="Plot area" value={`${fmt2(plotPolyArea)} m²`} />
-              <Stat label="Tower footprint" value={`${fmt2(towerArea)} m²`} />
-              <Stat label="Height above ground" value={`${fmt2(totalH)} m`} />
-              <Stat label="Basement depth" value={`${fmt2(basementH)} m`} />
-              <Stat label="Σ Volume GFA" value={fmt2(totalVolumeGFA)} />
-              <Stat label="FAR" value={computedFar.toFixed(2)} />
+            <div className="border border-ink-200">
+              <div className="grid grid-cols-2 divide-x divide-ink-200 border-b border-ink-200">
+                <HeroStat label="Height above ground" value={fmt2(totalH)} unit="m" />
+                <HeroStat label="FAR (volume)" value={computedFar.toFixed(2)} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm p-3 bg-bone-50/40">
+                <Stat label="Plot area" value={`${fmt2(plotPolyArea)} m²`} />
+                <Stat label="Tower footprint" value={`${fmt2(towerArea)} m²`} />
+                <Stat label="Basement depth" value={`${fmt2(basementH)} m`} />
+                <Stat label="Σ Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} />
+              </div>
             </div>
 
             <Collapsible
@@ -844,6 +909,18 @@ function NumInput({
         }
       }}
     />
+  );
+}
+
+function HeroStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div className="px-3 py-2.5">
+      <div className="eyebrow text-ink-500 text-[9.5px] mb-0.5">{label}</div>
+      <div className="text-ink-900 tabular-nums text-xl font-semibold leading-none">
+        {value}
+        {unit && <span className="text-[12px] font-normal text-ink-500 ml-1">{unit}</span>}
+      </div>
+    </div>
   );
 }
 
