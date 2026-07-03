@@ -1,14 +1,22 @@
 "use client";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid, Edges, Line, ContactShadows, Html } from "@react-three/drei";
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Point } from "@/lib/geom";
-import { polygonBBox, polygonCentroid } from "@/lib/geom";
+import { isCounterClockwise, offsetPolygon, polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 
 export type ViewPresetKind = "iso" | "front" | "top";
+
+/** Resolved parameters for the modelled residential facade. */
+export interface FacadeParams {
+  mode: "massing" | "residential";
+  panelWidthM: number;
+  balconyDepthM: number;
+  balconyEveryNBays: number;
+}
 
 export interface SceneProps {
   plot: Point[];           // Plot polygon in plot-local metres
@@ -32,6 +40,8 @@ export interface SceneProps {
   autoRotate?: boolean;
   /** Receives a function that renders a frame and returns it as a PNG data-URL. */
   captureRef?: MutableRefObject<(() => string) | null>;
+  /** Facade treatment; "residential" models slabs, glazing, mullions and balconies on the tower. */
+  facade?: FacadeParams;
 }
 
 interface CameraGoal {
@@ -43,7 +53,9 @@ export default function MassingScene(props: SceneProps) {
   const {
     plot, buildable, volumes, floorHeight, showFrontMarker, edgeColors,
     volumeLabels, showAnnotations = true, viewPreset, autoRotate, captureRef,
+    facade,
   } = props;
+  const facadeActive = facade?.mode === "residential";
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -77,7 +89,7 @@ export default function MassingScene(props: SceneProps) {
 
   const floorRings = useMemo(() => {
     if (floorHeight <= 0 || volumes.length === 0) return [];
-    const out: { y: number; polygon: Point[]; hole?: Point[]; emphasis: boolean }[] = [];
+    const out: { y: number; polygon: Point[]; hole?: Point[]; emphasis: boolean; kind?: Volume["kind"] }[] = [];
     for (const v of volumes) {
       // Floor levels inside this volume, excluding top and bottom (those are mesh edges)
       const startFloor = Math.floor(v.fromY / floorHeight) + 1;
@@ -85,7 +97,7 @@ export default function MassingScene(props: SceneProps) {
       for (let f = startFloor; f <= endFloor; f++) {
         const y = f * floorHeight;
         if (y <= v.fromY + 1e-3 || y >= v.toY - 1e-3) continue;
-        out.push({ y, polygon: v.polygon, hole: v.hole, emphasis: f % 5 === 0 });
+        out.push({ y, polygon: v.polygon, hole: v.hole, emphasis: f % 5 === 0, kind: v.kind });
       }
     }
     return out;
@@ -198,6 +210,19 @@ export default function MassingScene(props: SceneProps) {
         const shape = volumeShapes[i];
         const depth = v.toY - v.fromY;
         if (!shape || depth <= 0) return null;
+        if (facadeActive && facade && v.kind === "tower") {
+          return (
+            <ResidentialFacade
+              key={`fac-${i}`}
+              polygon={v.polygon}
+              hole={v.hole}
+              fromY={v.fromY}
+              toY={v.toY}
+              floorHeight={floorHeight}
+              params={facade}
+            />
+          );
+        }
         const colours = colourForKind(v.kind);
         return (
           <mesh
@@ -222,10 +247,13 @@ export default function MassingScene(props: SceneProps) {
         );
       })}
 
-      {/* Floor-level rings around each volume — emphasised every 5 floors */}
-      {floorRings.map((r, i) => (
-        <FloorRing key={`fr-${i}`} y={r.y} polygon={r.polygon} hole={r.hole} emphasis={r.emphasis} />
-      ))}
+      {/* Floor-level rings around each volume — emphasised every 5 floors.
+          The modelled facade draws real slabs on the tower, so its rings are skipped. */}
+      {floorRings
+        .filter((r) => !(facadeActive && r.kind === "tower"))
+        .map((r, i) => (
+          <FloorRing key={`fr-${i}`} y={r.y} polygon={r.polygon} hole={r.hole} emphasis={r.emphasis} />
+        ))}
 
       {/* Annotations: height dimension line + tier chips */}
       {showAnnotations && topY > 0 && (
@@ -448,6 +476,213 @@ function FrontMarker({ plot }: { plot: Point[] }) {
       <coneGeometry args={[size, size * 1.6, 3]} />
       <meshBasicMaterial color="#647d57" />
     </mesh>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Parametric residential facade                       */
+/* -------------------------------------------------------------------------- */
+
+const SLAB_T = 0.22;          // floor slab thickness (m)
+const SLAB_LIP = 0.12;        // slab projection beyond the facade line (m)
+const GLASS_INSET = 0.16;     // curtain-wall setback behind the facade line (m)
+const MULLION_W = 0.12;       // vertical mullion section (m)
+const RAIL_H = 1.05;          // balustrade height (m)
+
+/**
+ * Models a residential tower facade from the massing polygon: floor slabs,
+ * a recessed glazing body, vertical mullions on a parametric bay rhythm and
+ * balconies on every Nth bay. All repeated elements are instanced.
+ */
+function ResidentialFacade({
+  polygon, hole, fromY, toY, floorHeight, params,
+}: {
+  polygon: Point[];
+  hole?: Point[];
+  fromY: number;
+  toY: number;
+  floorHeight: number;
+  params: FacadeParams;
+}) {
+  const { panelWidthM, balconyDepthM, balconyEveryNBays } = params;
+  const height = toY - fromY;
+  const floors = Math.max(1, Math.round(height / Math.max(0.1, floorHeight)));
+  const floorH = height / floors;
+
+  const glassShape = useMemo(() => {
+    const inset = offsetPolygon(polygon, polygon.map(() => GLASS_INSET));
+    const s = polyToShape(inset.length >= 3 ? inset : polygon);
+    if (s && hole && hole.length >= 3) {
+      const grown = offsetPolygon(hole, hole.map(() => -GLASS_INSET));
+      const src = (grown.length >= 3 ? grown : hole).slice().reverse();
+      const path = new THREE.Path();
+      path.moveTo(src[0].x, src[0].y);
+      for (let i = 1; i < src.length; i++) path.lineTo(src[i].x, src[i].y);
+      path.closePath();
+      s.holes.push(path);
+    }
+    return s;
+  }, [polygon, hole]);
+
+  const slabShape = useMemo(() => {
+    const grown = offsetPolygon(polygon, polygon.map(() => -SLAB_LIP));
+    const s = polyToShape(grown.length >= 3 ? grown : polygon);
+    if (s && hole && hole.length >= 3) {
+      const shrunk = offsetPolygon(hole, hole.map(() => SLAB_LIP));
+      const src = (shrunk.length >= 3 ? shrunk : hole).slice().reverse();
+      const path = new THREE.Path();
+      path.moveTo(src[0].x, src[0].y);
+      for (let i = 1; i < src.length; i++) path.lineTo(src[i].x, src[i].y);
+      path.closePath();
+      s.holes.push(path);
+    }
+    return s;
+  }, [polygon, hole]);
+
+  const { mullions, balconySlabs, rails } = useMemo(() => {
+    const mullions: THREE.Matrix4[] = [];
+    const balconySlabs: THREE.Matrix4[] = [];
+    const rails: THREE.Matrix4[] = [];
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+
+    const ccw = isCounterClockwise(polygon);
+    const outSign = ccw ? 1 : -1; // outward normal = (uy,-ux) for CCW polygons (local xy)
+    const panelW = Math.max(1, panelWidthM);
+    const everyN = Math.max(1, Math.round(balconyEveryNBays));
+    const mullionH = floorH - SLAB_T;
+    let bayCounter = 0;
+
+    for (let e = 0; e < polygon.length; e++) {
+      const a = polygon[e];
+      const b = polygon[(e + 1) % polygon.length];
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      const len = Math.hypot(ex, ey);
+      if (len < 0.8) continue;
+      const ux = ex / len;
+      const uy = ey / len;
+      const nx = uy * outSign;
+      const ny = -ux * outSign;
+      // Yaw that aligns the box's local X with the edge direction in world space.
+      const yaw = Math.atan2(uy, ux);
+      const bays = Math.max(1, Math.round(len / panelW));
+      const bayLen = len / bays;
+
+      // Vertical mullions at every bay division (skip the end vertex — the
+      // next edge contributes its own corner mullion).
+      for (let k = 0; k < bays; k++) {
+        const px = a.x + ux * bayLen * k + nx * 0.02;
+        const py = a.y + uy * bayLen * k + ny * 0.02;
+        for (let f = 0; f < floors; f++) {
+          const yMid = fromY + f * floorH + SLAB_T + mullionH / 2;
+          pos.set(px, yMid, -py);
+          quat.setFromAxisAngle(yAxis, yaw);
+          scale.set(MULLION_W, mullionH, MULLION_W);
+          mullions.push(new THREE.Matrix4().compose(pos, quat, scale));
+        }
+      }
+
+      // Balconies on every Nth bay.
+      if (balconyDepthM > 0.05) {
+        for (let k = 0; k < bays; k++) {
+          const isBalconyBay = bayCounter % everyN === 0;
+          bayCounter++;
+          if (!isBalconyBay) continue;
+          const cx = a.x + ux * bayLen * (k + 0.5);
+          const cy = a.y + uy * bayLen * (k + 0.5);
+          const w = bayLen * 0.9;
+          for (let f = 1; f < floors; f++) {
+            const yBase = fromY + f * floorH;
+            // slab
+            pos.set(cx + nx * (balconyDepthM / 2), yBase + 0.07, -(cy + ny * (balconyDepthM / 2)));
+            quat.setFromAxisAngle(yAxis, yaw);
+            scale.set(w, 0.14, balconyDepthM);
+            balconySlabs.push(new THREE.Matrix4().compose(pos, quat, scale));
+            // glass balustrade on the outer edge
+            pos.set(cx + nx * (balconyDepthM - 0.03), yBase + 0.14 + RAIL_H / 2, -(cy + ny * (balconyDepthM - 0.03)));
+            scale.set(w, RAIL_H, 0.05);
+            rails.push(new THREE.Matrix4().compose(pos, quat, scale));
+          }
+        }
+      }
+    }
+    return { mullions, balconySlabs, rails };
+  }, [polygon, fromY, floors, floorH, panelWidthM, balconyDepthM, balconyEveryNBays]);
+
+  return (
+    <group>
+      {/* Recessed glazing body — stops under the roof slab so the roof reads opaque */}
+      {glassShape && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, fromY, 0]} castShadow receiveShadow>
+          <extrudeGeometry args={[glassShape, { depth: Math.max(0.1, height - SLAB_T), bevelEnabled: false }]} />
+          <meshPhysicalMaterial
+            color="#5e7a70"
+            roughness={0.18}
+            metalness={0.35}
+            clearcoat={0.6}
+            clearcoatRoughness={0.25}
+            transparent
+            opacity={0.82}
+          />
+        </mesh>
+      )}
+      {/* Floor slabs (including roof slab) */}
+      {slabShape &&
+        Array.from({ length: floors + 1 }, (_, i) => {
+          const y = i === floors ? toY - SLAB_T : fromY + i * floorH;
+          return (
+            <mesh key={`slab-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, y, 0]} castShadow receiveShadow>
+              <extrudeGeometry args={[slabShape, { depth: SLAB_T, bevelEnabled: false }]} />
+              <meshStandardMaterial color="#ddd8ca" roughness={0.85} metalness={0} />
+            </mesh>
+          );
+        })}
+      <InstancedBoxes matrices={mullions} color="#e9e5d8" roughness={0.7} />
+      <InstancedBoxes matrices={balconySlabs} color="#ddd8ca" roughness={0.85} />
+      <InstancedBoxes matrices={rails} color="#9fb7ae" roughness={0.15} metalness={0.2} opacity={0.45} />
+    </group>
+  );
+}
+
+/** Renders a set of unit boxes with per-instance transforms. */
+function InstancedBoxes({
+  matrices, color, roughness = 0.8, metalness = 0, opacity = 1,
+}: {
+  matrices: THREE.Matrix4[];
+  color: string;
+  roughness?: number;
+  metalness?: number;
+  opacity?: number;
+}) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+    mesh.count = matrices.length;
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [matrices]);
+  if (matrices.length === 0) return null;
+  return (
+    <instancedMesh
+      key={matrices.length}
+      ref={ref}
+      args={[undefined, undefined, matrices.length]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry />
+      <meshStandardMaterial
+        color={color}
+        roughness={roughness}
+        metalness={metalness}
+        transparent={opacity < 1}
+        opacity={opacity}
+      />
+    </instancedMesh>
   );
 }
 

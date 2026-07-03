@@ -93,38 +93,9 @@ export default function SetupTab() {
               onChange={(v) => patch({ targetGFA: v > 0 ? v : undefined })}
             />
           </Field>
-          <Field label="Latitude">
-            <NumInput
-              value={project.latitude ?? 0}
-              step={0.0001}
-              onChange={(v) => patch({ latitude: v !== 0 ? v : undefined })}
-            />
-          </Field>
-          <Field label="Longitude">
-            <NumInput
-              value={project.longitude ?? 0}
-              step={0.0001}
-              onChange={(v) => patch({ longitude: v !== 0 ? v : undefined })}
-            />
-          </Field>
-          <Field label="North heading (° clockwise of +Y)">
-            <NumInput
-              value={project.northHeadingDeg ?? 0}
-              step={1}
-              onChange={(v) => patch({ northHeadingDeg: v })}
-            />
-          </Field>
-          <Field label="Ground elevation override (m)">
-            <NumInput
-              value={project.groundElevationM ?? 0}
-              step={1}
-              onChange={(v) => patch({ groundElevationM: v !== 0 ? v : undefined })}
-            />
-          </Field>
         </div>
         <p className="text-[11px] text-ink-500 mt-3">
-          Target GFA powers the percentage input mode in Common Areas (leave 0 if you prefer m²). Latitude / longitude
-          unlock the In-context Massing view with a basemap and the surrounding buildings around the plot.
+          Target GFA powers the percentage input mode in Common Areas (leave 0 if you prefer m²).
         </p>
       </div>
 

@@ -194,48 +194,20 @@ export interface Project {
   commonAreasInputMode?: "absolute" | "percentage";
   /** Real-estate economic analysis configuration. */
   economic?: EconomicConfig;
-  /** Geographic location of the plot, used for the in-context Massing view (basemap + surrounding buildings). */
-  latitude?: number;
-  longitude?: number;
-  /** Heading of the plot's local +y axis relative to true north, in degrees clockwise. 0 = +y points north. */
-  northHeadingDeg?: number;
-  /** Optional manual ground-elevation override (m above WGS84 ellipsoid). When unset, the in-context viewer auto-fetches elevation from Open-Meteo. */
-  groundElevationM?: number;
-  /** Per-OSM-way height overrides (m) for surrounding buildings in the In-context view */
-  nearbyHeightOverrides?: Record<string, number>;
-  /** OSM way ids of surrounding buildings the user wants hidden from the In-context view */
-  nearbyHidden?: string[];
-  /** Tile basemap style for the In-context view */
-  contextMapStyle?: "topo" | "satellite" | "schematic";
-  /** Manual building XZ offset in metres (east/north) for fine alignment with the basemap. */
-  contextOffsetXM?: number;
-  contextOffsetZM?: number;
-  /** Manually defined neighbouring buildings (for plots not yet in OSM) */
-  customNeighbors?: CustomNeighbor[];
+  /** Parametric facade treatment for the Massing viewer. */
+  facade?: FacadeConfig;
 }
 
-/** A user-drawn neighbouring building rendered as one box (podium) plus an optional tower on top. */
-export interface CustomNeighbor {
-  id: string;
-  name?: string;
-  /** World XZ position of the podium centre, in metres. */
-  centerX: number;
-  centerZ: number;
-  /** Rotation of the building around +Y axis, degrees. 0 = aligned with world axes. */
-  rotationDeg: number;
-  /** Podium / base box dimensions (m). */
-  widthM: number;
-  depthM: number;
-  heightM: number;
-  /** Optional tower box stacked on top of the podium. */
-  tower?: {
-    widthM: number;
-    depthM: number;
-    heightM: number;
-    /** Tower offset from podium centre, in the building's own rotated frame (m). */
-    offsetXM?: number;
-    offsetZM?: number;
-  };
+/** Parameters for the modelled residential facade in the Massing viewer. */
+export interface FacadeConfig {
+  /** "massing" = flat volumes (default); "residential" = modelled facade with slabs, glazing, mullions and balconies. */
+  mode?: "massing" | "residential";
+  /** Vertical mullion spacing along the facade (m). Default 3.2. */
+  panelWidthM?: number;
+  /** Balcony slab depth (m). 0 hides balconies. Default 1.8. */
+  balconyDepthM?: number;
+  /** A balcony is placed on every Nth facade bay. Default 2. */
+  balconyEveryNBays?: number;
 }
 
 export interface FloorSection {

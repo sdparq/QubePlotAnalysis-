@@ -1,8 +1,9 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt2 } from "@/lib/format";
+import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
 import PlanTrace from "./plan-trace";
 import {
   type Point,
@@ -29,17 +30,11 @@ const MassingScene = dynamic(() => import("./massing-scene"), {
   ),
 });
 
-const MassingContextScene = dynamic(() => import("./massing-context-scene"), {
-  ssr: false,
-  loading: () => (
-    <div className="aspect-[4/3] border border-ink-200 bg-bone-100 flex items-center justify-center">
-      <div className="text-center">
-        <div className="mx-auto w-8 h-8 border-2 border-qube-500 border-t-transparent rounded-full animate-spin mb-3" />
-        <div className="text-xs text-ink-500 uppercase tracking-[0.18em]">Loading 3D Tiles…</div>
-      </div>
-    </div>
-  ),
-});
+type AiStyle = "scheme" | "hyperreal";
+const PROMPT_FOR: Record<AiStyle, string> = {
+  scheme: DEFAULT_SCHEME_PROMPT,
+  hyperreal: DEFAULT_HYPERREAL_PROMPT,
+};
 
 /** Resolve a per-edge setback array for a tier:
  *   - if the persisted perEdge array matches the plot polygon length, use it
@@ -163,11 +158,22 @@ export default function MassingTab() {
   const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * towerCount;
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
 
-  const [viewMode, setViewMode] = useState<"studio" | "context">("studio");
   const [viewPreset, setViewPreset] = useState<{ kind: "iso" | "front" | "top"; nonce: number } | null>(null);
   const [autoRotate, setAutoRotate] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const captureRef = useRef<(() => string) | null>(null);
+
+  // Facade parameters, persisted per project with sensible defaults.
+  const facadeParams = {
+    mode: project.facade?.mode ?? "massing",
+    panelWidthM: project.facade?.panelWidthM ?? 3.2,
+    balconyDepthM: project.facade?.balconyDepthM ?? 1.8,
+    balconyEveryNBays: project.facade?.balconyEveryNBays ?? 2,
+  } as const;
+
+  function patchFacade(partial: Partial<NonNullable<typeof project.facade>>) {
+    patch({ facade: { ...project.facade, ...partial } });
+  }
 
   function requestPreset(kind: "iso" | "front" | "top") {
     setAutoRotate(false);
@@ -182,10 +188,71 @@ export default function MassingTab() {
     a.download = `${project.name.replace(/\s+/g, "-").toLowerCase() || "project"}-massing.png`;
     a.click();
   }
-  const hasGeoCoords =
-    typeof project.latitude === "number" && typeof project.longitude === "number"
-      && project.latitude !== 0 && project.longitude !== 0;
-  const canShowContext = hasGeoCoords;
+
+  // ---- AI render (Gemini image-to-image over the studio capture) ----
+  const [apiKey, setApiKey] = useState<string>("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("qube.gemini.apiKey");
+    if (saved) setApiKey(saved);
+  }, []);
+  const [keyDialog, setKeyDialog] = useState<{ open: boolean; draft: string }>({ open: false, draft: "" });
+  const persistKey = useCallback((k: string) => {
+    setApiKey(k);
+    try { window.localStorage.setItem("qube.gemini.apiKey", k); } catch {}
+  }, []);
+  const [aiRendering, setAiRendering] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<{ imageDataUrl: string; note?: string; style: AiStyle } | null>(null);
+  const [aiStyle, setAiStyle] = useState<AiStyle>("hyperreal");
+  const [aiPrompts, setAiPrompts] = useState<Record<AiStyle, string>>({
+    scheme: DEFAULT_SCHEME_PROMPT,
+    hyperreal: DEFAULT_HYPERREAL_PROMPT,
+  });
+
+  /** Exact storey counts and proportions, prepended to the prompt so the
+   *  model doesn't invent floors or warp the silhouette. */
+  const geometryFacts = useMemo((): string => {
+    const totalAbove = groundCount + podiumCount + towerCount;
+    const lines: string[] = [
+      "GEOMETRY FACTS (the project building in the input image — preserve EXACTLY):",
+      `- ${totalAbove} floors above ground in total.`,
+      `- Ground: ${groundCount} floor(s) × ${groundHeightM.toFixed(1)} m height.`,
+    ];
+    if (podiumCount > 0) {
+      lines.push(`- Podium: ${podiumCount} floor(s) × ${podiumHeightM.toFixed(1)} m, sitting on top of the ground.`);
+    }
+    lines.push(`- Tower (residential): ${towerCount} typical floor(s) × ${towerHeightM.toFixed(1)} m. Draw exactly ${towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
+    if (basementCount > 0) {
+      lines.push(`- ${basementCount} basement(s) below ground — do NOT show them above ground.`);
+    }
+    lines.push(`- Total height above ground: ${totalH.toFixed(1)} m.`);
+    lines.push(`- Tower footprint area: ${Math.round(towerArea).toLocaleString("en-US")} m².`);
+    lines.push("");
+    lines.push("CAMERA: reuse the EXACT camera angle, framing, zoom level and crop of the input image. Do not pan, do not zoom, do not change orientation. The project's silhouette in the output must overlay 1:1 with the silhouette in the input.");
+    return lines.join("\n");
+  }, [groundCount, groundHeightM, podiumCount, podiumHeightM, towerCount, towerHeightM, basementCount, totalH, towerArea]);
+
+  const handleAiRender = useCallback(async () => {
+    if (!apiKey) {
+      setKeyDialog({ open: true, draft: "" });
+      return;
+    }
+    const png = captureRef.current?.();
+    if (!png) { setAiError("Could not capture the 3D viewer."); return; }
+    const basePrompt = (aiPrompts[aiStyle] ?? PROMPT_FOR[aiStyle]).trim() || PROMPT_FOR[aiStyle];
+    const prompt = `${geometryFacts}\n\n${basePrompt}`;
+    setAiRendering(true);
+    setAiError(null);
+    try {
+      const out = await renderSchemeWithGemini(apiKey, png, prompt);
+      setAiResult({ imageDataUrl: out.imageDataUrl, note: out.textNote, style: aiStyle });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiRendering(false);
+    }
+  }, [apiKey, aiPrompts, aiStyle, geometryFacts]);
 
   // ---- plot editor handlers ----
   function setPlotMode(next: "rectangular" | "polygon") {
@@ -260,183 +327,52 @@ export default function MassingTab() {
         <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
           <div className="grid gap-4 content-start">
             <div className="relative aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
-              {viewMode === "context" && canShowContext ? (
-                <MassingContextScene
-                  plot={plotPoly}
-                  buildable={towerPoly}
-                  volumes={sceneVolumes}
-                  primaryFootprint={towerPoly}
-                  floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
-                  edgeColors={edgeColors}
-                  building={{
-                    basementCount,
-                    basementHeightM,
-                    groundCount,
-                    groundHeightM,
-                    podiumCount,
-                    podiumHeightM,
-                    towerCount,
-                    towerHeightM,
-                    totalHeightAboveGroundM: totalH,
-                    towerFootprintM2: towerArea,
-                  }}
-                  latitude={project.latitude!}
-                  longitude={project.longitude!}
-                  northHeadingDeg={project.northHeadingDeg ?? 0}
-                  buildingYOffsetM={project.groundElevationM ?? 0}
-                  buildingXOffsetM={project.contextOffsetXM ?? 0}
-                  buildingZOffsetM={project.contextOffsetZM ?? 0}
-                  mapStyle={
-                    // Older saves may carry the removed "photoreal" style — fall back to topo.
-                    project.contextMapStyle === "topo" || project.contextMapStyle === "satellite" || project.contextMapStyle === "schematic"
-                      ? project.contextMapStyle
-                      : "topo"
-                  }
-                  nearbyHeightOverrides={project.nearbyHeightOverrides}
-                  nearbyHidden={project.nearbyHidden}
-                  customNeighbors={project.customNeighbors}
-                  onSetHeight={(id, h) => {
-                    const next = { ...(project.nearbyHeightOverrides ?? {}) };
-                    next[id] = h;
-                    patch({ nearbyHeightOverrides: next });
-                  }}
-                  onToggleHide={(id, hide) => {
-                    const cur = new Set(project.nearbyHidden ?? []);
-                    if (hide) cur.add(id);
-                    else cur.delete(id);
-                    patch({ nearbyHidden: Array.from(cur) });
-                  }}
-                  onSetMapStyle={(s) => patch({ contextMapStyle: s })}
-                  onSetBuildingOffset={(x, z) => patch({ contextOffsetXM: x, contextOffsetZM: z })}
-                  onAddCustomNeighbor={(centerX, centerZ) => {
-                    const id = `cn-${Date.now()}`;
-                    const next = [...(project.customNeighbors ?? []), {
-                      id,
-                      centerX: Number(centerX.toFixed(2)),
-                      centerZ: Number(centerZ.toFixed(2)),
-                      rotationDeg: 0,
-                      widthM: 30,
-                      depthM: 30,
-                      heightM: 18,
-                    }];
-                    patch({ customNeighbors: next });
-                    return id;
-                  }}
-                  onUpdateCustomNeighbor={(id, partial) => {
-                    const next = (project.customNeighbors ?? []).map((n) =>
-                      n.id === id ? { ...n, ...partial } : n,
-                    );
-                    patch({ customNeighbors: next });
-                  }}
-                  onDeleteCustomNeighbor={(id) => {
-                    const next = (project.customNeighbors ?? []).filter((n) => n.id !== id);
-                    patch({ customNeighbors: next });
-                  }}
-                  onDuplicateCustomNeighbor={(id) => {
-                    const src = (project.customNeighbors ?? []).find((n) => n.id === id);
-                    if (!src) return id;
-                    const newId = `cn-${Date.now()}`;
-                    const offset = Math.max(8, src.widthM * 0.6);
-                    const copy = {
-                      ...src,
-                      id: newId,
-                      centerX: Number((src.centerX + offset).toFixed(2)),
-                      centerZ: src.centerZ,
-                      name: src.name ? `${src.name} copy` : undefined,
-                      tower: src.tower ? { ...src.tower } : undefined,
-                    };
-                    patch({ customNeighbors: [...(project.customNeighbors ?? []), copy] });
-                    return newId;
-                  }}
-                  onShuffleTowers={(minH, maxH) => {
-                    const next = (project.customNeighbors ?? []).map((n) => {
-                      if (!n.tower) return n;
-                      const newH = Math.round((minH + Math.random() * (maxH - minH)) * 10) / 10;
-                      const maxOffsetX = Math.max(0, (n.widthM - n.tower.widthM) / 2);
-                      const maxOffsetZ = Math.max(0, (n.depthM - n.tower.depthM) / 2);
-                      return {
-                        ...n,
-                        tower: {
-                          ...n.tower,
-                          heightM: newH,
-                          offsetXM: Number(((Math.random() * 2 - 1) * maxOffsetX).toFixed(2)),
-                          offsetZM: Number(((Math.random() * 2 - 1) * maxOffsetZ).toFixed(2)),
-                        },
-                      };
-                    });
-                    patch({ customNeighbors: next });
-                  }}
-                />
-              ) : (
-                <MassingScene
-                  plot={plotPoly}
-                  buildable={towerPoly}
-                  volumes={sceneVolumes}
-                  primaryFootprint={towerPoly}
-                  floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
-                  showFrontMarker={mode === "rectangular"}
-                  edgeColors={edgeColors}
-                  volumeLabels={volumeLabels}
-                  showAnnotations={showAnnotations}
-                  viewPreset={viewPreset}
-                  autoRotate={autoRotate}
-                  captureRef={captureRef}
-                />
-              )}
-              <div className="absolute top-2 right-2 inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
+              <MassingScene
+                plot={plotPoly}
+                buildable={towerPoly}
+                volumes={sceneVolumes}
+                primaryFootprint={towerPoly}
+                floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
+                showFrontMarker={mode === "rectangular"}
+                edgeColors={edgeColors}
+                volumeLabels={volumeLabels}
+                showAnnotations={showAnnotations}
+                viewPreset={viewPreset}
+                autoRotate={autoRotate}
+                captureRef={captureRef}
+                facade={facadeParams}
+              />
+              <div className="absolute bottom-2 left-2 flex items-stretch gap-1.5 flex-wrap">
+                <div className="inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
+                  {([["iso", "Iso"], ["front", "Front"], ["top", "Top"]] as const).map(([kind, label]) => (
+                    <button
+                      key={kind}
+                      onClick={() => requestPreset(kind)}
+                      className="px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 transition-colors"
+                      title={`${label} view`}
+                    >{label}</button>
+                  ))}
+                </div>
                 <button
-                  onClick={() => setViewMode("studio")}
-                  className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                    viewMode === "studio" ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-50"
+                  onClick={() => setAutoRotate((v) => !v)}
+                  className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
+                    autoRotate ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
                   }`}
-                >Studio</button>
+                  title="Slow turntable rotation"
+                >⟳ Orbit</button>
                 <button
-                  onClick={() => canShowContext && setViewMode("context")}
-                  disabled={!canShowContext}
-                  title={!canShowContext ? "Set latitude / longitude in Setup" : ""}
-                  className={`px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                    viewMode === "context" ? "bg-ink-900 text-bone-100" : canShowContext ? "text-ink-700 hover:bg-bone-50" : "text-ink-300 cursor-not-allowed"
+                  onClick={() => setShowAnnotations((v) => !v)}
+                  className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
+                    showAnnotations ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
                   }`}
-                >In context</button>
+                  title="Toggle height dimension and tier labels"
+                >Dims</button>
+                <button
+                  onClick={downloadSnapshot}
+                  className="px-3 py-1.5 border border-ink-200 bg-white/90 backdrop-blur-sm text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 shadow-sm transition-colors"
+                  title="Download the current view as a PNG image"
+                >↓ PNG</button>
               </div>
-              {!canShowContext && (
-                <div className="absolute top-12 right-2 max-w-[260px] bg-amber-50/95 border border-amber-200 px-3 py-2 text-[10.5px] text-amber-900 leading-snug shadow-sm">
-                  Set latitude / longitude in <strong>Setup</strong> to enable the in-context view.
-                </div>
-              )}
-              {viewMode === "studio" && (
-                <div className="absolute bottom-2 left-2 flex items-stretch gap-1.5 flex-wrap">
-                  <div className="inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
-                    {([["iso", "Iso"], ["front", "Front"], ["top", "Top"]] as const).map(([kind, label]) => (
-                      <button
-                        key={kind}
-                        onClick={() => requestPreset(kind)}
-                        className="px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 transition-colors"
-                        title={`${label} view`}
-                      >{label}</button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setAutoRotate((v) => !v)}
-                    className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
-                      autoRotate ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
-                    }`}
-                    title="Slow turntable rotation"
-                  >⟳ Orbit</button>
-                  <button
-                    onClick={() => setShowAnnotations((v) => !v)}
-                    className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
-                      showAnnotations ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
-                    }`}
-                    title="Toggle height dimension and tier labels"
-                  >Dims</button>
-                  <button
-                    onClick={downloadSnapshot}
-                    className="px-3 py-1.5 border border-ink-200 bg-white/90 backdrop-blur-sm text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 shadow-sm transition-colors"
-                    title="Download the current view as a PNG image"
-                  >↓ PNG</button>
-                </div>
-              )}
             </div>
 
             {project.parcel && (
@@ -489,6 +425,8 @@ export default function MassingTab() {
               onPatch={patch}
             />
 
+            <FacadePanel params={facadeParams} onPatch={patchFacade} />
+
             <TowerOffset
               dx={towerDx}
               dy={towerDy}
@@ -505,6 +443,58 @@ export default function MassingTab() {
                 <Stat label="Tower footprint" value={`${fmt2(towerArea)} m²`} />
                 <Stat label="Basement depth" value={`${fmt2(basementH)} m`} />
                 <Stat label="Σ Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} />
+              </div>
+            </div>
+
+            <div className="border border-ink-200">
+              <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
+                <span className="eyebrow text-ink-500 text-[10px]">AI render</span>
+                <div className="inline-flex border border-ink-200 bg-white">
+                  {([["scheme", "Schematic"], ["hyperreal", "Hyperreal"]] as const).map(([id, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => setAiStyle(id)}
+                      className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+                        aiStyle === id ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="p-3 grid gap-2">
+                <button
+                  className="px-2.5 py-2 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                  onClick={handleAiRender}
+                  disabled={aiRendering}
+                  title="Capture the current 3D view and re-render it via Google Gemini"
+                >
+                  {aiRendering ? "Rendering…" : "✦ Render current view"}
+                </button>
+                <details>
+                  <summary className="cursor-pointer text-[10.5px] uppercase tracking-[0.10em] text-ink-500 hover:text-ink-900">Prompt</summary>
+                  <textarea
+                    className="cell-input !text-[10.5px] !leading-snug !py-1.5 !px-1.5 font-mono mt-1.5 w-full"
+                    rows={6}
+                    value={aiPrompts[aiStyle]}
+                    onChange={(e) => setAiPrompts((p) => ({ ...p, [aiStyle]: e.target.value }))}
+                    spellCheck={false}
+                  />
+                  {aiPrompts[aiStyle] !== PROMPT_FOR[aiStyle] && (
+                    <button
+                      className="text-[10px] text-qube-700 hover:text-qube-900 underline mt-1"
+                      onClick={() => setAiPrompts((p) => ({ ...p, [aiStyle]: PROMPT_FOR[aiStyle] }))}
+                    >Reset to default</button>
+                  )}
+                </details>
+                <button
+                  className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
+                  onClick={() => setKeyDialog({ open: true, draft: apiKey })}
+                >
+                  {apiKey ? "Replace Gemini key" : "Set Gemini key"}
+                </button>
+                {aiError && (
+                  <div className="text-[10px] text-red-700 leading-snug whitespace-pre-wrap">{aiError}</div>
+                )}
               </div>
             </div>
 
@@ -552,6 +542,107 @@ export default function MassingTab() {
           </div>
         </div>
       </div>
+
+      {/* Gemini API key dialog */}
+      {keyDialog.open && (
+        <div className="fixed inset-0 z-50 bg-ink-900/55 flex items-center justify-center p-4">
+          <div className="bg-white border border-ink-200 shadow-lg max-w-[440px] w-full p-4 grid gap-3">
+            <div>
+              <div className="eyebrow text-ink-500">Google AI Studio</div>
+              <h3 className="text-[15px] font-medium text-ink-900 mt-1">Gemini API key</h3>
+              <p className="text-[11.5px] text-ink-500 mt-1 leading-snug">
+                Get a free key at{" "}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-qube-700 hover:text-qube-900 underline"
+                >aistudio.google.com/app/apikey</a>{" "}
+                (free tier includes image generation). Stored only in your browser.
+              </p>
+            </div>
+            <input
+              type="password"
+              autoFocus
+              spellCheck={false}
+              className="cell-input"
+              placeholder="AIza…"
+              value={keyDialog.draft}
+              onChange={(e) => setKeyDialog((s) => ({ ...s, draft: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && keyDialog.draft.trim()) {
+                  persistKey(keyDialog.draft.trim());
+                  setKeyDialog({ open: false, draft: "" });
+                }
+              }}
+            />
+            <div className="flex items-center justify-end gap-2">
+              {apiKey && (
+                <button
+                  className="text-[11px] text-red-700 hover:text-red-900 underline mr-auto"
+                  onClick={() => {
+                    persistKey("");
+                    setKeyDialog({ open: false, draft: "" });
+                  }}
+                >Forget key</button>
+              )}
+              <button
+                className="px-3 py-1.5 text-[11px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 hover:bg-bone-50"
+                onClick={() => setKeyDialog({ open: false, draft: "" })}
+              >Cancel</button>
+              <button
+                className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
+                disabled={!keyDialog.draft.trim()}
+                onClick={() => {
+                  persistKey(keyDialog.draft.trim());
+                  setKeyDialog({ open: false, draft: "" });
+                }}
+              >Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI render result */}
+      {aiResult && (
+        <div className="fixed inset-0 z-50 bg-ink-900/65 flex items-center justify-center p-4">
+          <div className="bg-white border border-ink-200 shadow-lg max-w-[1100px] w-full max-h-full overflow-auto grid gap-3 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="eyebrow text-ink-500">
+                  AI {aiResult.style === "hyperreal" ? "hyperreal" : "schematic"} render
+                </div>
+                {aiResult.note && (
+                  <p className="text-[11px] text-ink-500 mt-1 leading-snug max-w-[700px]">{aiResult.note}</p>
+                )}
+              </div>
+              <button
+                className="text-ink-400 hover:text-ink-700 text-[18px] leading-none"
+                onClick={() => setAiResult(null)}
+                title="Close"
+              >×</button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={aiResult.imageDataUrl} alt="AI render of the massing" className="w-full h-auto border border-ink-200" />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="px-3 py-1.5 text-[11px] uppercase tracking-[0.10em] border border-ink-300 text-ink-700 hover:bg-bone-50"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = aiResult.imageDataUrl;
+                  a.download = `${project.name.replace(/\s+/g, "-").toLowerCase() || "project"}-ai-${aiResult.style}.png`;
+                  a.click();
+                }}
+              >↓ Download PNG</button>
+              <button
+                className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50"
+                disabled={aiRendering}
+                onClick={handleAiRender}
+              >{aiRendering ? "Rendering…" : "↻ Re-render"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -730,6 +821,89 @@ function SetbacksTable({
         Basement always follows the plot line (no setback). The colour swatch matches the edge in the
         3D viewer and on the reference plan.
       </p>
+    </div>
+  );
+}
+
+function FacadePanel({
+  params, onPatch,
+}: {
+  params: { mode: "massing" | "residential"; panelWidthM: number; balconyDepthM: number; balconyEveryNBays: number };
+  onPatch: (p: Partial<{ mode: "massing" | "residential"; panelWidthM: number; balconyDepthM: number; balconyEveryNBays: number }>) => void;
+}) {
+  const residential = params.mode === "residential";
+  return (
+    <div className="border border-ink-200">
+      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
+        <span className="eyebrow text-ink-500 text-[10px]">Facade</span>
+        <div className="inline-flex border border-ink-200 bg-white">
+          <button
+            onClick={() => onPatch({ mode: "massing" })}
+            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+              !residential ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+            }`}
+          >Massing</button>
+          <button
+            onClick={() => onPatch({ mode: "residential" })}
+            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+              residential ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+            }`}
+            title="Model the tower facade: floor slabs, glazing, mullions and balconies"
+          >Residential</button>
+        </div>
+      </div>
+      {residential && (
+        <div className="p-3 grid gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Bay width m">
+              <input
+                type="number"
+                step={0.2}
+                min={1}
+                className="cell-input text-right"
+                value={Number(params.panelWidthM.toFixed(1))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 1) onPatch({ panelWidthM: n });
+                }}
+                title="Vertical mullion spacing along the facade"
+              />
+            </Field>
+            <Field label="Balcony m">
+              <input
+                type="number"
+                step={0.2}
+                min={0}
+                className="cell-input text-right"
+                value={Number(params.balconyDepthM.toFixed(1))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0) onPatch({ balconyDepthM: n });
+                }}
+                title="Balcony depth — 0 removes balconies"
+              />
+            </Field>
+            <Field label="Every N bays">
+              <input
+                type="number"
+                step={1}
+                min={1}
+                className="cell-input text-right"
+                value={params.balconyEveryNBays}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  if (Number.isFinite(n) && n >= 1) onPatch({ balconyEveryNBays: n });
+                }}
+                title="A balcony on every Nth facade bay"
+              />
+            </Field>
+          </div>
+          <p className="text-[10.5px] text-ink-500 leading-snug">
+            Applies to the tower: floor slabs, recessed glazing, mullions on the bay rhythm and
+            balconies on every Nth bay. Ground and podium keep the massing look.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
