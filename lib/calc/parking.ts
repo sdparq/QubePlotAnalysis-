@@ -2,17 +2,19 @@ import type { Project, Typology } from "../types";
 
 export interface ParkingResult {
   availableStandard: number;
-  availablePRM: number;
+  availablePOD: number;
   availableTotal: number;
-  byLevel: { name: string; standard: number; prm: number; total: number }[];
+  byLevel: { name: string; standard: number; pod: number; total: number }[];
   /** Per-typology breakdown — each row uses the typology's own parkingPerUnit */
   requiredByTypology: { typology: Typology; units: number; ratio: number; required: number }[];
   /** Aggregated by category for high-level summary (sums up the per-typology values) */
   requiredByCategory: { category: string; units: number; ratio: number; required: number }[];
   totalUnitsCounted: number;
   requiredTotal: number;
-  requiredPRM: number;
-  prmBalance: number;
+  /** POD (People of Determination) spaces — ADDITIONAL to the standard total,
+   *  not a subset of it. See `grandRequiredWithPOD`. */
+  requiredPOD: number;
+  podBalance: number;
   balance: number;
   otherUsesRequired: { name: string; netArea: number; ratio: number; required: number }[];
   otherUsesTotal: number;
@@ -20,20 +22,27 @@ export interface ParkingResult {
   retailRequired: number;
   retailM2PerSpaceUsed: number;
   retailM2: number;
+  /** Standard spaces required (residential + retail + other uses), before POD. */
   grandRequired: number;
+  /** Final required space count: standard total + POD, summed. This is the
+   *  figure balance / surface calculations should use. */
+  grandRequiredWithPOD: number;
   grandBalance: number;
-  /** Total parking surface needed (m²) — `grandRequired × m²/space`. */
+  /** Total parking surface needed (m²) — `grandRequiredWithPOD × m²/space`. */
   totalParkingSurfaceM2: number;
   m2PerParkingSpaceUsed: number;
 }
 
 /**
- * Dubai DCD accessible-parking tiered rule (QUBE matrix):
+ * Dubai DCD POD (People of Determination) parking tiered rule (QUBE matrix):
  *   < 25 total       → no minimum
  *   25 – 500 total   → 2% of total, minimum of one
  *   > 500 total      → 2% on first 500 + 1% on the rest (= 10 + 1% × (total − 500))
+ *
+ * The result is ADDITIONAL to the standard total passed in, not a subset
+ * carved out of it — see `grandRequiredWithPOD` in computeParking.
  */
-export function requiredPRM(totalRequired: number): number {
+export function requiredPOD(totalRequired: number): number {
   if (totalRequired < 25) return 0;
   if (totalRequired <= 500) return Math.max(1, Math.ceil(totalRequired * 0.02));
   return Math.ceil(500 * 0.02) + Math.ceil((totalRequired - 500) * 0.01);
@@ -52,12 +61,12 @@ export function computeParking(project: Project): ParkingResult {
   const byLevel = project.parking.map((p) => ({
     name: p.name,
     standard: p.standard,
-    prm: p.prm,
+    pod: p.prm,
     total: p.standard + p.prm,
   }));
   const availableStandard = byLevel.reduce((s, l) => s + l.standard, 0);
-  const availablePRM = byLevel.reduce((s, l) => s + l.prm, 0);
-  const availableTotal = availableStandard + availablePRM;
+  const availablePOD = byLevel.reduce((s, l) => s + l.pod, 0);
+  const availableTotal = availableStandard + availablePOD;
 
   // Active program cells only (within current floor range)
   const activeCells = project.program.filter(
@@ -112,20 +121,25 @@ export function computeParking(project: Project): ParkingResult {
     : 0;
 
   const grandRequired = requiredTotal + otherUsesTotal + retailRequired;
+  // POD spaces are additional to the standard total, not a subset of it — the
+  // tiered rule still uses the standard total as its basis, but the result gets
+  // summed on top for every balance / surface calculation from here on.
+  const podRequired = requiredPOD(grandRequired);
+  const grandRequiredWithPOD = grandRequired + podRequired;
   const m2PerParkingSpaceUsed = project.m2PerParkingSpace ?? 25;
-  const totalParkingSurfaceM2 = grandRequired * m2PerParkingSpaceUsed;
+  const totalParkingSurfaceM2 = grandRequiredWithPOD * m2PerParkingSpaceUsed;
 
   return {
     availableStandard,
-    availablePRM,
+    availablePOD,
     availableTotal,
     byLevel,
     requiredByTypology,
     requiredByCategory,
     totalUnitsCounted,
     requiredTotal,
-    requiredPRM: requiredPRM(grandRequired),
-    prmBalance: availablePRM - requiredPRM(grandRequired),
+    requiredPOD: podRequired,
+    podBalance: availablePOD - podRequired,
     balance: availableTotal - requiredTotal,
     otherUsesRequired,
     otherUsesTotal,
@@ -133,7 +147,8 @@ export function computeParking(project: Project): ParkingResult {
     retailM2PerSpaceUsed,
     retailM2,
     grandRequired,
-    grandBalance: availableTotal - grandRequired,
+    grandRequiredWithPOD,
+    grandBalance: availableTotal - grandRequiredWithPOD,
     totalParkingSurfaceM2,
     m2PerParkingSpaceUsed,
   };

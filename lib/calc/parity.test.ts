@@ -17,7 +17,7 @@ describe("Production City — parity vs Excel", () => {
 
   it("parking totals match Excel", () => {
     expect(r.parking.availableStandard).toBe(360);
-    expect(r.parking.availablePRM).toBe(9);
+    expect(r.parking.availablePOD).toBe(9);
     expect(r.parking.availableTotal).toBe(369);
     const studio1br2br = r.parking.requiredByCategory
       .filter((x) => ["Studio", "1BR", "2BR"].includes(x.category))
@@ -26,7 +26,8 @@ describe("Production City — parity vs Excel", () => {
     expect(studio1br2br).toBe(338);
     expect(br3?.required).toBe(16);
     expect(r.parking.requiredTotal).toBe(354);
-    expect(r.parking.requiredPRM).toBe(8);
+    expect(r.parking.requiredPOD).toBe(8);
+    expect(r.parking.grandRequiredWithPOD).toBe(r.parking.grandRequired + r.parking.requiredPOD);
     expect(r.parking.balance).toBe(15);
   });
 

@@ -48,9 +48,11 @@ export default function ParkingTab() {
             <h2 className="section-title">Parking parameters</h2>
             <p className="section-sub">
               Retail comes from Setup → GFA breakdown ÷ <strong>m² per space</strong>.
-              PRM follows Dubai DCD: 2% of total up to 500 (min 1), then +1% on each
-              additional space. The total parking surface is estimated by multiplying
-              required spaces by the average <strong>m² / parking space</strong>.
+              POD (People of Determination) follows Dubai DCD: 2% of the standard total up
+              to 500 (min 1), then +1% on each additional space — added on top of the
+              standard total, not carved out of it. The total parking surface is estimated
+              by multiplying the combined required spaces by the average{" "}
+              <strong>m² / parking space</strong>.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 min-w-[320px]">
@@ -137,7 +139,8 @@ export default function ParkingTab() {
           <h2 className="section-title">Required parking</h2>
           <p className="section-sub">
             Each typology contributes its own ratio (set in Typologies). Retail and other
-            uses are added below; PRM is computed from the grand total.
+            uses are added below; POD (People of Determination) spaces are computed from
+            the standard total and added on top — not a subset of it.
           </p>
         </div>
         <div>
@@ -201,51 +204,23 @@ export default function ParkingTab() {
                   <td className="text-right">{fmt0(r.otherUsesTotal)}</td>
                 </tr>
               )}
-              <tr className="row-total">
-                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Total spaces required</td>
+              <tr className="row-subtotal">
+                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Standard spaces required</td>
                 <td className="text-right">{fmt0(r.grandRequired)}</td>
               </tr>
-              <tr>
-                <td colSpan={4} className="text-right text-ink-500 text-xs">
-                  Of which PRM (Dubai DCD tiered rule)
+              <tr className="row-subtotal">
+                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">
+                  + POD (Dubai DCD tiered rule, additional)
                 </td>
-                <td className="text-right">{fmt0(r.requiredPRM)}</td>
+                <td className="text-right">{fmt0(r.requiredPOD)}</td>
+              </tr>
+              <tr className="row-total">
+                <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">Total spaces required</td>
+                <td className="text-right">{fmt0(r.grandRequiredWithPOD)}</td>
               </tr>
             </tbody>
           </table>
         </div>
-
-        {r.requiredByCategory.length > 0 && (
-          <div className="mt-5">
-            <div className="eyebrow text-ink-500 mb-2">Summary by category</div>
-            <table className="tbl w-full table-fixed">
-              <colgroup>
-                <col />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 110 }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th className="text-right">Units</th>
-                  <th className="text-right">Avg ratio</th>
-                  <th className="text-right">Required</th>
-                </tr>
-              </thead>
-              <tbody>
-                {r.requiredByCategory.map((rc) => (
-                  <tr key={rc.category}>
-                    <td className="font-medium text-ink-900">{rc.category}</td>
-                    <td className="text-right">{fmt0(rc.units)}</td>
-                    <td className="text-right tabular-nums">{rc.ratio.toFixed(2)}</td>
-                    <td className="text-right">{fmt0(rc.required)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       <div className="card">
@@ -259,8 +234,8 @@ export default function ParkingTab() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
           <Stat
             label="Total spaces"
-            value={fmt0(r.grandRequired)}
-            sub={`${fmt0(r.requiredPRM)} of which PRM`}
+            value={fmt0(r.grandRequiredWithPOD)}
+            sub={`${fmt0(r.grandRequired)} std + ${fmt0(r.requiredPOD)} POD`}
           />
           <Stat
             label="m² / space"

@@ -546,12 +546,12 @@ function ParkingLiftsScene({ t, data }: { t: number; data: SampleData }) {
     {
       title: "Tab 05 · Parking",
       rows: [
-        { k: "Required (apt)", v: `${pk.requiredTotal} std + ${pk.requiredPRM} PRM` },
-        { k: "Available", v: `${pk.availableStandard} std + ${pk.availablePRM} PRM` },
-        { k: "Balance", v: `${pk.balance >= 0 ? "+" : ""}${pk.balance} std · ${pk.prmBalance >= 0 ? "+" : ""}${pk.prmBalance} PRM` },
+        { k: "Required (apt)", v: `${pk.requiredTotal} std + ${pk.requiredPOD} POD` },
+        { k: "Available", v: `${pk.availableStandard} std + ${pk.availablePOD} POD` },
+        { k: "Balance", v: `${pk.balance >= 0 ? "+" : ""}${pk.balance} std · ${pk.podBalance >= 0 ? "+" : ""}${pk.podBalance} POD` },
         { k: "Levels", v: data.project.parking.map((l) => l.name).join(" · ") },
       ],
-      verdict: pk.balance >= 0 && pk.prmBalance >= 0 ? "PASS" : "REVIEW",
+      verdict: pk.balance >= 0 && pk.podBalance >= 0 ? "PASS" : "REVIEW",
     },
     {
       title: "Tab 06 · Lifts (Dubai Building Code D.8.8)",

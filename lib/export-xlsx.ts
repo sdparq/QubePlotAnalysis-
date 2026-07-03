@@ -59,12 +59,12 @@ export async function exportToExcel(project: Project) {
   wsP.addRow([`PARKING SPACES INVENTORY — ${project.name.toUpperCase()}`]);
   wsP.getCell("A1").font = { bold: true, size: 14 };
   wsP.addRow([]);
-  wsP.addRow(["Level", "Standard", "PRM", "Total", "Notes"]);
+  wsP.addRow(["Level", "Standard", "POD", "Total", "Notes"]);
   applyHeader(wsP.lastRow!);
   for (const lvl of r.parking.byLevel) {
-    wsP.addRow([lvl.name, lvl.standard, lvl.prm, lvl.total, ""]);
+    wsP.addRow([lvl.name, lvl.standard, lvl.pod, lvl.total, ""]);
   }
-  wsP.addRow(["PROJECT TOTAL", r.parking.availableStandard, r.parking.availablePRM, r.parking.availableTotal, ""]);
+  wsP.addRow(["PROJECT TOTAL", r.parking.availableStandard, r.parking.availablePOD, r.parking.availableTotal, ""]);
   applySubtotal(wsP.lastRow!);
 
   wsP.addRow([]);
@@ -78,10 +78,12 @@ export async function exportToExcel(project: Project) {
   for (const ou of r.parking.otherUsesRequired) {
     wsP.addRow([`Other: ${ou.name}`, ou.netArea, `${ou.ratio}/100m²`, Number(ou.required.toFixed(2)), ""]);
   }
-  wsP.addRow(["TOTAL REQUIRED", "", "", r.parking.grandRequired, ""]);
+  wsP.addRow(["STANDARD REQUIRED", "", "", r.parking.grandRequired, ""]);
   applySubtotal(wsP.lastRow!);
-  wsP.addRow([`Of which PRM (${(project.prmPercent * 100).toFixed(0)}%)`, "", "", r.parking.requiredPRM, `PRM balance: ${r.parking.prmBalance}`]);
-  wsP.addRow(["BALANCE", "", "", r.parking.grandBalance, "Available − required"]);
+  wsP.addRow([`+ POD (${(project.prmPercent * 100).toFixed(0)}%, additional)`, "", "", r.parking.requiredPOD, `POD balance: ${r.parking.podBalance}`]);
+  wsP.addRow(["TOTAL REQUIRED", "", "", r.parking.grandRequiredWithPOD, ""]);
+  applySubtotal(wsP.lastRow!);
+  wsP.addRow(["BALANCE", "", "", r.parking.grandBalance, "Available − required (incl. POD)"]);
   applySubtotal(wsP.lastRow!);
   setColWidths(wsP, [38, 14, 16, 14, 32]);
 
@@ -234,8 +236,8 @@ export async function exportToExcel(project: Project) {
   wsC.addRow(["Area", "Status", "Detail"]);
   applyHeader(wsC.lastRow!);
   const checks: [string, string, string][] = [
-    ["Parking total", r.parking.grandBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availableTotal} available vs ${r.parking.grandRequired} required (${r.parking.grandBalance >= 0 ? "+" : ""}${r.parking.grandBalance})`],
-    ["PRM parking", r.parking.prmBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availablePRM} available vs ${r.parking.requiredPRM} required`],
+    ["Parking total", r.parking.grandBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availableTotal} available vs ${r.parking.grandRequiredWithPOD} required incl. POD (${r.parking.grandBalance >= 0 ? "+" : ""}${r.parking.grandBalance})`],
+    ["POD parking", r.parking.podBalance >= 0 ? "OK" : "REVIEW", `${r.parking.availablePOD} available vs ${r.parking.requiredPOD} required`],
     ["Lifts", "INFO", `Recommended ${r.lifts.liftsRecommended} (${r.lifts.governing})`],
     ["Garbage room", "INFO", `${r.garbage.containers} containers · ${r.garbage.roomAreaM2.toFixed(2)} m²`],
     ["GFA / FAR", "INFO", `Total GFA ${r.program.totalGFABuilding.toFixed(2)} m² · FAR ${r.program.far.toFixed(3)}`],
