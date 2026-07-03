@@ -1,4 +1,4 @@
-import { edgeLengths, type Point } from "./geom";
+import { edgeLengths, polygonArea, polygonCentroid, type Point } from "./geom";
 import type { PdfTextItem } from "./parcel-extract";
 
 /** Matches "51.49 (168.93 ft)" style dimension labels used on Dubai DLD
@@ -82,10 +82,31 @@ export interface AutoCalibrationResult {
   confident: boolean;
 }
 
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length / 2;
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[Math.floor(mid)];
+}
+
+/** Relative tolerance for an (edge, label) pair to count as consistent with a
+ *  scale hypothesis. Covers label rounding (cm precision) and polygon
+ *  simplification jitter. */
+const SCALE_CONSENSUS_TOL = 0.06;
+
 /** Try to determine the plot's real-world scale by matching printed dimension
- *  labels (from `extractEdgeLabels`) to the nearest edge of the given polygon
- *  (in the same pixel space). Returns null when there isn't enough signal —
- *  callers should fall back to manual 2-point calibration in that case. */
+ *  labels (from `extractEdgeLabels`) to the edges of the given polygon (same
+ *  pixel space).
+ *
+ *  The drawing scale is global, so we use RANSAC-style consensus: every
+ *  nearby (edge, label) pair proposes a scale hypothesis (metres ÷ pixel
+ *  length); each hypothesis is scored by how many edges can be assigned a
+ *  label one-to-one whose implied scale agrees within tolerance; the best
+ *  hypothesis wins and its inlier set becomes the match list. This survives
+ *  the common DLD situation where the highlighted (balance-area) polygon has
+ *  fewer edges than the dimensioned plot boundary, so some labels sit closest
+ *  to the wrong edge — proximity alone used to mis-assign those and wreck the
+ *  scale. Returns null when there isn't enough signal — callers fall back to
+ *  manual 2-point calibration. */
 export function tryAutoCalibrate(polygonPx: Point[], textItems: PdfTextItem[]): AutoCalibrationResult | null {
   if (polygonPx.length < 3) return null;
   const labels = extractEdgeLabels(textItems);
@@ -93,40 +114,103 @@ export function tryAutoCalibrate(polygonPx: Point[], textItems: PdfTextItem[]): 
 
   const lens = edgeLengths(polygonPx);
   const avgLen = lens.reduce((s, l) => s + l, 0) / lens.length;
-  const threshold = Math.max(15, avgLen * 0.35);
+  // Dimension labels are printed right beside their edge (a couple of text
+  // heights away at most). The absolute cap keeps far-away cotas — e.g. a
+  // coincidentally-matching number from another edge — out of the consensus.
+  const threshold = Math.max(20, Math.min(60, avgLen * 0.35));
 
-  const matches: EdgeCalibrationMatch[] = [];
+  // All (edge, label) pairs within reach.
+  const pairs: Array<{ edgeIndex: number; label: EdgeLabel; dist: number; scale: number }> = [];
   for (let i = 0; i < polygonPx.length; i++) {
+    if (lens[i] <= 0) continue;
     const a = polygonPx[i];
     const b = polygonPx[(i + 1) % polygonPx.length];
-    let best: { label: EdgeLabel; dist: number } | null = null;
     for (const label of labels) {
       const d = pointToSegmentDistance({ x: label.x, y: label.y }, a, b);
-      if (d <= threshold && (!best || d < best.dist)) best = { label, dist: d };
+      if (d <= threshold) pairs.push({ edgeIndex: i, label, dist: d, scale: label.metres / lens[i] });
     }
-    if (best && lens[i] > 0) {
-      matches.push({
-        edgeIndex: i,
-        labelText: best.label.text,
-        labelMetres: best.label.metres,
-        pixelLength: lens[i],
-        impliedScale: best.label.metres / lens[i],
-      });
+  }
+  if (pairs.length === 0) return null;
+
+  // Evaluate every pair's scale as a hypothesis: greedy 1:1 assignment (by
+  // distance) restricted to pairs whose implied scale agrees with it.
+  function inliersFor(hypothesis: number): Array<{ edgeIndex: number; label: EdgeLabel; dist: number; scale: number }> {
+    const usable = pairs
+      .filter((p) => Math.abs(p.scale - hypothesis) / hypothesis <= SCALE_CONSENSUS_TOL)
+      .sort((a, b) => a.dist - b.dist);
+    const usedEdges = new Set<number>();
+    const usedLabels = new Set<EdgeLabel>();
+    const out: typeof usable = [];
+    for (const p of usable) {
+      if (usedEdges.has(p.edgeIndex) || usedLabels.has(p.label)) continue;
+      usedEdges.add(p.edgeIndex);
+      usedLabels.add(p.label);
+      out.push(p);
+    }
+    return out;
+  }
+
+  let best: ReturnType<typeof inliersFor> = [];
+  let bestDist = Infinity;
+  for (const candidate of pairs) {
+    const inliers = inliersFor(candidate.scale);
+    const totalDist = inliers.reduce((s, p) => s + p.dist, 0);
+    if (inliers.length > best.length || (inliers.length === best.length && totalDist < bestDist)) {
+      best = inliers;
+      bestDist = totalDist;
     }
   }
 
-  if (matches.length < 2) return null;
+  if (best.length < 2) return null;
 
-  const scales = matches.map((m) => m.impliedScale).sort((a, b) => a - b);
-  const mid = scales.length / 2;
-  const median = scales.length % 2 === 0 ? (scales[mid - 1] + scales[mid]) / 2 : scales[Math.floor(mid)];
-  const maxDeviation = median > 0 ? Math.max(...scales.map((s) => Math.abs(s - median) / median)) : 1;
+  const matches: EdgeCalibrationMatch[] = best
+    .map((p) => ({
+      edgeIndex: p.edgeIndex,
+      labelText: p.label.text,
+      labelMetres: p.label.metres,
+      pixelLength: lens[p.edgeIndex],
+      impliedScale: p.scale,
+    }))
+    .sort((a, b) => a.edgeIndex - b.edgeIndex);
+
+  const median = medianOf(matches.map((m) => m.impliedScale));
+  const maxDeviation =
+    median > 0 ? Math.max(...matches.map((m) => Math.abs(m.impliedScale - median) / median)) : 1;
 
   return {
     scale: median,
     matches,
     totalEdges: polygonPx.length,
     deviationPct: maxDeviation * 100,
-    confident: matches.length >= 2 && maxDeviation < 0.08,
+    // ≥3 agreeing edges is very unlikely by chance; 2 could coincide, so a
+    // 2-edge consensus is shown for review instead of applied automatically.
+    confident: matches.length >= 3 && maxDeviation < 0.08,
   };
+}
+
+/* ---------------------- Apply helpers (pure) ---------------------- */
+
+/** Convert a traced pixel polygon into plot-local metres: scale, flip Y so the
+ *  visual top becomes +y, recentre on the centroid. */
+export function polygonPxToMetres(polygonPx: Point[], scale: number): { plotPolygon: Point[]; areaM2: number } {
+  const inMetres = polygonPx.map((p) => ({ x: p.x * scale, y: -p.y * scale }));
+  const c = polygonCentroid(inMetres);
+  const plotPolygon = inMetres.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+  return { plotPolygon, areaM2: polygonArea(plotPolygon) };
+}
+
+/** Pick the matched edge whose implied scale sits closest to the applied
+ *  median, and express it as the p1/p2/metres calibration record the rest of
+ *  the app persists. metres is derived from the applied scale so the record
+ *  stays exactly self-consistent. */
+export function pickReferenceEdge(
+  result: AutoCalibrationResult,
+  polygonPx: Point[],
+): { p1: Point; p2: Point; metres: number } {
+  const best = [...result.matches].sort(
+    (a, b) => Math.abs(a.impliedScale - result.scale) - Math.abs(b.impliedScale - result.scale),
+  )[0];
+  const p1 = polygonPx[best.edgeIndex];
+  const p2 = polygonPx[(best.edgeIndex + 1) % polygonPx.length];
+  return { p1, p2, metres: result.scale * best.pixelLength };
 }

@@ -113,3 +113,52 @@ describe("tryAutoCalibrate", () => {
     expect(result!.matches.every((m) => m.labelMetres < 100)).toBe(true);
   });
 });
+
+import { simplifyPolygon, polygonArea } from "./geom";
+
+describe("simplifyPolygon", () => {
+  it("collapses a noisy PDF-style outline to its true corners", () => {
+    // Rectangle whose top edge is chopped into dozens of 2px sub-segments
+    // with sub-pixel jitter — like the decoration-riddled paths extracted
+    // from DLD affection plans.
+    const noisy: { x: number; y: number }[] = [];
+    for (let x = 0; x <= 400; x += 2) noisy.push({ x, y: (x / 2) % 2 === 0 ? 0 : 0.4 });
+    noisy.push({ x: 400, y: 200 });
+    noisy.push({ x: 0, y: 200 });
+    const out = simplifyPolygon(noisy, 2);
+    expect(out.length).toBe(4);
+    expect(polygonArea(out)).toBeCloseTo(80000, -2);
+  });
+
+  it("leaves an already-clean polygon untouched", () => {
+    const clean = [
+      { x: 0, y: 0 },
+      { x: 400, y: 0 },
+      { x: 400, y: 200 },
+      { x: 0, y: 200 },
+    ];
+    expect(simplifyPolygon(clean, 2)).toEqual(clean);
+  });
+});
+
+describe("tryAutoCalibrate · consensus vs proximity", () => {
+  it("assigns by scale consensus when a label sits nearer to the wrong edge", () => {
+    // True scale 0.1. The label for edge 1 (200px → 20 m) is placed slightly
+    // nearer to edge 0 than to its own edge; pure nearest-edge matching would
+    // pair it with edge 0 (400px → implied 0.05) and wreck the median.
+    const scale = 0.1;
+    const items = [
+      { text: "40.00 (131.23 ft)", x: 200, y: 8 },   // edge 0 (400 px, its own)
+      { text: "20.00 (65.62 ft)", x: 390, y: 30 },   // edge 1's label, drifted toward the corner
+      { text: "40.00 (131.23 ft)", x: 200, y: 192 }, // edge 2 (400 px)
+      { text: "20.00 (65.62 ft)", x: 8, y: 100 },    // edge 3 (200 px)
+    ];
+    const result = tryAutoCalibrate(RECT, items);
+    expect(result).not.toBeNull();
+    expect(result!.confident).toBe(true);
+    expect(result!.scale).toBeCloseTo(scale, 3);
+    // The drifted label must have ended up on edge 1, not edge 0.
+    const e1 = result!.matches.find((m) => m.edgeIndex === 1);
+    expect(e1?.labelMetres).toBeCloseTo(20, 2);
+  });
+});

@@ -1,4 +1,4 @@
-import { polygonArea, polygonBBox, type Point } from "./geom";
+import { polygonArea, polygonBBox, simplifyPolygon, type Point } from "./geom";
 import { parcelColorScore, type RGB } from "./parcel-colors";
 
 const MAX_DIM = 2400;
@@ -165,7 +165,7 @@ function parseRgbArgs(args: any): RGB | null {
   return [r * scale, g * scale, b * scale];
 }
 
-function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number[]): TaggedPath[] {
+export function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number[]): TaggedPath[] {
   const paths: TaggedPath[] = [];
   let ctm: number[] = [1, 0, 0, 1, 0, 0];
   let fillColor: RGB | null = null;
@@ -295,7 +295,7 @@ function extractPathsFromOpList(opList: any, OPS: any, viewportTransform: number
 /** Filter + rank candidates. Parcel-coloured polygons (yellow fill / red
  *  stroke) sort first, then by area. Returns the ranked candidates and the
  *  index of a confidently auto-detected parcel (or null). */
-function filterCandidates(
+export function filterCandidates(
   paths: TaggedPath[],
   pageW: number,
   pageH: number,
@@ -326,7 +326,18 @@ function filterCandidates(
   const autoParcelIndex =
     top && top.score >= 2 && top.area >= pageArea * 0.003 ? 0 : null;
 
-  return { candidates: enriched.map(({ points, fill, stroke }) => ({ points, fill, stroke })), autoParcelIndex };
+  // PDF paths often carry hundreds of sub-pixel decoration segments (dashes,
+  // hatching) on top of the true corners — simplify each candidate so what we
+  // trace, match cotas against, and eventually push into Massing is the real
+  // corner set.
+  return {
+    candidates: enriched.map(({ points, fill, stroke }) => ({
+      points: simplifyPolygon(points, 2),
+      fill,
+      stroke,
+    })),
+    autoParcelIndex,
+  };
 }
 
 /* ------------------------ Helpers ------------------------ */
