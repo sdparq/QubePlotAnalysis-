@@ -171,17 +171,11 @@ export interface Project {
   /** Average built area consumed by one parking space (incl. aisles, ramps).
    *  Used to estimate the total parking surface needed. Default 25 m² / space. */
   m2PerParkingSpace?: number;
-  /** Surface per above-ground floor available for parking (m²). Replaces the
-   *  legacy `podiumParkingPerFloorM2` — kept for backward compat as a
-   *  fallback. The host floor can be ground, podium or any tier the user
-   *  decides to give over to parking. */
-  otherParkingPerFloorM2?: number;
-  /** Number of above-ground floors hosting parking. Replaces the implicit
-   *  link to Setup → podium.count. Falls back to `project.podium.count`
-   *  when unset for backward compat. */
-  otherParkingFloorsCount?: number;
-  /** @deprecated kept so saved projects still read; superseded by
-   *  `otherParkingPerFloorM2`. */
+  /** Parking surface on the ground floor (m²), if any. Absolute value — not
+   *  multiplied by Setup's ground.count (ground is normally a single level). */
+  groundParkingM2?: number;
+  /** Parking surface per podium floor (m²), if any. Multiplied by Setup →
+   *  Floor breakdown's `podium.count` to get the total podium parking surface. */
   podiumParkingPerFloorM2?: number;
   /** Override for the number of boarding floors used by the Dubai Building
    *  Code D.8.8 lift sizing (Figure D.14). When unset, derived from the

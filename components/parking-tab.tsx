@@ -1,13 +1,7 @@
 "use client";
-import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeParking } from "@/lib/calc/parking";
 import { fmt0 } from "@/lib/format";
-import {
-  offsetPolygon,
-  polygonArea,
-  rectanglePlotPolygon,
-} from "@/lib/geom";
 import type { OtherUse } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
@@ -23,22 +17,6 @@ export default function ParkingTab() {
   const removeU = useStore((s) => s.removeOtherUse);
   const upsertTypology = useStore((s) => s.upsertTypology);
   const r = computeParking(project);
-
-  // Buildable area at podium level = plot polygon shrunk by the podium setback.
-  // Parking lives in basements (= plot polygon) and podium floors, so this is
-  // the most restrictive footprint we can safely fill with cars.
-  const buildableArea = useMemo(() => {
-    const plotArea = project.plotArea ?? 0;
-    const sqRoot = plotArea > 0 ? Math.sqrt(plotArea) : 50;
-    const frontage = project.plotFrontage && project.plotFrontage > 0 ? project.plotFrontage : sqRoot;
-    const depth = project.plotDepth && project.plotDepth > 0 ? project.plotDepth : sqRoot;
-    const podiumSet = project.podiumSetbackM ?? 3;
-    const plotPoly = project.plotMode === "polygon" && project.plotPolygon && project.plotPolygon.length >= 3
-      ? project.plotPolygon
-      : rectanglePlotPolygon(frontage, depth);
-    if (podiumSet <= 0) return polygonArea(plotPoly);
-    return polygonArea(offsetPolygon(plotPoly, plotPoly.map(() => podiumSet)));
-  }, [project.plotArea, project.plotFrontage, project.plotDepth, project.podiumSetbackM, project.plotMode, project.plotPolygon]);
 
   return (
     <div className="grid gap-6">
@@ -253,27 +231,25 @@ export default function ParkingTab() {
           const plotArea = project.plotArea ?? 0;
           const basementCount = project.basements?.count ?? 0;
           const basementHeightM = project.basements?.heightM ?? 3.0;
-          // Other parking floor plans — fully editable. Falls back to the
-          // legacy podium fields when the project predates this UI so saved
-          // projects keep their numbers.
-          const otherFloors = project.otherParkingFloorsCount ?? project.podium?.count ?? 0;
-          const otherPerFloor =
-            project.otherParkingPerFloorM2
-            ?? project.podiumParkingPerFloorM2
-            ?? buildableArea;
+          // Ground and podium parking surfaces — independent, specific inputs.
+          // Ground is a flat m² figure (ground is normally a single level);
+          // podium is per-floor, multiplied by Setup's podium.count.
+          const groundParking = Math.max(0, project.groundParkingM2 ?? 0);
+          const podiumParkingPerFloor = Math.max(0, project.podiumParkingPerFloorM2 ?? 0);
+          const podiumCount = project.podium?.count ?? 0;
+          const podiumParkingSurface = podiumParkingPerFloor * podiumCount;
+          const aboveGroundSurface = groundParking + podiumParkingSurface;
           const basementSurface = plotArea * basementCount;
-          const otherSurface = otherPerFloor * otherFloors;
-          const availTotal = basementSurface + otherSurface;
+          const availTotal = basementSurface + aboveGroundSurface;
           const required = r.totalParkingSurfaceM2;
           const balance = availTotal - required;
           const enough = balance >= 0 && availTotal > 0;
           const basementsNeededAlone = plotArea > 0 ? Math.ceil(required / plotArea) : 0;
-          const otherFloorsNeededAlone = otherPerFloor > 0 ? Math.ceil(required / otherPerFloor) : 0;
           // How many basements are actually needed GIVEN what's already
-          // planned on the other parking floors — the number this card
+          // planned for ground/podium parking — the number this card
           // answers. Read-only suggestion; Setup → Floor breakdown remains
           // the source of truth for basementCount (a click here syncs it).
-          const remainingForBasements = Math.max(0, required - otherSurface);
+          const remainingForBasements = Math.max(0, required - aboveGroundSurface);
           const basementsNeeded = plotArea > 0 && remainingForBasements > 0
             ? Math.ceil(remainingForBasements / plotArea)
             : 0;
@@ -293,7 +269,7 @@ export default function ParkingTab() {
                     </div>
                     <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
                       {plotArea > 0
-                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(plotArea)} m² plot, after ${fmt0(otherSurface)} m² already planned on other floors.`
+                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(plotArea)} m² plot, after ${fmt0(aboveGroundSurface)} m² already planned in ground/podium.`
                         : "Set Plot area in Setup to compute this."}
                     </div>
                   </div>
@@ -324,39 +300,41 @@ export default function ParkingTab() {
                     sub={basementCount > 0 ? `${project.basements?.heightM ?? 0} m height each` : "Set in Setup → Floor breakdown"}
                   />
                   <div className="border border-ink-200 bg-white p-3">
-                    <div className="eyebrow text-ink-500 text-[10px]">Other parking per floor (m²)</div>
+                    <div className="eyebrow text-ink-500 text-[10px]">Ground floor parking (m²)</div>
                     <input
                       type="number"
                       step={10}
                       min={0}
                       className="cell-input text-right !text-[18px] font-light tabular-nums mt-0.5 w-full"
-                      value={Number(otherPerFloor.toFixed(0))}
+                      value={groundParking || ""}
+                      placeholder="0"
                       onChange={(e) => {
                         const n = parseFloat(e.target.value);
-                        if (Number.isFinite(n) && n >= 0) patch({ otherParkingPerFloorM2: n });
+                        patch({ groundParkingM2: Number.isFinite(n) && n >= 0 ? n : undefined });
                       }}
-                      title="Surface available per above-ground floor for parking. Could be a ground floor, a podium, a lower-rise level — wherever you want to host cars."
+                      title="Surface on the ground floor dedicated to parking, if any. Leave 0 if the ground floor has no parking."
                     />
                     <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
-                      Buildable {buildableArea > 0 ? `${fmt0(buildableArea)} m²` : "—"} · editable
+                      Leave 0 if none
                     </div>
                   </div>
                   <div className="border border-ink-200 bg-white p-3">
-                    <div className="eyebrow text-ink-500 text-[10px]">Other parking floors</div>
+                    <div className="eyebrow text-ink-500 text-[10px]">Podium parking per floor (m²)</div>
                     <input
                       type="number"
-                      step={1}
+                      step={10}
                       min={0}
                       className="cell-input text-right !text-[18px] font-light tabular-nums mt-0.5 w-full"
-                      value={Number(otherFloors)}
+                      value={podiumParkingPerFloor || ""}
+                      placeholder="0"
                       onChange={(e) => {
                         const n = parseFloat(e.target.value);
-                        if (Number.isFinite(n) && n >= 0) patch({ otherParkingFloorsCount: Math.round(n) });
+                        patch({ podiumParkingPerFloorM2: Number.isFinite(n) && n >= 0 ? n : undefined });
                       }}
-                      title="Number of above-ground floors used for parking. Independent from the Setup floor breakdown."
+                      title="Surface dedicated to parking on each podium floor, if any. Multiplied by the podium level count from Setup."
                     />
                     <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
-                      Ground / podium / wherever
+                      × {podiumCount} podium level{podiumCount === 1 ? "" : "s"} (Setup)
                     </div>
                   </div>
                 </div>
@@ -368,9 +346,9 @@ export default function ParkingTab() {
                     sub={basementSurface > 0 ? `${fmt0(plotArea)} × ${basementCount}` : ""}
                   />
                   <Stat
-                    label="Avail. in other floor plans"
-                    value={otherSurface > 0 ? `${fmt0(otherSurface)} m²` : "—"}
-                    sub={otherSurface > 0 ? `${fmt0(otherPerFloor)} × ${otherFloors}` : ""}
+                    label="Avail. in ground + podium"
+                    value={aboveGroundSurface > 0 ? `${fmt0(aboveGroundSurface)} m²` : "—"}
+                    sub={aboveGroundSurface > 0 ? `${fmt0(groundParking)} ground + ${fmt0(podiumParkingSurface)} podium` : ""}
                   />
                   <Stat
                     label="Total available"
@@ -385,19 +363,19 @@ export default function ParkingTab() {
                 <div className={`text-[12px] mt-3 leading-snug ${enough ? "text-emerald-700" : "text-amber-900"}`}>
                   {availTotal === 0 ? (
                     <>
-                      No basements or other parking floors set yet. To fit the{" "}
+                      No basements, ground or podium parking set yet. To fit the{" "}
                       {fmt0(required)} m² of parking you could:
                       <ul className="list-disc ml-5 mt-1">
                         {plotArea > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (full plot footprint of {fmt0(plotArea)} m²)</li>}
-                        {otherPerFloor > 0 && <li>or <strong>{otherFloorsNeededAlone}</strong> other floor{otherFloorsNeededAlone === 1 ? "" : "s"} alone ({fmt0(otherPerFloor)} m² per floor)</li>}
-                        <li>or any combination — set basements in <em>Setup → Floor breakdown</em> and the other-floors count above.</li>
+                        <li>or some combination of ground floor parking and podium parking (per floor) above</li>
+                        <li>or any mix — set basements in <em>Setup → Floor breakdown</em>.</li>
                       </ul>
                     </>
                   ) : enough ? (
                     <>
-                      ✓ Total available <strong>{fmt0(availTotal)} m²</strong> ({basementCount} basement{basementCount === 1 ? "" : "s"} + {otherFloors} other floor{otherFloors === 1 ? "" : "s"}) covers the {fmt0(required)} m² required with a <strong>{fmt0(balance)} m²</strong> margin.
-                      {basementSurface >= required && otherFloors > 0 && (
-                        <> · You could fit it all in the basements alone ({fmt0(basementSurface)} m²) and free those floors for amenities or retail.</>
+                      ✓ Total available <strong>{fmt0(availTotal)} m²</strong> ({basementCount} basement{basementCount === 1 ? "" : "s"} + {fmt0(aboveGroundSurface)} m² ground/podium) covers the {fmt0(required)} m² required with a <strong>{fmt0(balance)} m²</strong> margin.
+                      {basementSurface >= required && aboveGroundSurface > 0 && (
+                        <> · You could fit it all in the basements alone ({fmt0(basementSurface)} m²) and free ground/podium for amenities or retail.</>
                       )}
                     </>
                   ) : (
@@ -405,8 +383,7 @@ export default function ParkingTab() {
                       Available <strong>{fmt0(availTotal)} m²</strong> falls{" "}
                       <strong>{fmt0(-balance)} m² short</strong> of {fmt0(required)} m² required.{" "}
                       You&apos;d need either <strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"}{" "}
-                      (full plot), <strong>{otherFloorsNeededAlone}</strong> other floor{otherFloorsNeededAlone === 1 ? "" : "s"}{" "}
-                      ({fmt0(otherPerFloor)} m² each), or a mix that adds up to {fmt0(required)} m².
+                      alone (full plot), more ground/podium parking surface, or a mix that adds up to {fmt0(required)} m².
                     </>
                   )}
                 </div>
