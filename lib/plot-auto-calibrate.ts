@@ -51,6 +51,51 @@ export function extractEdgeLabels(items: PdfTextItem[]): EdgeLabel[] {
   return out;
 }
 
+/** Matches "3654.45 SQ.M" style declared-area labels (the Total / Balance /
+ *  Affected figures in the plan's area table). SQ.F entries don't match. */
+const AREA_LABEL_RE = /(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*SQ\.?\s*M\b/i;
+
+/** The area table prints the number and its "SQ.M" unit as separate runs in
+ *  adjacent table-cell positions — wider apart than the compact edge-label
+ *  splits (measured ~53px on real DLD plans at our render scale). */
+const AREA_MERGE_DISTANCE_PX = 90;
+
+/** Extract declared areas (m²) from the PDF's text runs, merging short
+ *  consecutive runs the same way edge labels are. Items consumed by a match
+ *  can't be re-captured by an overlapping merge (which would duplicate the
+ *  figure). */
+export function extractAreaLabels(items: PdfTextItem[]): number[] {
+  const out: number[] = [];
+  const used = new Set<number>();
+  for (let i = 0; i < items.length; i++) {
+    if (used.has(i)) continue;
+    const single = items[i].text.trim();
+    const m1 = AREA_LABEL_RE.exec(single);
+    if (m1) {
+      out.push(parseFloat(m1[1].replace(/,/g, "")));
+      used.add(i);
+      continue;
+    }
+    for (let span = 2; span <= 3 && i + span - 1 < items.length; span++) {
+      const group = items.slice(i, i + span);
+      let close = true;
+      for (let k = 1; k < group.length; k++) {
+        const d = Math.hypot(group[k].x - group[k - 1].x, group[k].y - group[k - 1].y);
+        if (d > AREA_MERGE_DISTANCE_PX) { close = false; break; }
+      }
+      if (!close) continue;
+      const merged = group.map((g) => g.text).join(" ").replace(/\s+/g, " ");
+      const m2 = AREA_LABEL_RE.exec(merged);
+      if (m2) {
+        out.push(parseFloat(m2[1].replace(/,/g, "")));
+        for (let k = i; k < i + span; k++) used.add(k);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
   const abx = b.x - a.x, aby = b.y - a.y;
   const len2 = abx * abx + aby * aby;
@@ -70,12 +115,18 @@ export interface EdgeCalibrationMatch {
 }
 
 export interface AutoCalibrationResult {
-  /** metres per pixel — median across matched edges. */
+  /** metres per pixel. Median across matched edges, then — when a declared
+   *  area on the plan corroborates it — refined so the polygon's computed
+   *  area equals that declared figure exactly. */
   scale: number;
   matches: EdgeCalibrationMatch[];
   totalEdges: number;
   /** Max relative deviation of any matched edge's implied scale from the median. */
   deviationPct: number;
+  /** The declared area (m², e.g. the plan's "Balance Area … SQ.M" figure) the
+   *  scale was anchored to, or null when no declared area corroborated the
+   *  cota consensus. When set, polygon area at `scale` equals this exactly. */
+  anchoredAreaM2: number | null;
   /** True when enough edges matched and they agree closely enough to trust
    *  without a manual double-check. Callers should still show the matches
    *  for visual confirmation before applying. */
@@ -177,14 +228,39 @@ export function tryAutoCalibrate(polygonPx: Point[], textItems: PdfTextItem[]): 
   const maxDeviation =
     median > 0 ? Math.max(...matches.map((m) => Math.abs(m.impliedScale - median) / median)) : 1;
 
+  // Area anchoring: the plan usually declares the parcel's official area
+  // ("Balance Area … SQ.M"). If one of the declared figures implies a scale
+  // within 3% of the cota consensus, adopt it — the polygon's computed area
+  // then matches the official number exactly, and the agreement doubles as an
+  // independent cross-check of the calibration.
+  const pxArea = polygonArea(polygonPx);
+  let anchoredAreaM2: number | null = null;
+  let scale = median;
+  if (pxArea > 0 && median > 0) {
+    let best: { area: number; diff: number } | null = null;
+    for (const area of extractAreaLabels(textItems)) {
+      if (area <= 0) continue;
+      const impliedScale = Math.sqrt(area / pxArea);
+      const diff = Math.abs(impliedScale - median) / median;
+      if (diff <= 0.03 && (!best || diff < best.diff)) best = { area, diff };
+    }
+    if (best) {
+      anchoredAreaM2 = best.area;
+      scale = Math.sqrt(best.area / pxArea);
+    }
+  }
+
   return {
-    scale: median,
+    scale,
     matches,
     totalEdges: polygonPx.length,
     deviationPct: maxDeviation * 100,
+    anchoredAreaM2,
     // ≥3 agreeing edges is very unlikely by chance; 2 could coincide, so a
-    // 2-edge consensus is shown for review instead of applied automatically.
-    confident: matches.length >= 3 && maxDeviation < 0.08,
+    // 2-edge consensus needs the declared-area cross-check to auto-apply,
+    // otherwise it's shown for review.
+    confident:
+      maxDeviation < 0.08 && (matches.length >= 3 || (matches.length >= 2 && anchoredAreaM2 !== null)),
   };
 }
 

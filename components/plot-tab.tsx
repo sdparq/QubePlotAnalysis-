@@ -116,11 +116,14 @@ export default function PlotTab() {
     if (result?.confident) {
       const ref = pickReferenceEdge(result, poly);
       const { plotPolygon, areaM2 } = polygonPxToMetres(poly, result.scale);
+      // Prefer the plan's declared area verbatim when the scale was anchored
+      // to it — the polygon then agrees with the official figure exactly.
+      const area = result.anchoredAreaM2 ?? Math.round(areaM2 * 100) / 100;
       patch({
         parcel: { ...parcelObj, tracePolygonPx: poly, calibration: ref },
         plotMode: "polygon",
         plotPolygon,
-        plotArea: project.plotArea > 0 ? project.plotArea : Math.round(areaM2 * 100) / 100,
+        plotArea: project.plotArea > 0 ? project.plotArea : area,
       });
       setAutoApplied(true);
       return true;
@@ -518,7 +521,9 @@ export default function PlotTab() {
                     {autoApplied && autoCalib ? (
                       <span className="text-qube-700 font-medium">
                         ✓ Auto-calibrated from {autoCalib.matches.length} cotas · deviation{" "}
-                        {autoCalib.deviationPct.toFixed(1)}% · 1 px ≈ {autoCalib.scale.toFixed(4)} m
+                        {autoCalib.deviationPct.toFixed(1)}%
+                        {autoCalib.anchoredAreaM2 !== null &&
+                          ` · area anchored to the plan's declared ${autoCalib.anchoredAreaM2.toLocaleString("en-US")} m²`}
                       </span>
                     ) : (
                       <>Reference: {parcel.calibration.metres.toFixed(2)} m between picked points</>

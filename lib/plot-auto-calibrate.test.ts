@@ -162,3 +162,74 @@ describe("tryAutoCalibrate · consensus vs proximity", () => {
     expect(e1?.labelMetres).toBeCloseTo(20, 2);
   });
 });
+
+import { extractAreaLabels } from "./plot-auto-calibrate";
+
+describe("extractAreaLabels", () => {
+  it("parses SQ.M figures and ignores SQ.F", () => {
+    const out = extractAreaLabels([
+      { text: "3654.45 SQ.M", x: 0, y: 0 },
+      { text: "40493 SQ.F", x: 0, y: 20 },
+      { text: "3,761.92 SQ.M", x: 0, y: 40 },
+    ]);
+    expect(out).toEqual([3654.45, 3761.92]);
+  });
+
+  it("merges a split area label", () => {
+    const out = extractAreaLabels([
+      { text: "3654.45 ", x: 0, y: 0 },
+      { text: "SQ.M", x: 25, y: 0 },
+    ]);
+    expect(out).toEqual([3654.45]);
+  });
+});
+
+describe("tryAutoCalibrate · area anchoring", () => {
+  // RECT is 400×200 px → 80,000 px². At scale 0.1 the true area is 800 m².
+  it("anchors the scale so the polygon area equals the declared SQ.M figure", () => {
+    const items = [
+      ...labelsAtEdgeMidpoints(0.1),
+      { text: "802.50 SQ.M", x: 1000, y: 1000 }, // declared area, slightly off the cota consensus
+    ];
+    const result = tryAutoCalibrate(RECT, items);
+    expect(result).not.toBeNull();
+    expect(result!.anchoredAreaM2).toBe(802.5);
+    // Polygon area at the anchored scale must equal the declared figure.
+    const area = 80000 * result!.scale * result!.scale;
+    expect(area).toBeCloseTo(802.5, 6);
+  });
+
+  it("picks the closest declared figure when several are within tolerance", () => {
+    // 800 (balance) vs 830 (total, ~1.9% away in scale terms) — balance wins.
+    const items = [
+      ...labelsAtEdgeMidpoints(0.1),
+      { text: "830.00 SQ.M", x: 1000, y: 1000 },
+      { text: "800.00 SQ.M", x: 1000, y: 1050 },
+    ];
+    const result = tryAutoCalibrate(RECT, items);
+    expect(result!.anchoredAreaM2).toBe(800);
+    expect(result!.scale).toBeCloseTo(0.1, 6);
+  });
+
+  it("ignores declared figures that contradict the cota consensus", () => {
+    const items = [
+      ...labelsAtEdgeMidpoints(0.1),
+      { text: "107.47 SQ.M", x: 1000, y: 1000 }, // affected-area figure, way off
+    ];
+    const result = tryAutoCalibrate(RECT, items);
+    expect(result!.anchoredAreaM2).toBeNull();
+    expect(result!.scale).toBeCloseTo(0.1, 4);
+  });
+
+  it("upgrades a 2-cota consensus to confident when the declared area agrees", () => {
+    const items = [
+      ...labelsAtEdgeMidpoints(0.1).slice(0, 2), // only 2 cotas → not confident alone
+      { text: "800.00 SQ.M", x: 1000, y: 1000 },
+    ];
+    const result = tryAutoCalibrate(RECT, items);
+    expect(result).not.toBeNull();
+    expect(result!.matches).toHaveLength(2);
+    expect(result!.anchoredAreaM2).toBe(800);
+    expect(result!.confident).toBe(true);
+  });
+});
