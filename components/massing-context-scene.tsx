@@ -4,7 +4,7 @@ import { OrbitControls, Edges, Line, TransformControls } from "@react-three/drei
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { Point } from "@/lib/geom";
-import { polygonBBox } from "@/lib/geom";
+import { polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import type { CustomNeighbor } from "@/lib/types";
 import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
@@ -312,6 +312,9 @@ export default function MassingContextScene(props: ContextSceneProps) {
   }, []);
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
+  // Anchor the PLOT CENTRE (not the polygon's arbitrary local origin) to the
+  // lat/lon coordinate — traced polygons are rarely centred on (0,0).
+  const plotCentre = useMemo(() => polygonCentroid(plot), [plot]);
   const maxDim = Math.max(bbox.w, bbox.h, ...volumes.map((v) => v.toY), 30);
   const camDist = Math.max(contextRadiusM * 1.4, maxDim * 1.5);
   const headingRad = (northHeadingDeg * Math.PI) / 180;
@@ -492,6 +495,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
           rotation={[0, -headingRad, 0]}
           position={[buildingXOffsetM, buildingYOffsetM, buildingZOffsetM]}
         >
+         <group position={[-plotCentre.x, 0, plotCentre.y]}>
           {edgeColors && edgeColors.length === plot.length ? (
             plot.map((p, i) => {
               const next = plot[(i + 1) % plot.length];
@@ -574,6 +578,7 @@ export default function MassingContextScene(props: ContextSceneProps) {
               );
             });
           })}
+         </group>
         </group>
 
         <OrbitControls
