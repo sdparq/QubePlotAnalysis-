@@ -34,6 +34,9 @@ export interface FacadeParams {
   podiumLoungeBbq: boolean;
 }
 
+const SIDEWALK_W = 3; // sidewalk ring width around the plot (m)
+const ROAD_W = 8;     // road ring width beyond the sidewalk (m)
+
 /** Deterministic per-cell hash → [0,1). Stable across renders for a given seed. */
 function cellRand(seed: number, i: number, j: number, salt = 0): number {
   let h = (seed | 0) ^ Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(j + 1, 0x85ebca6b) ^ Math.imul(salt + 1, 0xc2b2ae35);
@@ -117,6 +120,21 @@ export default function MassingScene(props: SceneProps) {
 
   const plotShape = useMemo(() => polyToShape(plot), [plot]);
   const buildableShape = useMemo(() => (buildable.length >= 3 ? polyToShape(buildable) : null), [buildable]);
+
+  // Street context around the plot: a sidewalk ring hugging the plot line,
+  // wrapped by a road ring with a dashed centreline. Negative offsets grow outward.
+  const sidewalkOuter = useMemo(
+    () => (plot.length >= 3 ? offsetPolygon(plot, plot.map(() => -SIDEWALK_W)) : []),
+    [plot],
+  );
+  const roadOuter = useMemo(
+    () => (plot.length >= 3 ? offsetPolygon(plot, plot.map(() => -(SIDEWALK_W + ROAD_W))) : []),
+    [plot],
+  );
+  const roadCentreline = useMemo(
+    () => (plot.length >= 3 ? offsetPolygon(plot, plot.map(() => -(SIDEWALK_W + ROAD_W / 2))) : []),
+    [plot],
+  );
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const goalRef = useRef<CameraGoal | null>(null);
@@ -219,6 +237,25 @@ export default function MassingScene(props: SceneProps) {
         position={[centroid.x, -0.001, -centroid.y]}
         infiniteGrid
       />
+
+      {/* Street context: road ring, dashed centreline, then the sidewalk ring */}
+      <GroundRing inner={sidewalkOuter} outer={roadOuter} y={0.002} color="#5b5a56" roughness={1} />
+      {roadCentreline.length >= 3 && (
+        <Line
+          points={closedPoints(roadCentreline, 0.006)}
+          color="#efe9d8"
+          lineWidth={1.5}
+          dashed
+          dashSize={2.2}
+          gapSize={2.2}
+          transparent
+          opacity={0.85}
+        />
+      )}
+      <GroundRing inner={plot} outer={sidewalkOuter} y={0.004} color="#d9d4c7" roughness={0.95} />
+      {sidewalkOuter.length >= 3 && (
+        <Line points={closedPoints(sidewalkOuter, 0.008)} color="#b5b0a2" lineWidth={1} transparent opacity={0.7} />
+      )}
 
       {plotShape && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
@@ -510,6 +547,39 @@ function FloorRing({
         />
       )}
     </>
+  );
+}
+
+/** Flat ring between two nested polygons (outer minus inner), lying on the ground plane. */
+function GroundRing({
+  inner, outer, y, color, roughness = 1,
+}: {
+  inner: Point[];
+  outer: Point[];
+  y: number;
+  color: string;
+  roughness?: number;
+}) {
+  const shape = useMemo(() => {
+    if (outer.length < 3) return null;
+    const s = polyToShape(outer);
+    if (!s) return null;
+    if (inner.length >= 3) {
+      const src = inner.slice().reverse(); // holes need opposite winding
+      const path = new THREE.Path();
+      path.moveTo(src[0].x, src[0].y);
+      for (let i = 1; i < src.length; i++) path.lineTo(src[i].x, src[i].y);
+      path.closePath();
+      s.holes.push(path);
+    }
+    return s;
+  }, [inner, outer]);
+  if (!shape) return null;
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, y, 0]} receiveShadow>
+      <shapeGeometry args={[shape]} />
+      <meshStandardMaterial color={color} roughness={roughness} />
+    </mesh>
   );
 }
 
