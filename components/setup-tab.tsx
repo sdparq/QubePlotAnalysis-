@@ -78,7 +78,7 @@ export default function SetupTab() {
           <Field label="Project name">
             <input className="cell-input" value={project.name} onChange={(e) => patch({ name: e.target.value })} />
           </Field>
-          <Field label="Dubai zone" hint={detectedClass ? `Class ${detectedClass} · ${library[detectedClass].name}` : "Unknown class"}>
+          <Field label="Zone (Dubai / Abu Dhabi)" hint={detectedClass ? `Class ${detectedClass} · ${library[detectedClass].name}` : "Unknown class"}>
             <select className="cell-input" value={project.zone} onChange={(e) => patch({ zone: e.target.value })}>
               {zoneOptions.map((z) => <option key={z}>{z}</option>)}
             </select>

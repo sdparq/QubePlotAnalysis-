@@ -234,7 +234,7 @@ export default function TypologiesTab() {
             <strong>Apply class mix</strong> button here. Either:
           </p>
           <ul className="text-[12.5px] text-ink-800 mt-1.5 leading-snug list-disc pl-5 space-y-0.5">
-            <li>Pick a listed zone in <strong>Setup</strong> (tab 01, &quot;Dubai zone&quot;), or</li>
+            <li>Pick a listed zone in <strong>Setup</strong> (tab 01, &quot;Zone (Dubai / Abu Dhabi)&quot;), or</li>
             <li>Open <strong>Class Library</strong> (tab L) and add this exact zone name to whichever class fits it.</li>
           </ul>
           <p className="text-[11px] text-ink-600 mt-2 leading-snug">

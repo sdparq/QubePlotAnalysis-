@@ -93,6 +93,9 @@ const LOCATIONS_A = [
   "Jumeirah Second",
   "Jumeirah Bay Island",
   "Pearl Jumeirah",
+  "Saadiyat Island",
+  "Al Bateen",
+  "Al Maryah Island",
 ];
 const LOCATIONS_B = [
   "Dubai Marina",
@@ -105,6 +108,10 @@ const LOCATIONS_B = [
   "Umm Suqeim Third",
   "La Mer",
   "DIFC",
+  "Al Reem Island",
+  "Yas Island",
+  "Al Raha Beach",
+  "Corniche Road",
 ];
 const LOCATIONS_C = [
   "Meydan One",
@@ -128,6 +135,10 @@ const LOCATIONS_C = [
   "The Hills",
   "Al Barari",
   "Dubai Design District",
+  "Danet Abu Dhabi",
+  "Al Khalidiya",
+  "Al Zahiyah (Tourist Club Area)",
+  "Al Muroor",
 ];
 const LOCATIONS_D = [
   "Jumeirah Village Circle (JVC)",
@@ -136,6 +147,9 @@ const LOCATIONS_D = [
   "Expo City",
   "Al Barshaa South Third",
   "Jumeirah Heights",
+  "Khalifa City A",
+  "Al Reef",
+  "Masdar City",
 ];
 const LOCATIONS_E = [
   "Dubai South",
@@ -158,6 +172,9 @@ const LOCATIONS_E = [
   "Trade Center Second",
   "Muhaisanah First",
   "Mudon",
+  "Mohammed Bin Zayed City",
+  "Al Shamkha",
+  "Baniyas",
 ];
 const LOCATIONS_F = [
   "Dubailand Residence Complex",
@@ -175,6 +192,8 @@ const LOCATIONS_F = [
   "Falcon City of Wonders",
   "Bur Dubai",
   "Deira",
+  "Mussafah",
+  "Al Falah",
 ];
 const LOCATIONS_G = [
   "International City",
@@ -184,7 +203,31 @@ const LOCATIONS_G = [
   "Dubai Investment Park (DIP)",
   "Dubai Industrial City",
   "Dubai Waterfront",
+  "ICAD (Industrial City of Abu Dhabi)",
+  "Al Wathba",
 ];
+
+/** Abu Dhabi zones seeded into the library above — everything else defaults
+ *  to Dubai. Used only to power the city filter/tag in the Class Library UI;
+ *  classForZone() and the rest of the app treat all locations the same way.
+ *  These reuse each class's existing (Dubai-sourced) typology mix, areas and
+ *  pricing as a relative-tier proxy — not Abu-Dhabi-calibrated figures. */
+export const ABU_DHABI_LOCATIONS: string[] = [
+  "Saadiyat Island", "Al Bateen", "Al Maryah Island",
+  "Al Reem Island", "Yas Island", "Al Raha Beach", "Corniche Road",
+  "Danet Abu Dhabi", "Al Khalidiya", "Al Zahiyah (Tourist Club Area)", "Al Muroor",
+  "Khalifa City A", "Al Reef", "Masdar City",
+  "Mohammed Bin Zayed City", "Al Shamkha", "Baniyas",
+  "Mussafah", "Al Falah",
+  "ICAD (Industrial City of Abu Dhabi)", "Al Wathba",
+];
+
+export type Emirate = "Dubai" | "Abu Dhabi";
+
+/** Which emirate a location belongs to — everything not in ABU_DHABI_LOCATIONS is Dubai. */
+export function emirateForLocation(name: string): Emirate {
+  return ABU_DHABI_LOCATIONS.includes(name) ? "Abu Dhabi" : "Dubai";
+}
 
 /* ---------------- Per-class mix, areas, prices ---------------- */
 

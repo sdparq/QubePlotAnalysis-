@@ -4,6 +4,8 @@ import {
   ALL_CLASS_LETTERS,
   TYPOLOGY_KEYS,
   TYPOLOGY_LABELS,
+  emirateForLocation,
+  type Emirate,
   type TypologyKey,
   type ZoneClass,
   type ZoneClassRow,
@@ -22,7 +24,7 @@ type Section =
 
 const SECTION_LABELS: { id: Section; label: string; hint: string }[] = [
   { id: "overview", label: "Overview", hint: "Class names + descriptions." },
-  { id: "locations", label: "Locations", hint: "Which Dubai zones fall in each class." },
+  { id: "locations", label: "Locations", hint: "Which zones (Dubai or Abu Dhabi) fall in each class." },
   { id: "typologyMix", label: "Typology mix", hint: "Share of each unit type (sums to 100%)." },
   { id: "avgArea", label: "Average areas (SqFt)", hint: "Typical sellable area per unit type." },
   { id: "salePrice", label: "Sale price (AED/SqFt)", hint: "Indicative GSA price range." },
@@ -42,9 +44,9 @@ export default function ZonesTab() {
       <div className="card">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="section-title">Class library · Dubai</h2>
+            <h2 className="section-title">Class library · Dubai &amp; Abu Dhabi</h2>
             <p className="section-sub">
-              QUBE&apos;s reference matrix of Dubai real-estate classes
+              QUBE&apos;s reference matrix of UAE real-estate classes
               (A&nbsp;&middot; Most luxurious &rarr; G&nbsp;&middot; Economical).
               Each class groups zones with similar typology mix, prices, floor
               heights and parking standard. Everything below is editable and
@@ -147,33 +149,53 @@ function LocationsMatrix({
   library: Record<ZoneClass, ZoneClassRow>;
   update: (l: ZoneClass, p: Partial<ZoneClassRow>) => void;
 }) {
+  const [city, setCity] = useState<Emirate | "all">("all");
   return (
-    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-      {ALL_CLASS_LETTERS.map((letter) => (
-        <LocationsCard
-          key={letter}
-          letter={letter}
-          row={library[letter]}
-          onCommit={(list) => update(letter, { locations: list })}
-        />
-      ))}
+    <div className="grid gap-3">
+      <div className="inline-flex border border-ink-200 bg-bone-50 self-start">
+        {([["all", "Both"], ["Dubai", "Dubai"], ["Abu Dhabi", "Abu Dhabi"]] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setCity(id)}
+            className={`px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] transition-colors ${
+              city === id ? "bg-qube-500 text-white" : "text-ink-700 hover:bg-bone-100"
+            }`}
+          >{label}</button>
+        ))}
+      </div>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {ALL_CLASS_LETTERS.map((letter) => (
+          <LocationsCard
+            key={letter}
+            letter={letter}
+            row={library[letter]}
+            cityFilter={city}
+            onCommit={(list) => update(letter, { locations: list })}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
 function LocationsCard({
-  letter, row, onCommit,
+  letter, row, cityFilter, onCommit,
 }: {
   letter: ZoneClass;
   row: ZoneClassRow;
+  cityFilter: Emirate | "all";
   onCommit: (list: string[]) => void;
 }) {
-  const stored = row.locations.join("\n");
+  // Zones belonging to the OTHER city, hidden while a filter is active — kept
+  // untouched and spliced back in on commit so switching filters never drops data.
+  const hidden = cityFilter === "all" ? [] : row.locations.filter((loc) => emirateForLocation(loc) !== cityFilter);
+  const visible = cityFilter === "all" ? row.locations : row.locations.filter((loc) => emirateForLocation(loc) === cityFilter);
+  const stored = visible.join("\n");
   const [draft, setDraft] = useState(stored);
   const [editing, setEditing] = useState(false);
 
-  // Keep the local draft in sync when the stored list changes from elsewhere
-  // (e.g. an import or another tab) and we're not currently typing.
+  // Keep the local draft in sync when the stored list or the active city
+  // filter changes from elsewhere, and we're not currently typing.
   useEffect(() => {
     if (!editing) setDraft(stored);
   }, [stored, editing]);
@@ -181,7 +203,7 @@ function LocationsCard({
   function commit() {
     setEditing(false);
     const list = draft.split("\n").map((s) => s.trim()).filter(Boolean);
-    onCommit(list);
+    onCommit([...hidden, ...list]);
   }
 
   const liveCount = draft.split("\n").map((s) => s.trim()).filter(Boolean).length;
@@ -201,7 +223,10 @@ function LocationsCard({
         onBlur={commit}
         placeholder="One zone per line"
       />
-      <div className="text-[10.5px] text-ink-500">{liveCount} zones</div>
+      <div className="text-[10.5px] text-ink-500">
+        {liveCount} zone{liveCount === 1 ? "" : "s"}
+        {cityFilter !== "all" && hidden.length > 0 && ` · ${hidden.length} more hidden (other city)`}
+      </div>
     </div>
   );
 }
