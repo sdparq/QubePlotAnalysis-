@@ -222,6 +222,10 @@ export interface FacadeConfig {
   finWidthM?: number;
   /** Fin projection depth outward from the facade (m). Default 0.35. */
   finDepthM?: number;
+  /** Model a swimming pool on the podium roof deck, only if it fits. */
+  podiumPool?: boolean;
+  /** Model a lounge + BBQ terrace on the podium roof deck, only if it fits. */
+  podiumLoungeBbq?: boolean;
 }
 
 export interface FloorSection {

@@ -176,11 +176,15 @@ export default function MassingTab() {
     finSpacingM: project.facade?.finSpacingM ?? 1.0,
     finWidthM: project.facade?.finWidthM ?? 0.15,
     finDepthM: project.facade?.finDepthM ?? 0.35,
+    podiumPool: project.facade?.podiumPool ?? false,
+    podiumLoungeBbq: project.facade?.podiumLoungeBbq ?? false,
   } as const;
 
   function patchFacade(partial: Partial<NonNullable<typeof project.facade>>) {
     patch({ facade: { ...project.facade, ...partial } });
   }
+
+  const [amenityFit, setAmenityFit] = useState({ pool: true, lounge: true });
 
   function requestPreset(kind: "iso" | "front" | "top") {
     setAutoRotate(false);
@@ -348,6 +352,7 @@ export default function MassingTab() {
                 autoRotate={autoRotate}
                 captureRef={captureRef}
                 facade={facadeParams}
+                onAmenityFit={setAmenityFit}
               />
               <div className="absolute bottom-2 left-2 flex items-stretch gap-1.5 flex-wrap">
                 <div className="inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
@@ -433,6 +438,14 @@ export default function MassingTab() {
             />
 
             <FacadePanel params={facadeParams} onPatch={patchFacade} />
+
+            <PodiumAmenitiesPanel
+              hasPodium={podiumH > 0}
+              pool={facadeParams.podiumPool}
+              lounge={facadeParams.podiumLoungeBbq}
+              fit={amenityFit}
+              onPatch={patchFacade}
+            />
 
             <TowerOffset
               dx={towerDx}
@@ -1015,6 +1028,61 @@ function FacadePanel({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function PodiumAmenitiesPanel({
+  hasPodium, pool, lounge, fit, onPatch,
+}: {
+  hasPodium: boolean;
+  pool: boolean;
+  lounge: boolean;
+  fit: { pool: boolean; lounge: boolean };
+  onPatch: (p: { podiumPool?: boolean; podiumLoungeBbq?: boolean }) => void;
+}) {
+  return (
+    <div className="border border-ink-200">
+      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200">
+        <span className="eyebrow text-ink-500 text-[10px]">Podium roof amenities</span>
+      </div>
+      <div className="p-3 grid gap-2">
+        <label className={`flex items-center gap-2 text-[12px] ${hasPodium ? "text-ink-900" : "text-ink-400"}`}>
+          <input
+            type="checkbox"
+            checked={pool}
+            disabled={!hasPodium}
+            onChange={(e) => onPatch({ podiumPool: e.target.checked })}
+          />
+          Swimming pool
+        </label>
+        {pool && hasPodium && !fit.pool && (
+          <p className="text-[10.5px] text-amber-700 leading-snug pl-5 -mt-1">
+            No room on the podium deck for a pool — the ring between the tower and the podium
+            edge is too narrow. Increase Tower setback or reduce Podium setback per edge above.
+          </p>
+        )}
+        <label className={`flex items-center gap-2 text-[12px] ${hasPodium ? "text-ink-900" : "text-ink-400"}`}>
+          <input
+            type="checkbox"
+            checked={lounge}
+            disabled={!hasPodium}
+            onChange={(e) => onPatch({ podiumLoungeBbq: e.target.checked })}
+          />
+          Lounge &amp; BBQ terrace
+        </label>
+        {lounge && hasPodium && !fit.lounge && (
+          <p className="text-[10.5px] text-amber-700 leading-snug pl-5 -mt-1">
+            No room on the podium deck for a lounge terrace — same fix: widen the ring by
+            adjusting the Tower / Podium setbacks per edge above.
+          </p>
+        )}
+        <p className="text-[10.5px] text-ink-500 leading-snug">
+          {hasPodium
+            ? "Placed on the podium roof ring exposed once the (further set back) tower rises above it — only if there is enough clear depth."
+            : "Add podium floors in Setup → Floor breakdown to unlock roof amenities."}
+        </p>
+      </div>
     </div>
   );
 }

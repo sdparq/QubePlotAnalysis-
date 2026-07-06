@@ -61,6 +61,19 @@ export function pointSegmentDistance(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
 }
 
+/** Minimum distance from a point to the boundary of a (closed) polygon. */
+export function pointToPolygonDistance(p: Point, poly: Point[]): number {
+  if (poly.length < 2) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const d = pointSegmentDistance(p, a, b);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 /** Clean up a noisy closed polygon: drop near-duplicate consecutive vertices,
  *  then iteratively remove vertices that are (nearly) collinear with their
  *  neighbours. Vector paths extracted from PDFs often carry hundreds of

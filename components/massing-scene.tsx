@@ -7,6 +7,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Point } from "@/lib/geom";
 import { isCounterClockwise, offsetPolygon, polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
+import { planPodiumAmenities, type PlacedAmenity } from "@/lib/podium-amenities";
 
 export type ViewPresetKind = "iso" | "front" | "top";
 
@@ -27,6 +28,10 @@ export interface FacadeParams {
   finSpacingM: number;
   finWidthM: number;
   finDepthM: number;
+  /** Model a swimming pool on the podium roof deck, only if it fits. */
+  podiumPool: boolean;
+  /** Model a lounge + BBQ terrace on the podium roof deck, only if it fits. */
+  podiumLoungeBbq: boolean;
 }
 
 /** Deterministic per-cell hash → [0,1). Stable across renders for a given seed. */
@@ -62,6 +67,8 @@ export interface SceneProps {
   captureRef?: MutableRefObject<(() => string) | null>;
   /** Facade treatment; "residential" models slabs, glazing, mullions and balconies on the tower. */
   facade?: FacadeParams;
+  /** Reports whether the requested podium amenities actually found room, so the tab can show a hint. */
+  onAmenityFit?: (fit: { pool: boolean; lounge: boolean }) => void;
 }
 
 interface CameraGoal {
@@ -73,10 +80,28 @@ export default function MassingScene(props: SceneProps) {
   const {
     plot, buildable, volumes, floorHeight, showFrontMarker, edgeColors,
     volumeLabels, showAnnotations = true, viewPreset, autoRotate, captureRef,
-    facade,
+    facade, onAmenityFit,
   } = props;
   const facadeActive = facade?.mode === "residential";
   const finsActive = facade?.groundPodiumTreatment === "fins";
+
+  const podiumVolume = useMemo(() => volumes.find((v) => v.kind === "podium"), [volumes]);
+  const towerVolume = useMemo(() => volumes.find((v) => v.kind === "tower"), [volumes]);
+  const wantPool = !!facade?.podiumPool;
+  const wantLounge = !!facade?.podiumLoungeBbq;
+  const amenityPlan = useMemo(
+    () =>
+      podiumVolume && (wantPool || wantLounge)
+        ? planPodiumAmenities(podiumVolume.polygon, towerVolume?.polygon ?? [], { pool: wantPool, lounge: wantLounge })
+        : { pool: null, lounge: null },
+    [podiumVolume, towerVolume, wantPool, wantLounge],
+  );
+  useEffect(() => {
+    onAmenityFit?.({
+      pool: wantPool ? amenityPlan.pool !== null : true,
+      lounge: wantLounge ? amenityPlan.lounge !== null : true,
+    });
+  }, [amenityPlan, wantPool, wantLounge, onAmenityFit]);
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -272,6 +297,12 @@ export default function MassingScene(props: SceneProps) {
           </group>
         );
       })}
+
+      {/* Podium roof amenities: pool and/or lounge + BBQ terrace, on the ring
+          of podium deck left exposed once the (further set back) tower rises above it. */}
+      {podiumVolume && (
+        <PodiumAmenities pool={amenityPlan.pool} lounge={amenityPlan.lounge} toY={podiumVolume.toY} />
+      )}
 
       {/* Floor-level rings around each volume — emphasised every 5 floors.
           The modelled facade draws real slabs on the tower, so its rings are skipped. */}
@@ -788,6 +819,91 @@ function VerticalFinScreen({
   }, [polygon, fromY, height, finSpacingM, finWidthM, finDepthM]);
 
   return <InstancedBoxes matrices={fins} color="#9c8f6e" roughness={0.5} metalness={0.25} />;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Podium roof amenities                             */
+/* -------------------------------------------------------------------------- */
+
+function boxMatrix(center: Point, y: number, sizeAlong: number, height: number, sizeAcross: number, yaw: number): THREE.Matrix4 {
+  const pos = new THREE.Vector3(center.x, y, -center.y);
+  const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+  const scale = new THREE.Vector3(sizeAlong, height, sizeAcross);
+  return new THREE.Matrix4().compose(pos, quat, scale);
+}
+
+function PodiumAmenities({
+  pool, lounge, toY,
+}: {
+  pool: PlacedAmenity | null;
+  lounge: PlacedAmenity | null;
+  toY: number;
+}) {
+  return (
+    <>
+      {pool && <Pool plan={pool} toY={toY} />}
+      {lounge && <LoungeBbq plan={lounge} toY={toY} />}
+    </>
+  );
+}
+
+/** A shallow water surface on a coping rim, sized and placed by planPodiumAmenities. */
+function Pool({ plan, toY }: { plan: PlacedAmenity; toY: number }) {
+  const { center, length, width, yaw } = plan;
+  const rim = useMemo(() => [boxMatrix(center, toY + 0.06, length + 0.6, 0.12, width + 0.6, yaw)], [center, toY, length, width, yaw]);
+  const water = useMemo(() => [boxMatrix(center, toY + 0.11, length, 0.06, width, yaw)], [center, toY, length, width, yaw]);
+  return (
+    <>
+      <InstancedBoxes matrices={rim} color="#d8d3c2" roughness={0.9} />
+      <InstancedBoxes matrices={water} color="#2f8a92" roughness={0.05} metalness={0.3} opacity={0.88} />
+    </>
+  );
+}
+
+/** A row of sun loungers plus a BBQ counter block at one end, laid out within the planned rectangle. */
+function LoungeBbq({ plan, toY }: { plan: PlacedAmenity; toY: number }) {
+  const { center, length, width, yaw } = plan;
+
+  const { loungers, bbq } = useMemo(() => {
+    // "along" tracks the edge direction (maps to a box's local +X once rotated
+    // by `yaw`); "across" tracks the perpendicular direction (local +Z). Both
+    // derived directly from yaw so they always agree with boxMatrix's rotation.
+    const along: Point = { x: Math.cos(yaw), y: Math.sin(yaw) };
+    const across: Point = { x: Math.sin(yaw), y: -Math.cos(yaw) };
+    const toWorld = (alongT: number, acrossT: number): Point => ({
+      x: center.x + along.x * alongT + across.x * acrossT,
+      y: center.y + along.y * alongT + across.y * acrossT,
+    });
+
+    const bbqLen = Math.min(length * 0.3, 2.4);
+    const bbqDepth = Math.min(width * 0.7, 0.9);
+    const bbqAlong = length / 2 - bbqLen / 2; // flush against the "+along" end
+
+    const loungeZoneLen = length - bbqLen - 1;
+    const loungerThickness = 0.9; // along-axis footprint per lounger, including its gap
+    const loungerCount = Math.max(0, Math.floor(loungeZoneLen / loungerThickness));
+    const loungerLen = Math.min(width * 0.75, 2.0); // the lounger's long dimension, across-axis
+    const loungerWidth = 0.75; // along-axis footprint before the gap
+    const startAlong = -length / 2;
+    const span = loungerCount * loungerThickness;
+    const loungerStart = startAlong + Math.max(0, (loungeZoneLen - span) / 2);
+
+    const loungers: THREE.Matrix4[] = [];
+    for (let i = 0; i < loungerCount; i++) {
+      const alongT = loungerStart + i * loungerThickness + loungerWidth / 2;
+      loungers.push(boxMatrix(toWorld(alongT, 0), toY + 0.18, loungerWidth, 0.35, loungerLen, yaw));
+    }
+    const bbq = [boxMatrix(toWorld(bbqAlong, 0), toY + 0.48, bbqLen, 0.95, bbqDepth, yaw)];
+
+    return { loungers, bbq };
+  }, [center, length, width, yaw, toY]);
+
+  return (
+    <>
+      <InstancedBoxes matrices={loungers} color="#a9855f" roughness={0.65} />
+      <InstancedBoxes matrices={bbq} color="#3f3d38" roughness={0.5} metalness={0.15} />
+    </>
+  );
 }
 
 function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {
