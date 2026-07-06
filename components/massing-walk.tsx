@@ -362,44 +362,6 @@ function StreetLamps({ ring }: { ring: Point[] }) {
   );
 }
 
-const CAR_COLORS = ["#eceae5", "#cfd0d3", "#26282d", "#801f26", "#b8a888", "#39506b", "#5b5e63", "#e6e6e8"];
-
-function ParkedCars({ ring }: { ring: Point[] }) {
-  const cars = useMemo(
-    () =>
-      sampleAlongPolygon(ring, 8.5)
-        .filter((s, i) => hash01(i, 21) < 0.55)
-        .map((s, i) => ({
-          ...s,
-          color: CAR_COLORS[Math.floor(hash01(i, 22) * CAR_COLORS.length)],
-          flip: hash01(i, 23) > 0.5 ? Math.PI : 0,
-        })),
-    [ring],
-  );
-  return (
-    <>
-      {cars.map((c, i) => (
-        <group key={i} position={[c.x, 0, -c.y]} rotation={[0, c.yaw + c.flip, 0]}>
-          <mesh position={[0, 0.55, 0]} castShadow>
-            <boxGeometry args={[4.35, 0.62, 1.82]} />
-            <meshPhysicalMaterial color={c.color} roughness={0.25} metalness={0.7} clearcoat={0.8} clearcoatRoughness={0.15} envMapIntensity={1.2} />
-          </mesh>
-          <mesh position={[-0.25, 1.12, 0]} castShadow>
-            <boxGeometry args={[2.25, 0.55, 1.66]} />
-            <meshPhysicalMaterial color="#141b20" roughness={0.08} metalness={0.4} envMapIntensity={1.4} />
-          </mesh>
-          {[[-1.4, 0.78], [1.4, 0.78], [-1.4, -0.78], [1.4, -0.78]].map(([wx, wz], w) => (
-            <mesh key={w} position={[wx, 0.33, wz]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.33, 0.33, 0.26, 14]} />
-              <meshStandardMaterial color="#17181a" roughness={0.9} />
-            </mesh>
-          ))}
-        </group>
-      ))}
-    </>
-  );
-}
-
 const NEIGHBOR_TONES = ["#d8d2c2", "#cfc8b8", "#c2bcae", "#e0dacb", "#b6b0a3"];
 
 function NeighborBlocks({
@@ -511,7 +473,6 @@ function WalkScene({ plot, volumes, floorHeight, facade }: Omit<WalkProps, "onEx
   const roadOuter = useMemo(() => offsetPolygon(plot, plot.map(() => -(SIDEWALK_W + ROAD_W))), [plot]);
   const treeRing = useMemo(() => offsetPolygon(plot, plot.map(() => -(SIDEWALK_W * 0.55))), [plot]);
   const lampRing = useMemo(() => offsetPolygon(plot, plot.map(() => -(SIDEWALK_W - 0.4))), [plot]);
-  const parkRing = useMemo(() => offsetPolygon(plot, plot.map(() => -(SIDEWALK_W + 2.1))), [plot]);
   const centreline = useMemo(() => offsetPolygon(plot, plot.map(() => -(SIDEWALK_W + ROAD_W / 2))), [plot]);
 
   // The tier standing on the ground — its footprint bounds the base planting ring.
@@ -625,7 +586,7 @@ function WalkScene({ plot, volumes, floorHeight, facade }: Omit<WalkProps, "onEx
         <TexturedRing inner={[]} outer={plot} y={0.03} map={tex.paver} roughness={0.9} />
       )}
 
-      {/* The project building — same treatments as the studio viewer, plus balcony greenery */}
+      {/* The project building — same treatments as the studio viewer */}
       {volumes.map((v, i) => {
         const shape = volumeShapes[i];
         const depth = v.toY - v.fromY;
@@ -640,7 +601,6 @@ function WalkScene({ plot, volumes, floorHeight, facade }: Omit<WalkProps, "onEx
               toY={v.toY}
               floorHeight={floorHeight}
               params={facade}
-              greenery
             />
           );
         }
@@ -670,7 +630,6 @@ function WalkScene({ plot, volumes, floorHeight, facade }: Omit<WalkProps, "onEx
       {/* Streetscape */}
       <StreetPlanting ring={treeRing} />
       <StreetLamps ring={lampRing} />
-      <ParkedCars ring={parkRing} />
       <NeighborBlocks centroid={centroid} ringRadius={ringRadius} facadeTex={tex.facade} />
 
       <WalkControls blocked={blocked} />
@@ -733,7 +692,7 @@ export default function MassingWalk(props: WalkProps) {
 
       {locked && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/55 text-white/85 text-[12px] tracking-wide rounded-sm">
-          WASD moverse · ratón mirar · Shift correr · ESC pausa
+          WASD move · mouse look · Shift run · ESC pause
         </div>
       )}
 
@@ -741,23 +700,23 @@ export default function MassingWalk(props: WalkProps) {
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="text-center text-bone-100 max-w-[420px] px-8">
             <div className="text-[11px] uppercase tracking-[0.3em] text-bone-200/60 mb-2">Immersive walk</div>
-            <h2 className="text-2xl font-light mb-4">Paseo virtual</h2>
+            <h2 className="text-2xl font-light mb-4">Virtual walk</h2>
             <p className="text-[13px] text-bone-200/80 leading-relaxed mb-6">
-              <strong>WASD</strong> para moverte · <strong>ratón</strong> para mirar ·{" "}
-              <strong>Shift</strong> para correr · <strong>ESC</strong> para pausar
+              <strong>WASD</strong> to move · <strong>mouse</strong> to look ·{" "}
+              <strong>Shift</strong> to run · <strong>ESC</strong> to pause
             </p>
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => controlsRef.current?.lock()}
                 className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
               >
-                ▶ Entrar
+                ▶ Enter
               </button>
               <button
                 onClick={onExit}
                 className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] border border-bone-100/30 text-bone-100 hover:bg-white/10 transition-colors"
               >
-                Salir
+                Exit
               </button>
             </div>
           </div>

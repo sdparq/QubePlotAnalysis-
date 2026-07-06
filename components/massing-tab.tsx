@@ -316,10 +316,10 @@ export default function MassingTab() {
           <div>
             <h2 className="section-title">Massing study · 3D</h2>
             <p className="section-sub">
-              Estratificación simple: el <strong>basement</strong> ocupa la línea de fachada
-              completa; <strong>ground</strong>, <strong>podium</strong> y <strong>torre</strong>{" "}
-              se construyen sobre la huella del solar con su propio setback uniforme. Las alturas
-              de cada tramo vienen del breakdown de Setup.
+              Simple stratification: the <strong>basement</strong> fills the full plot line;{" "}
+              <strong>ground</strong>, <strong>podium</strong> and <strong>tower</strong> are built
+              on the plot footprint with their own per-edge setbacks. Floor heights come from
+              Setup&apos;s floor breakdown.
             </p>
           </div>
           <div className="inline-flex border border-ink-200 bg-bone-50">

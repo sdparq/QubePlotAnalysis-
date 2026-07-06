@@ -104,11 +104,11 @@ export default function CommonAreasTab() {
         <div className="mb-5">
           <h2 className="section-title">Distribution · residential GFA → apartments / common areas</h2>
           <p className="section-sub">
-            Reparte el GFA residencial entre <strong>Amenities</strong>, <strong>Circulation</strong>{" "}
-            y lo que queda para <strong>Apartments</strong>. <strong>Services</strong> (MEP, shafts,
-            plant rooms…) también se introduce como % del GFA residencial pero solo cuenta como{" "}
-            <strong>BUA</strong> (no como GFA) y no reduce la cuota de Apartments. El Apartments GFA
-            que sale aquí alimenta luego Typologies y Apartments.
+            Splits the residential GFA between <strong>Amenities</strong>, <strong>Circulation</strong>{" "}
+            and what remains for <strong>Apartments</strong>. <strong>Services</strong> (MEP, shafts,
+            plant rooms…) is also entered as a % of residential GFA but only counts as{" "}
+            <strong>BUA</strong> (not GFA) and does not reduce the Apartments quota. The Apartments GFA
+            computed here then feeds Typologies and Apartments.
           </p>
         </div>
 
@@ -180,11 +180,11 @@ function TowerYieldCard({
       <div className="mb-4">
         <h2 className="section-title">Tower floors · from residential GFA</h2>
         <p className="section-sub">
-          Escribe la huella de cada tramo tal y como la conoces de tu propio estudio de zoning —
-          no se calcula desde el solar de Massing (para evitar arrastrar errores de trazado). El
-          nº de plantas de la torre sale de dividir el <strong>GFA residencial</strong> entre la{" "}
-          <strong>huella de torre</strong>; Ground y Podium son informativos, para contrastar con
-          el retail/commercial de Setup.
+          Enter each tier's footprint as you know it from your own zoning study —
+          it is not derived from the Massing plot (to avoid dragging tracing errors along). The
+          tower floor count comes from dividing the <strong>residential GFA</strong> by the{" "}
+          <strong>tower footprint</strong>; Ground and Podium are informative, to cross-check
+          against Setup's retail/commercial.
         </p>
       </div>
 
@@ -198,7 +198,7 @@ function TowerYieldCard({
 
         <FootprintRow
           label="Ground floor"
-          hint="Informativo — contrasta con retail/commercial de Setup."
+          hint="Informative — cross-check against Setup's retail/commercial."
           value={y.groundFootprintM2}
           floors={y.groundCount}
           gfa={y.groundGFA}
@@ -206,7 +206,7 @@ function TowerYieldCard({
         />
         <FootprintRow
           label="Podium"
-          hint={`Informativo · × ${y.podiumCount} podium level(s) (Setup → Floor breakdown).`}
+          hint={`Informative · × ${y.podiumCount} podium level(s) (Setup → Floor breakdown).`}
           value={y.podiumFootprintM2}
           floors={y.podiumCount}
           gfa={y.podiumGFA}
@@ -214,7 +214,7 @@ function TowerYieldCard({
         />
         <FootprintRow
           label="Tower (per floor)"
-          hint="Decide el nº de plantas de la torre — ver debajo."
+          hint="Drives the tower floor count — see below."
           value={y.towerFootprintM2}
           floors={y.towerFloors}
           gfa={y.towerGFA}
@@ -225,7 +225,7 @@ function TowerYieldCard({
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <Stat label="Residential GFA" value={y.residentialGFA > 0 ? `${fmt0(y.residentialGFA)} m²` : "—"} />
-        <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="sin cap" />
+        <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
         <div className="border border-ink-200 bg-white p-3">
           <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>
           <input
@@ -234,34 +234,34 @@ function TowerYieldCard({
             min={0}
             className="cell-input text-right !text-[18px] font-light tabular-nums mt-0.5 w-full"
             value={maxTowerFloors ?? ""}
-            placeholder="sin límite"
+            placeholder="unlimited"
             onChange={(e) => {
               const n = parseFloat(e.target.value);
               onSetMaxTowerFloors(Number.isFinite(n) ? n : 0);
             }}
           />
-          <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">Deja vacío si es unlimited</div>
+          <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">Leave empty for unlimited</div>
         </div>
         <Stat
           label="Tower floors (final)"
           value={y.towerFootprintM2 > 0 ? `${fmt0(y.towerFloors)}` : "—"}
-          sub={y.exceedsMax ? "clamped al máximo" : "aplicado al proyecto"}
+          sub={y.exceedsMax ? "clamped to the max" : "applied to the project"}
         />
       </div>
 
       {y.towerFootprintM2 <= 0 && (
         <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] leading-snug">
-          Escribe la huella de torre por planta para calcular cuántas plantas hacen falta.
+          Enter the tower footprint per floor to compute how many floors are needed.
         </div>
       )}
 
       {y.exceedsMax && (
         <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug">
-          Con el máximo de <strong>{y.maxTowerFloors}</strong> plantas sólo caben{" "}
-          <strong>{fmt0(y.towerGFA)} m²</strong> de los <strong>{fmt0(y.residentialGFA)} m²</strong> de
-          GFA residencial — faltan <strong>{fmt0(y.gfaShort)} m²</strong> ({y.floorsShort} planta
-          {y.floorsShort === 1 ? "" : "s"}). Reduce el GFA residencial en Setup, agranda la huella de
-          torre, o si el solar realmente lo permite, sube el máximo de plantas.
+          With the <strong>{y.maxTowerFloors}</strong>-floor cap only{" "}
+          <strong>{fmt0(y.towerGFA)} m²</strong> of the <strong>{fmt0(y.residentialGFA)} m²</strong> of
+          residential GFA fits — <strong>{fmt0(y.gfaShort)} m²</strong> short ({y.floorsShort} floor
+          {y.floorsShort === 1 ? "" : "s"}). Reduce the residential GFA in Setup, enlarge the tower
+          footprint, or raise the floor cap if the plot genuinely allows it.
         </div>
       )}
     </div>
