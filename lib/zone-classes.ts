@@ -173,6 +173,8 @@ const LOCATIONS_F = [
   "Green Community West",
   "Al Barsha First",
   "Falcon City of Wonders",
+  "Bur Dubai",
+  "Deira",
 ];
 const LOCATIONS_G = [
   "International City",
