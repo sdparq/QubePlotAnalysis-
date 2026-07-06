@@ -96,6 +96,8 @@ const LOCATIONS_A = [
   "Saadiyat Island",
   "Al Bateen",
   "Al Maryah Island",
+  "Nurai Island",
+  "Jubail Island",
 ];
 const LOCATIONS_B = [
   "Dubai Marina",
@@ -112,6 +114,10 @@ const LOCATIONS_B = [
   "Yas Island",
   "Al Raha Beach",
   "Corniche Road",
+  "Al Muneera",
+  "Al Zeina",
+  "Al Bandar",
+  "Al Hudayriyat Island",
 ];
 const LOCATIONS_C = [
   "Meydan One",
@@ -139,6 +145,11 @@ const LOCATIONS_C = [
   "Al Khalidiya",
   "Al Zahiyah (Tourist Club Area)",
   "Al Muroor",
+  "Al Nahyan",
+  "Al Manhal",
+  "Al Wahda",
+  "Al Karamah",
+  "Al Mushrif",
 ];
 const LOCATIONS_D = [
   "Jumeirah Village Circle (JVC)",
@@ -150,6 +161,9 @@ const LOCATIONS_D = [
   "Khalifa City A",
   "Al Reef",
   "Masdar City",
+  "Khalifa City B",
+  "Al Rahba",
+  "Al Bahia",
 ];
 const LOCATIONS_E = [
   "Dubai South",
@@ -175,6 +189,9 @@ const LOCATIONS_E = [
   "Mohammed Bin Zayed City",
   "Al Shamkha",
   "Baniyas",
+  "Al Shahama",
+  "Al Manaseer",
+  "Hydra Village",
 ];
 const LOCATIONS_F = [
   "Dubailand Residence Complex",
@@ -194,6 +211,8 @@ const LOCATIONS_F = [
   "Deira",
   "Mussafah",
   "Al Falah",
+  "Madinat Zayed",
+  "Al Shawamekh",
 ];
 const LOCATIONS_G = [
   "International City",
@@ -205,6 +224,8 @@ const LOCATIONS_G = [
   "Dubai Waterfront",
   "ICAD (Industrial City of Abu Dhabi)",
   "Al Wathba",
+  "Musaffah Industrial",
+  "Between the Bridges",
 ];
 
 /** Abu Dhabi zones seeded into the library above — everything else defaults
@@ -213,13 +234,22 @@ const LOCATIONS_G = [
  *  These reuse each class's existing (Dubai-sourced) typology mix, areas and
  *  pricing as a relative-tier proxy — not Abu-Dhabi-calibrated figures. */
 export const ABU_DHABI_LOCATIONS: string[] = [
-  "Saadiyat Island", "Al Bateen", "Al Maryah Island",
+  // A — Most Luxurious
+  "Saadiyat Island", "Al Bateen", "Al Maryah Island", "Nurai Island", "Jubail Island",
+  // B — Premium
   "Al Reem Island", "Yas Island", "Al Raha Beach", "Corniche Road",
+  "Al Muneera", "Al Zeina", "Al Bandar", "Al Hudayriyat Island",
+  // C — Upper mid-tier
   "Danet Abu Dhabi", "Al Khalidiya", "Al Zahiyah (Tourist Club Area)", "Al Muroor",
-  "Khalifa City A", "Al Reef", "Masdar City",
-  "Mohammed Bin Zayed City", "Al Shamkha", "Baniyas",
-  "Mussafah", "Al Falah",
-  "ICAD (Industrial City of Abu Dhabi)", "Al Wathba",
+  "Al Nahyan", "Al Manhal", "Al Wahda", "Al Karamah", "Al Mushrif",
+  // D — Mid-tier
+  "Khalifa City A", "Al Reef", "Masdar City", "Khalifa City B", "Al Rahba", "Al Bahia",
+  // E — Lower mid-tier
+  "Mohammed Bin Zayed City", "Al Shamkha", "Baniyas", "Al Shahama", "Al Manaseer", "Hydra Village",
+  // F — Affordable
+  "Mussafah", "Al Falah", "Madinat Zayed", "Al Shawamekh",
+  // G — Economical
+  "ICAD (Industrial City of Abu Dhabi)", "Al Wathba", "Musaffah Industrial", "Between the Bridges",
 ];
 
 export type Emirate = "Dubai" | "Abu Dhabi";
