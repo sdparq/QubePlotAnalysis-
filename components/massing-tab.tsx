@@ -579,6 +579,7 @@ export default function MassingTab() {
           volumes={sceneVolumes}
           floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
           facade={facadeParams}
+          geometryFacts={geometryFacts}
           onExit={() => setImmersive(false)}
         />
       )}

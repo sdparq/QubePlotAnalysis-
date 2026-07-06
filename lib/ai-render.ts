@@ -51,6 +51,22 @@ CONTEXT: keep the surrounding neighbour volumes in their exact positions but ren
 
 QUALITY: ultra-high-resolution architectural visualisation, sharp focus throughout, professional V-Ray / Corona / Lumion / Enscape look, magazine-cover composition, suitable for a developer marketing brochure. No labels, no text, no people that are recognisable, no logos.`;
 
+export const DEFAULT_WALK_HYPERREAL_PROMPT = `Transform this street-level 3D viewport capture into a photorealistic eye-level architectural photograph, in the visual language of a professional archviz still (V-Ray / Corona / Lumion look).
+
+ABSOLUTE GEOMETRIC FIDELITY (highest priority — do not negotiate):
+- This is an image-to-image render. Reuse the EXACT camera position, eye height, angle, lens/field of view, framing and crop of the input. Do NOT re-frame, pan, dolly, zoom or rotate.
+- The project building's silhouette, footprint, storey count, podium step and every set-back must overlay the input pixel-for-pixel. Do NOT invent extra floors or roof features.
+- If the input image shows corrected (perfectly parallel) verticals — an architectural tilt-shift view — preserve exactly parallel verticals in the output too.
+- If a GEOMETRY FACTS block is given above, the storey counts and floor heights it lists are exact — match them.
+
+PROJECT BUILDING (the building the camera faces, with the detailed facade): contemporary residential tower. White architectural concrete or off-white fibre-cement panels, full-height glazing in dark anodised aluminium frames, deeply carved balcony loggias with warm timber soffits and glass balustrades, crisp shadow lines on every floor slab. Ground/podium levels keep their vertical fin / louvre screens as elegant bronze-anodised brise-soleil.
+
+SETTING — Dubai / Abu Dhabi residential district: this is a dense Gulf-city neighbourhood. The simple box-shaped neighbour volumes in the input are placeholders — render them as realistic contemporary RESIDENTIAL HIGH-RISES and mid-rises: glass curtain walls, sand-toned stone and render, balconies, rooftop amenities — keeping their exact positions and heights. Fill the background haze with a believable residential skyline of further towers. Streets with clean asphalt and lane markings, pale stone sidewalks, granite kerbs, date palms and ficus trees with detailed canopies, landscaped planting strips, street lights, a few pedestrians for scale.
+
+LIGHTING & ATMOSPHERE: late-afternoon Gulf sunlight, warm directional light with long soft shadows across the street, clear blue sky with thin haze near the horizon, gentle heat shimmer in the far distance. Physically based rendering, realistic ambient occlusion, subtle bloom on glazing highlights, cinematic colour grade.
+
+QUALITY: ultra-high-resolution architectural visualisation, sharp focus, magazine-quality composition, suitable for a developer marketing brochure. No labels, no text, no recognisable faces, no logos.`;
+
 async function callGeminiOnce(
   apiKey: string,
   base64: string,

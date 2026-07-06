@@ -2,13 +2,14 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { PointerLockControls, Sky, Edges, Environment, Lightformer } from "@react-three/drei";
 import { EffectComposer, N8AO, Bloom, Vignette } from "@react-three/postprocessing";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
 import type { Point } from "@/lib/geom";
 import { isCounterClockwise, offsetPolygon, polygonBBox, polygonCentroid } from "@/lib/geom";
 import type { Volume } from "@/lib/massing";
 import { planPodiumAmenities } from "@/lib/podium-amenities";
+import { renderSchemeWithGemini, DEFAULT_WALK_HYPERREAL_PROMPT } from "@/lib/ai-render";
 import {
   PodiumAmenities,
   ResidentialFacade,
@@ -29,6 +30,8 @@ export interface WalkProps {
   volumes: Volume[];
   floorHeight: number;
   facade: FacadeParams;
+  /** Exact storey counts / heights header, prepended to the AI render prompt. */
+  geometryFacts?: string;
   onExit: () => void;
 }
 
@@ -206,6 +209,73 @@ function WalkControls({ blocked }: { blocked: (x: number, z: number) => boolean 
     camera.position.y = EYE_H;
   });
 
+  return null;
+}
+
+/** Applies the HUD-controlled field of view, and — when verticals correction
+ *  is on — converts the camera's pitch into a vertical lens shift: the camera
+ *  stays level (so all verticals render perfectly parallel, like an
+ *  architectural tilt-shift photograph) while mouse-up/down pans the shifted
+ *  frustum to bring the tower top into frame. */
+function CameraTuner({
+  fov, verticals, pitchBank,
+}: {
+  fov: number;
+  verticals: boolean;
+  pitchBank: MutableRefObject<number>;
+}) {
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const size = useThree((s) => s.size);
+  const euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
+
+  useEffect(() => {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }, [camera, fov]);
+
+  useFrame(() => {
+    if (!verticals) return;
+    // Harvest whatever pitch the pointer-lock controls applied since the last
+    // frame into the bank, then force the camera level again.
+    euler.setFromQuaternion(camera.quaternion);
+    if (Math.abs(euler.x) > 1e-5) {
+      pitchBank.current = THREE.MathUtils.clamp(pitchBank.current + euler.x, -1.15, 1.15);
+      euler.x = 0;
+      euler.z = 0;
+      camera.quaternion.setFromEuler(euler);
+    }
+    const halfTan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const yShift = (-Math.tan(pitchBank.current) / (2 * halfTan)) * size.height;
+    camera.setViewOffset(size.width, size.height, 0, yShift, size.width, size.height);
+  });
+
+  useEffect(() => {
+    if (verticals) return;
+    // Leaving verticals mode: hand the banked pitch back to the camera so the
+    // view direction doesn't jump.
+    camera.clearViewOffset();
+    euler.setFromQuaternion(camera.quaternion);
+    euler.x = THREE.MathUtils.clamp(euler.x + pitchBank.current, -1.45, 1.45);
+    euler.z = 0;
+    camera.quaternion.setFromEuler(euler);
+    pitchBank.current = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verticals]);
+
+  return null;
+}
+
+/** Exposes a render-and-capture function so the HUD can send the current
+ *  frame to the AI renderer. */
+function CaptureBridge({ captureRef }: { captureRef: MutableRefObject<(() => string) | null> }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    captureRef.current = () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL("image/png");
+    };
+    return () => { captureRef.current = null; };
+  }, [gl, scene, camera, captureRef]);
   return null;
 }
 
@@ -646,9 +716,19 @@ function WalkScene({ plot, volumes, floorHeight, facade }: Omit<WalkProps, "onEx
 /* ------------------------------ Entry point ------------------------------- */
 
 export default function MassingWalk(props: WalkProps) {
-  const { plot, onExit } = props;
+  const { plot, geometryFacts, onExit } = props;
   const [locked, setLocked] = useState(false);
   const controlsRef = useRef<PointerLockControlsImpl | null>(null);
+  const captureRef = useRef<(() => string) | null>(null);
+
+  const [fov, setFov] = useState(68);
+  const [verticals, setVerticals] = useState(false);
+  const pitchBank = useRef(0);
+
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiResult, setAiResult] = useState<{ img: string; note?: string } | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiOpen = aiBusy || !!aiResult || !!aiError;
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -658,13 +738,63 @@ export default function MassingWalk(props: WalkProps) {
     -(bbox.minY - (SIDEWALK_W + ROAD_W + 5)),
   ];
 
+  const handleRender = useCallback(async () => {
+    if (aiBusy) return;
+    // Capture BEFORE releasing pointer lock so the framing is exactly what the
+    // user is looking at.
+    const png = captureRef.current?.();
+    document.exitPointerLock?.();
+    if (!png) {
+      setAiError("Could not capture the view.");
+      return;
+    }
+    const key = typeof window !== "undefined" ? (window.localStorage.getItem("qube.gemini.apiKey") ?? "") : "";
+    if (!key) {
+      setAiError("No Gemini API key set. Configure it in the Massing tab → AI render panel first (it's stored in this browser and shared with this mode).");
+      return;
+    }
+    setAiBusy(true);
+    setAiError(null);
+    setAiResult(null);
+    try {
+      const prompt = `${geometryFacts ? `${geometryFacts}\n\n` : ""}${DEFAULT_WALK_HYPERREAL_PROMPT}`;
+      const out = await renderSchemeWithGemini(key, png, prompt);
+      setAiResult({ img: out.imageDataUrl, note: out.textNote });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }, [aiBusy, geometryFacts]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.pointerLockElement) onExit();
+      if (e.key === "Escape" && !document.pointerLockElement && !aiOpen) onExit();
+      if (e.code === "KeyV" && document.pointerLockElement) setVerticals((v) => !v);
+      if (e.code === "KeyR" && document.pointerLockElement && !aiOpen) void handleRender();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onExit]);
+  }, [onExit, aiOpen, handleRender]);
+
+  // Mouse wheel = lens zoom (works while pointer-locked). Wider FOV lets the
+  // whole tower fit in frame from the sidewalk.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!document.pointerLockElement) return;
+      setFov((f) => THREE.MathUtils.clamp(f + (e.deltaY > 0 ? 3 : -3), 28, 105));
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, []);
+
+  function downloadAiResult() {
+    if (!aiResult) return;
+    const a = document.createElement("a");
+    a.href = aiResult.img;
+    a.download = "immersive-hyperreal.png";
+    a.click();
+  }
 
   return (
     <div className="fixed inset-0 z-[70] bg-black">
@@ -679,6 +809,8 @@ export default function MassingWalk(props: WalkProps) {
         }}
       >
         <WalkScene {...props} />
+        <CameraTuner fov={fov} verticals={verticals} pitchBank={pitchBank} />
+        <CaptureBridge captureRef={captureRef} />
         <PointerLockControls
           ref={controlsRef}
           onLock={() => setLocked(true)}
@@ -691,26 +823,45 @@ export default function MassingWalk(props: WalkProps) {
       )}
 
       {locked && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/55 text-white/85 text-[12px] tracking-wide rounded-sm">
+        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/55 text-white/85 text-[12px] tracking-wide rounded-sm text-center leading-relaxed">
           WASD move · mouse look · Shift run · ESC pause
+          <br />
+          <span className="text-white/65">
+            wheel FOV ({fov}°) · V verticals {verticals ? "ON" : "off"} · R hyperreal render
+          </span>
         </div>
       )}
 
-      {!locked && (
+      {locked && verticals && (
+        <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 bg-black/55 text-white/80 text-[11px] uppercase tracking-[0.14em] rounded-sm">
+          ⊥ Verticals corrected
+        </div>
+      )}
+
+      {!locked && !aiOpen && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="text-center text-bone-100 max-w-[420px] px-8">
+          <div className="text-center text-bone-100 max-w-[460px] px-8">
             <div className="text-[11px] uppercase tracking-[0.3em] text-bone-200/60 mb-2">Immersive walk</div>
             <h2 className="text-2xl font-light mb-4">Virtual walk</h2>
             <p className="text-[13px] text-bone-200/80 leading-relaxed mb-6">
-              <strong>WASD</strong> to move · <strong>mouse</strong> to look ·{" "}
-              <strong>Shift</strong> to run · <strong>ESC</strong> to pause
+              <strong>WASD</strong> to move · <strong>mouse</strong> to look · <strong>Shift</strong> to run
+              <br />
+              <strong>wheel</strong> zoom (FOV) · <strong>V</strong> corrected verticals ·{" "}
+              <strong>R</strong> hyperreal render · <strong>ESC</strong> to pause
             </p>
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center justify-center gap-3 flex-wrap">
               <button
                 onClick={() => controlsRef.current?.lock()}
                 className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
               >
                 ▶ Enter
+              </button>
+              <button
+                onClick={() => void handleRender()}
+                className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] border border-qube-400/60 text-qube-200 hover:bg-qube-500/20 transition-colors"
+                title="Send the current view to Gemini as a hyperreal archviz render"
+              >
+                ✦ Hyperreal render
               </button>
               <button
                 onClick={onExit}
@@ -720,6 +871,58 @@ export default function MassingWalk(props: WalkProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* AI render overlay: spinner → result / error */}
+      {aiOpen && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 p-6">
+          {aiBusy ? (
+            <div className="text-center text-bone-100">
+              <div className="mx-auto w-10 h-10 border-2 border-qube-400 border-t-transparent rounded-full animate-spin mb-4" />
+              <div className="text-[12px] uppercase tracking-[0.2em] text-bone-200/70">
+                Rendering with Gemini…
+              </div>
+            </div>
+          ) : aiError ? (
+            <div className="max-w-[520px] text-center text-bone-100">
+              <div className="text-[11px] uppercase tracking-[0.3em] text-red-300/80 mb-3">Render failed</div>
+              <p className="text-[13px] text-bone-200/85 leading-relaxed whitespace-pre-wrap mb-6">{aiError}</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => void handleRender()}
+                  className="px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
+                >↻ Retry</button>
+                <button
+                  onClick={() => setAiError(null)}
+                  className="px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] border border-bone-100/30 text-bone-100 hover:bg-white/10 transition-colors"
+                >Close</button>
+              </div>
+            </div>
+          ) : aiResult ? (
+            <div className="max-w-[1100px] w-full max-h-full flex flex-col gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={aiResult.img}
+                alt="Hyperreal AI render of the current view"
+                className="w-full h-auto max-h-[80vh] object-contain border border-white/15"
+              />
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={downloadAiResult}
+                  className="px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] border border-bone-100/30 text-bone-100 hover:bg-white/10 transition-colors"
+                >↓ Download PNG</button>
+                <button
+                  onClick={() => void handleRender()}
+                  className="px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] border border-qube-400/60 text-qube-200 hover:bg-qube-500/20 transition-colors"
+                >↻ Re-render</button>
+                <button
+                  onClick={() => setAiResult(null)}
+                  className="px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.14em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
+                >Close</button>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
