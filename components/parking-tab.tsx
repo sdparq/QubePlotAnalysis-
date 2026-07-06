@@ -250,8 +250,9 @@ export default function ParkingTab() {
           const basementsNeededAlone = basementFootprint > 0 ? Math.ceil(required / basementFootprint) : 0;
           // How many basements are actually needed GIVEN what's already
           // planned for ground/podium parking — the number this card
-          // answers. Read-only suggestion; Setup → Floor breakdown remains
-          // the source of truth for basementCount (a click here syncs it).
+          // answers. project.basements.count has no editable input in Setup
+          // (it's shown there read-only) — the Apply button below is the
+          // only way to set it.
           const remainingForBasements = Math.max(0, required - aboveGroundSurface);
           const basementsNeeded = basementFootprint > 0 && remainingForBasements > 0
             ? Math.ceil(remainingForBasements / basementFootprint)
@@ -278,7 +279,7 @@ export default function ParkingTab() {
                   </div>
                   <div className="text-right">
                     <div className="text-[11px] text-ink-500">
-                      Configured in Setup: <strong className="text-ink-900">{basementCount}</strong>
+                      Current basement count: <strong className="text-ink-900">{basementCount}</strong>
                     </div>
                     {!basementsMatch && basementFootprint > 0 && (
                       <button className="btn btn-primary btn-xs mt-1" onClick={applyBasementsNeeded}>
@@ -286,7 +287,7 @@ export default function ParkingTab() {
                       </button>
                     )}
                     {basementsMatch && basementFootprint > 0 && (
-                      <div className="text-[10.5px] text-emerald-700 mt-1">✓ matches Setup</div>
+                      <div className="text-[10.5px] text-emerald-700 mt-1">✓ up to date</div>
                     )}
                   </div>
                 </div>
@@ -323,7 +324,7 @@ export default function ParkingTab() {
                   <Stat
                     label="Basements"
                     value={`${basementCount}`}
-                    sub={basementCount > 0 ? `${project.basements?.heightM ?? 0} m height each` : "Set in Setup → Floor breakdown"}
+                    sub={basementCount > 0 ? `${project.basements?.heightM ?? 0} m height each` : "Use “Apply” above to set a count"}
                   />
                   <div className="border border-ink-200 bg-white p-3">
                     <div className="eyebrow text-ink-500 text-[10px]">Ground floor parking (m²)</div>
@@ -392,9 +393,9 @@ export default function ParkingTab() {
                       No basements, ground or podium parking set yet. To fit the{" "}
                       {fmt0(required)} m² of parking you could:
                       <ul className="list-disc ml-5 mt-1">
-                        {basementFootprint > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (basement footprint of {fmt0(basementFootprint)} m²)</li>}
+                        {basementFootprint > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (basement footprint of {fmt0(basementFootprint)} m²) — use the <strong>Apply</strong> button above</li>}
                         <li>or some combination of ground floor parking and podium parking (per floor) above</li>
-                        <li>or any mix — set basements in <em>Setup → Floor breakdown</em>.</li>
+                        <li>or any mix of the two.</li>
                       </ul>
                     </>
                   ) : enough ? (
@@ -436,7 +437,7 @@ function BalanceStat({ value, ok, unset }: { value: number; ok: boolean; unset: 
   const color = unset ? "text-ink-400" : ok ? "text-emerald-700" : "text-red-700";
   const label = "Surface balance";
   const display = unset ? "—" : `${value >= 0 ? "+" : ""}${fmt0(value)} m²`;
-  const sub = unset ? "Add basements in Setup" : ok ? "Fits within basements ✓" : "Short of required";
+  const sub = unset ? "Apply basements or set ground/podium parking above" : ok ? "Fits within basements ✓" : "Short of required";
   return (
     <div className="border border-ink-200 bg-white p-3">
       <div className="eyebrow text-ink-500 text-[10px]">{label}</div>
