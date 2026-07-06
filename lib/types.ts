@@ -214,6 +214,14 @@ export interface FacadeConfig {
   balconyLayout?: "rhythm" | "random";
   /** Seed for the deterministic random pattern (solids + random balconies). */
   patternSeed?: number;
+  /** Treatment for the Ground + Podium tiers: "massing" = flat volumes (default); "fins" = a full-height vertical fin/louvre screen wrapping the perimeter, in front of the solid volume. */
+  groundPodiumTreatment?: "massing" | "fins";
+  /** Centre-to-centre spacing between fins (m). Default 1.0. */
+  finSpacingM?: number;
+  /** Fin blade width along the facade direction (m). Default 0.15. */
+  finWidthM?: number;
+  /** Fin projection depth outward from the facade (m). Default 0.35. */
+  finDepthM?: number;
 }
 
 export interface FloorSection {

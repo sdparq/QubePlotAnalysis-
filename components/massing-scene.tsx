@@ -22,6 +22,11 @@ export interface FacadeParams {
   balconyLayout: "rhythm" | "random";
   /** Seed for the deterministic random pattern. */
   patternSeed: number;
+  /** Treatment for the Ground + Podium tiers; "fins" adds a vertical louvre screen in front of the solid volume. */
+  groundPodiumTreatment: "massing" | "fins";
+  finSpacingM: number;
+  finWidthM: number;
+  finDepthM: number;
 }
 
 /** Deterministic per-cell hash → [0,1). Stable across renders for a given seed. */
@@ -71,6 +76,7 @@ export default function MassingScene(props: SceneProps) {
     facade,
   } = props;
   const facadeActive = facade?.mode === "residential";
+  const finsActive = facade?.groundPodiumTreatment === "fins";
 
   const bbox = useMemo(() => polygonBBox(plot), [plot]);
   const centroid = useMemo(() => polygonCentroid(plot), [plot]);
@@ -239,26 +245,31 @@ export default function MassingScene(props: SceneProps) {
           );
         }
         const colours = colourForKind(v.kind);
+        const showFins = finsActive && facade && (v.kind === "ground" || v.kind === "podium");
         return (
-          <mesh
-            key={i}
-            rotation={[-Math.PI / 2, 0, 0]}
-            position={[0, v.fromY, 0]}
-            castShadow
-            receiveShadow
-          >
-            <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
-            <meshPhysicalMaterial
-              color={colours.fill}
-              roughness={colours.roughness}
-              metalness={0.05}
-              clearcoat={v.kind === "tower" ? 0.25 : 0}
-              clearcoatRoughness={0.7}
-              transparent={colours.opacity < 1}
-              opacity={colours.opacity}
-            />
-            <Edges color={colours.edge} threshold={1} />
-          </mesh>
+          <group key={i}>
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[0, v.fromY, 0]}
+              castShadow
+              receiveShadow
+            >
+              <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
+              <meshPhysicalMaterial
+                color={colours.fill}
+                roughness={colours.roughness}
+                metalness={0.05}
+                clearcoat={v.kind === "tower" ? 0.25 : 0}
+                clearcoatRoughness={0.7}
+                transparent={colours.opacity < 1}
+                opacity={colours.opacity}
+              />
+              <Edges color={colours.edge} threshold={1} />
+            </mesh>
+            {showFins && (
+              <VerticalFinScreen polygon={v.polygon} fromY={v.fromY} toY={v.toY} params={facade!} />
+            )}
+          </group>
         );
       })}
 
@@ -715,6 +726,68 @@ function InstancedBoxes({
       />
     </instancedMesh>
   );
+}
+
+/**
+ * Full-height vertical fin/louvre screen wrapping a Ground or Podium
+ * footprint — thin blades spaced along the perimeter, projecting outward
+ * from the facade line, in front of the solid tier volume.
+ */
+function VerticalFinScreen({
+  polygon, fromY, toY, params,
+}: {
+  polygon: Point[];
+  fromY: number;
+  toY: number;
+  params: FacadeParams;
+}) {
+  const { finSpacingM, finWidthM, finDepthM } = params;
+  const height = toY - fromY;
+
+  const fins = useMemo(() => {
+    const matrices: THREE.Matrix4[] = [];
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const midY = fromY + height / 2;
+
+    const ccw = isCounterClockwise(polygon);
+    const outSign = ccw ? 1 : -1; // outward normal = (uy,-ux) for CCW polygons (local xy)
+    const spacing = Math.max(0.2, finSpacingM);
+    const finW = Math.max(0.03, finWidthM);
+    const finD = Math.max(0.05, finDepthM);
+
+    for (let e = 0; e < polygon.length; e++) {
+      const a = polygon[e];
+      const b = polygon[(e + 1) % polygon.length];
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      const len = Math.hypot(ex, ey);
+      if (len < 0.4) continue;
+      const ux = ex / len;
+      const uy = ey / len;
+      const nx = uy * outSign;
+      const ny = -ux * outSign;
+      const yaw = Math.atan2(uy, ux);
+      quat.setFromAxisAngle(yAxis, yaw);
+
+      const count = Math.max(1, Math.round(len / spacing));
+      const step = len / count;
+      for (let k = 0; k < count; k++) {
+        const t = (k + 0.5) * step;
+        // Inner face of the blade sits on the facade line; it projects outward by finD.
+        const px = a.x + ux * t + nx * (finD / 2);
+        const py = a.y + uy * t + ny * (finD / 2);
+        pos.set(px, midY, -py);
+        scale.set(finW, height, finD);
+        matrices.push(new THREE.Matrix4().compose(pos, quat, scale));
+      }
+    }
+    return matrices;
+  }, [polygon, fromY, height, finSpacingM, finWidthM, finDepthM]);
+
+  return <InstancedBoxes matrices={fins} color="#9c8f6e" roughness={0.5} metalness={0.25} />;
 }
 
 function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {

@@ -172,6 +172,10 @@ export default function MassingTab() {
     solidPanelRatio: project.facade?.solidPanelRatio ?? 0.25,
     balconyLayout: project.facade?.balconyLayout ?? "rhythm",
     patternSeed: project.facade?.patternSeed ?? 1,
+    groundPodiumTreatment: project.facade?.groundPodiumTreatment ?? "massing",
+    finSpacingM: project.facade?.finSpacingM ?? 1.0,
+    finWidthM: project.facade?.finWidthM ?? 0.15,
+    finDepthM: project.facade?.finDepthM ?? 0.35,
   } as const;
 
   function patchFacade(partial: Partial<NonNullable<typeof project.facade>>) {
@@ -836,6 +840,10 @@ interface FacadePanelParams {
   solidPanelRatio: number;
   balconyLayout: "rhythm" | "random";
   patternSeed: number;
+  groundPodiumTreatment: "massing" | "fins";
+  finSpacingM: number;
+  finWidthM: number;
+  finDepthM: number;
 }
 
 function FacadePanel({
@@ -845,10 +853,11 @@ function FacadePanel({
   onPatch: (p: Partial<FacadePanelParams>) => void;
 }) {
   const residential = params.mode === "residential";
+  const fins = params.groundPodiumTreatment === "fins";
   return (
     <div className="border border-ink-200">
       <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
-        <span className="eyebrow text-ink-500 text-[10px]">Facade</span>
+        <span className="eyebrow text-ink-500 text-[10px]">Facade · Tower</span>
         <div className="inline-flex border border-ink-200 bg-white">
           <button
             onClick={() => onPatch({ mode: "massing" })}
@@ -949,8 +958,78 @@ function FacadePanel({
           >⤲ Shuffle pattern</button>
           <p className="text-[10.5px] text-ink-500 leading-snug">
             Applies to the tower: floor slabs, recessed glazing, mullions on the bay rhythm,
-            solid panels scattered at the given share, and balconies. Ground and podium keep
-            the massing look.
+            solid panels scattered at the given share, and balconies.
+          </p>
+        </div>
+      )}
+
+      <div className="px-3 py-2 bg-bone-50 border-y border-ink-200 flex items-center justify-between gap-2">
+        <span className="eyebrow text-ink-500 text-[10px]">Facade · Ground / Podium</span>
+        <div className="inline-flex border border-ink-200 bg-white">
+          <button
+            onClick={() => onPatch({ groundPodiumTreatment: "massing" })}
+            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+              !fins ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+            }`}
+          >Massing</button>
+          <button
+            onClick={() => onPatch({ groundPodiumTreatment: "fins" })}
+            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
+              fins ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
+            }`}
+            title="Wrap ground and podium in a vertical fin / louvre screen"
+          >Vertical fins</button>
+        </div>
+      </div>
+      {fins && (
+        <div className="p-3 grid gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Spacing m">
+              <input
+                type="number"
+                step={0.1}
+                min={0.2}
+                className="cell-input text-right"
+                value={Number(params.finSpacingM.toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0.2) onPatch({ finSpacingM: n });
+                }}
+                title="Centre-to-centre spacing between fins"
+              />
+            </Field>
+            <Field label="Width m">
+              <input
+                type="number"
+                step={0.02}
+                min={0.03}
+                className="cell-input text-right"
+                value={Number(params.finWidthM.toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0.03) onPatch({ finWidthM: n });
+                }}
+                title="Fin blade width along the facade"
+              />
+            </Field>
+            <Field label="Depth m">
+              <input
+                type="number"
+                step={0.05}
+                min={0.05}
+                className="cell-input text-right"
+                value={Number(params.finDepthM.toFixed(2))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n >= 0.05) onPatch({ finDepthM: n });
+                }}
+                title="How far the fins project outward from the facade"
+              />
+            </Field>
+          </div>
+          <p className="text-[10.5px] text-ink-500 leading-snug">
+            Full-height vertical blades wrap the Ground and Podium perimeter, spaced evenly
+            per edge, in front of the solid volume underneath.
           </p>
         </div>
       )}
