@@ -206,7 +206,9 @@ export default function ParkingTab() {
           <h2 className="section-title">Parking surface</h2>
           <p className="section-sub">
             Estimated built area required to fit all parking spaces and how it compares to
-            the basement footprint available (= plot area × number of basements, from Setup).
+            the basement footprint available (= basement footprint × number of basements, from
+            Setup). The basement footprint defaults to the full plot area — override it below
+            if the basement covers less (setbacks, a shared party wall, etc).
           </p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
@@ -229,6 +231,7 @@ export default function ParkingTab() {
 
         {(() => {
           const plotArea = project.plotArea ?? 0;
+          const basementFootprint = project.basementFootprintM2 ?? plotArea;
           const basementCount = project.basements?.count ?? 0;
           const basementHeightM = project.basements?.heightM ?? 3.0;
           // Ground and podium parking surfaces — independent, specific inputs.
@@ -239,19 +242,19 @@ export default function ParkingTab() {
           const podiumCount = project.podium?.count ?? 0;
           const podiumParkingSurface = podiumParkingPerFloor * podiumCount;
           const aboveGroundSurface = groundParking + podiumParkingSurface;
-          const basementSurface = plotArea * basementCount;
+          const basementSurface = basementFootprint * basementCount;
           const availTotal = basementSurface + aboveGroundSurface;
           const required = r.totalParkingSurfaceM2;
           const balance = availTotal - required;
           const enough = balance >= 0 && availTotal > 0;
-          const basementsNeededAlone = plotArea > 0 ? Math.ceil(required / plotArea) : 0;
+          const basementsNeededAlone = basementFootprint > 0 ? Math.ceil(required / basementFootprint) : 0;
           // How many basements are actually needed GIVEN what's already
           // planned for ground/podium parking — the number this card
           // answers. Read-only suggestion; Setup → Floor breakdown remains
           // the source of truth for basementCount (a click here syncs it).
           const remainingForBasements = Math.max(0, required - aboveGroundSurface);
-          const basementsNeeded = plotArea > 0 && remainingForBasements > 0
-            ? Math.ceil(remainingForBasements / plotArea)
+          const basementsNeeded = basementFootprint > 0 && remainingForBasements > 0
+            ? Math.ceil(remainingForBasements / basementFootprint)
             : 0;
           const basementsMatch = basementCount === basementsNeeded;
           function applyBasementsNeeded() {
@@ -265,11 +268,11 @@ export default function ParkingTab() {
                   <div>
                     <div className="eyebrow text-ink-500 text-[10px]">Basements needed</div>
                     <div className={`text-[22px] font-light tabular-nums mt-0.5 ${basementsMatch ? "text-emerald-700" : "text-amber-700"}`}>
-                      {plotArea > 0 ? basementsNeeded : "—"}
+                      {basementFootprint > 0 ? basementsNeeded : "—"}
                     </div>
                     <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
-                      {plotArea > 0
-                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(plotArea)} m² plot, after ${fmt0(aboveGroundSurface)} m² already planned in ground/podium.`
+                      {basementFootprint > 0
+                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(basementFootprint)} m² basement footprint, after ${fmt0(aboveGroundSurface)} m² already planned in ground/podium.`
                         : "Set Plot area in Setup to compute this."}
                     </div>
                   </div>
@@ -277,23 +280,46 @@ export default function ParkingTab() {
                     <div className="text-[11px] text-ink-500">
                       Configured in Setup: <strong className="text-ink-900">{basementCount}</strong>
                     </div>
-                    {!basementsMatch && plotArea > 0 && (
+                    {!basementsMatch && basementFootprint > 0 && (
                       <button className="btn btn-primary btn-xs mt-1" onClick={applyBasementsNeeded}>
                         Apply {basementsNeeded} basement{basementsNeeded === 1 ? "" : "s"}
                       </button>
                     )}
-                    {basementsMatch && plotArea > 0 && (
+                    {basementsMatch && basementFootprint > 0 && (
                       <div className="text-[10.5px] text-emerald-700 mt-1">✓ matches Setup</div>
                     )}
                   </div>
                 </div>
                 {/* Inputs row */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <Stat
-                    label="Plot area (basement)"
-                    value={plotArea > 0 ? `${fmt0(plotArea)} m²` : "—"}
-                    sub={plotArea > 0 ? fmtSqft(plotArea) : "Set in Setup"}
-                  />
+                  <div className="border border-ink-200 bg-white p-3">
+                    <div className="eyebrow text-ink-500 text-[10px]">Plot area (basement)</div>
+                    <div className="text-[18px] font-light tabular-nums text-ink-900 mt-0.5">
+                      {plotArea > 0 ? `${fmt0(plotArea)} m²` : "—"}
+                    </div>
+                    <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
+                      {plotArea > 0 ? fmtSqft(plotArea) : "Set in Setup"}
+                    </div>
+                    <label className="block mt-2 pt-2 border-t border-ink-100">
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-ink-500">Replace with (m²)</span>
+                      <input
+                        type="number"
+                        step={10}
+                        min={0}
+                        className="cell-input text-right !text-[14px] tabular-nums mt-1 w-full"
+                        value={project.basementFootprintM2 ?? ""}
+                        placeholder={plotArea > 0 ? fmt0(plotArea) : "0"}
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value);
+                          patch({ basementFootprintM2: Number.isFinite(n) && n >= 0 ? n : undefined });
+                        }}
+                        title="Override the basement footprint per level, if it covers less than the full plot (setbacks, shared party wall, etc). Leave empty to use the full plot area."
+                      />
+                    </label>
+                    <div className="text-[10.5px] text-ink-500 mt-1 leading-snug">
+                      Leave empty to use the full plot footprint
+                    </div>
+                  </div>
                   <Stat
                     label="Basements"
                     value={`${basementCount}`}
@@ -343,7 +369,7 @@ export default function ParkingTab() {
                   <Stat
                     label="Avail. in basements"
                     value={basementSurface > 0 ? `${fmt0(basementSurface)} m²` : "—"}
-                    sub={basementSurface > 0 ? `${fmt0(plotArea)} × ${basementCount}` : ""}
+                    sub={basementSurface > 0 ? `${fmt0(basementFootprint)} × ${basementCount}` : ""}
                   />
                   <Stat
                     label="Avail. in ground + podium"
@@ -366,7 +392,7 @@ export default function ParkingTab() {
                       No basements, ground or podium parking set yet. To fit the{" "}
                       {fmt0(required)} m² of parking you could:
                       <ul className="list-disc ml-5 mt-1">
-                        {plotArea > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (full plot footprint of {fmt0(plotArea)} m²)</li>}
+                        {basementFootprint > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (basement footprint of {fmt0(basementFootprint)} m²)</li>}
                         <li>or some combination of ground floor parking and podium parking (per floor) above</li>
                         <li>or any mix — set basements in <em>Setup → Floor breakdown</em>.</li>
                       </ul>

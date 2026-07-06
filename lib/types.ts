@@ -177,6 +177,11 @@ export interface Project {
   /** Parking surface per podium floor (m²), if any. Multiplied by Setup →
    *  Floor breakdown's `podium.count` to get the total podium parking surface. */
   podiumParkingPerFloorM2?: number;
+  /** Override for the basement footprint (m²) used per basement level, when
+   *  it covers less than the full plot (e.g. setbacks, a shared party wall).
+   *  When unset, falls back to Setup's plot area (the historical assumption
+   *  that basements run the full plot footprint). */
+  basementFootprintM2?: number;
   /** Override for the number of boarding floors used by the Dubai Building
    *  Code D.8.8 lift sizing (Figure D.14). When unset, derived from the
    *  Setup floor breakdown (basements + ground + podium). */
