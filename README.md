@@ -8,7 +8,6 @@ Reproduces every calculation from `Analysis_Production City .xlsx` and lets any 
 - Next.js 14 (App Router) + TypeScript + Tailwind
 - Calculations: pure TS modules in `lib/calc/`
 - State: Zustand with `localStorage` persistence (+ optional Supabase cloud sync)
-- Export: ExcelJS — produces a workbook with the same 5 sheets as the source Excel
 - Tests: Vitest with parity test against the Production City sample
 
 ## Scripts
@@ -31,13 +30,11 @@ lib/
   store.ts           # Zustand store + localStorage persistence
   sample.ts          # Production City seed
   format.ts          # number formatting
-  export-xlsx.ts     # multi-sheet Excel export
   standards/dubai.ts # Dubai DCD/DM constants (parking, waste, lifts, fire)
   calc/
     program.ts       # GFA, units, mix, common areas, efficiency
     parking.ts       # required vs available, PRM
     lifts.ts         # CIBSE Guide D + practical checks
-    garbage.ts       # Dubai DM waste room
     parity.test.ts   # ✅ matches the Excel cell-by-cell
 ```
 
@@ -50,9 +47,8 @@ lib/
 5. **Parking** — inventory by level + other uses (retail, F&B)
 6. **Lifts** — cabin, speed, handling parameters
 7. **Results** — dashboard with KPIs and compliance checks
-8. **Export Excel** — recreates the 5-sheet workbook for sharing
 
-State auto-saves to localStorage. Use *Export JSON* / *Import JSON* to share analyses between users — or enable the optional cloud sync below for live collaboration.
+State auto-saves to localStorage — or enable the optional cloud sync below for live collaboration.
 
 ## Cloud sync (optional)
 

@@ -1,12 +1,8 @@
 "use client";
-import { useProject } from "@/lib/store";
-import { exportToExcel } from "@/lib/export-xlsx";
 import ProjectSwitcher from "./project-switcher";
 import CloudStatus from "./cloud-status";
 
 export default function HeaderBar() {
-  const project = useProject();
-
   return (
     <header className="bg-ink-900 text-bone-100 relative z-30">
       <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap min-w-0">
@@ -33,11 +29,7 @@ export default function HeaderBar() {
           <ProjectSwitcher />
         </div>
         <div className="flex items-center gap-1 flex-wrap">
-          <button
-            className="px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
-            onClick={() => exportToExcel(project)}
-          >Export Excel</button>
-          <div className="ml-2"><CloudStatus /></div>
+          <CloudStatus />
         </div>
       </div>
     </header>
