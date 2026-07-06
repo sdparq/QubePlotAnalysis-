@@ -85,16 +85,21 @@ export default function MassingScene(props: SceneProps) {
   const facadeActive = facade?.mode === "residential";
   const finsActive = facade?.groundPodiumTreatment === "fins";
 
-  const podiumVolume = useMemo(() => volumes.find((v) => v.kind === "podium"), [volumes]);
+  // The amenity deck is whichever tier sits directly below the tower: podium
+  // when there is one, otherwise the ground floor (tower rises straight off it).
+  const deckVolume = useMemo(
+    () => volumes.find((v) => v.kind === "podium") ?? volumes.find((v) => v.kind === "ground"),
+    [volumes],
+  );
   const towerVolume = useMemo(() => volumes.find((v) => v.kind === "tower"), [volumes]);
   const wantPool = !!facade?.podiumPool;
   const wantLounge = !!facade?.podiumLoungeBbq;
   const amenityPlan = useMemo(
     () =>
-      podiumVolume && (wantPool || wantLounge)
-        ? planPodiumAmenities(podiumVolume.polygon, towerVolume?.polygon ?? [], { pool: wantPool, lounge: wantLounge })
+      deckVolume && (wantPool || wantLounge)
+        ? planPodiumAmenities(deckVolume.polygon, towerVolume?.polygon ?? [], { pool: wantPool, lounge: wantLounge })
         : { pool: null, lounge: null },
-    [podiumVolume, towerVolume, wantPool, wantLounge],
+    [deckVolume, towerVolume, wantPool, wantLounge],
   );
   useEffect(() => {
     onAmenityFit?.({
@@ -298,10 +303,11 @@ export default function MassingScene(props: SceneProps) {
         );
       })}
 
-      {/* Podium roof amenities: pool and/or lounge + BBQ terrace, on the ring
-          of podium deck left exposed once the (further set back) tower rises above it. */}
-      {podiumVolume && (
-        <PodiumAmenities pool={amenityPlan.pool} lounge={amenityPlan.lounge} toY={podiumVolume.toY} />
+      {/* Roof amenities: pool and/or lounge + BBQ terrace, on the ring of
+          podium (or ground, if there's no podium) deck left exposed once the
+          further-set-back tower rises above it. */}
+      {deckVolume && (
+        <PodiumAmenities pool={amenityPlan.pool} lounge={amenityPlan.lounge} toY={deckVolume.toY} />
       )}
 
       {/* Floor-level rings around each volume — emphasised every 5 floors.

@@ -440,7 +440,8 @@ export default function MassingTab() {
             <FacadePanel params={facadeParams} onPatch={patchFacade} />
 
             <PodiumAmenitiesPanel
-              hasPodium={podiumH > 0}
+              hasDeck={podiumH > 0 || groundH > 0}
+              deckKind={podiumH > 0 ? "podium" : "ground"}
               pool={facadeParams.podiumPool}
               lounge={facadeParams.podiumLoungeBbq}
               fit={amenityFit}
@@ -1033,54 +1034,56 @@ function FacadePanel({
 }
 
 function PodiumAmenitiesPanel({
-  hasPodium, pool, lounge, fit, onPatch,
+  hasDeck, deckKind, pool, lounge, fit, onPatch,
 }: {
-  hasPodium: boolean;
+  hasDeck: boolean;
+  deckKind: "podium" | "ground";
   pool: boolean;
   lounge: boolean;
   fit: { pool: boolean; lounge: boolean };
   onPatch: (p: { podiumPool?: boolean; podiumLoungeBbq?: boolean }) => void;
 }) {
+  const deckLabel = deckKind === "podium" ? "podium" : "ground floor";
   return (
     <div className="border border-ink-200">
       <div className="px-3 py-2 bg-bone-50 border-b border-ink-200">
-        <span className="eyebrow text-ink-500 text-[10px]">Podium roof amenities</span>
+        <span className="eyebrow text-ink-500 text-[10px]">Roof amenities</span>
       </div>
       <div className="p-3 grid gap-2">
-        <label className={`flex items-center gap-2 text-[12px] ${hasPodium ? "text-ink-900" : "text-ink-400"}`}>
+        <label className={`flex items-center gap-2 text-[12px] ${hasDeck ? "text-ink-900" : "text-ink-400"}`}>
           <input
             type="checkbox"
             checked={pool}
-            disabled={!hasPodium}
+            disabled={!hasDeck}
             onChange={(e) => onPatch({ podiumPool: e.target.checked })}
           />
           Swimming pool
         </label>
-        {pool && hasPodium && !fit.pool && (
+        {pool && hasDeck && !fit.pool && (
           <p className="text-[10.5px] text-amber-700 leading-snug pl-5 -mt-1">
-            No room on the podium deck for a pool — the ring between the tower and the podium
-            edge is too narrow. Increase Tower setback or reduce Podium setback per edge above.
+            No room on the {deckLabel} deck for a pool — the ring between the tower and the {deckLabel}
+            edge is too narrow. Increase Tower setback or reduce {deckKind === "podium" ? "Podium" : "Ground"} setback per edge above.
           </p>
         )}
-        <label className={`flex items-center gap-2 text-[12px] ${hasPodium ? "text-ink-900" : "text-ink-400"}`}>
+        <label className={`flex items-center gap-2 text-[12px] ${hasDeck ? "text-ink-900" : "text-ink-400"}`}>
           <input
             type="checkbox"
             checked={lounge}
-            disabled={!hasPodium}
+            disabled={!hasDeck}
             onChange={(e) => onPatch({ podiumLoungeBbq: e.target.checked })}
           />
           Lounge &amp; BBQ terrace
         </label>
-        {lounge && hasPodium && !fit.lounge && (
+        {lounge && hasDeck && !fit.lounge && (
           <p className="text-[10.5px] text-amber-700 leading-snug pl-5 -mt-1">
-            No room on the podium deck for a lounge terrace — same fix: widen the ring by
-            adjusting the Tower / Podium setbacks per edge above.
+            No room on the {deckLabel} deck for a lounge terrace — same fix: widen the ring by
+            adjusting the Tower / {deckKind === "podium" ? "Podium" : "Ground"} setbacks per edge above.
           </p>
         )}
         <p className="text-[10.5px] text-ink-500 leading-snug">
-          {hasPodium
-            ? "Placed on the podium roof ring exposed once the (further set back) tower rises above it — only if there is enough clear depth."
-            : "Add podium floors in Setup → Floor breakdown to unlock roof amenities."}
+          {hasDeck
+            ? `Placed on the ${deckLabel} roof ring exposed once the (further set back) tower rises above it — only if there is enough clear depth. Uses the Podium deck when there is one, otherwise the Ground floor roof.`
+            : "Add ground or podium floors in Setup → Floor breakdown to unlock roof amenities."}
         </p>
       </div>
     </div>
