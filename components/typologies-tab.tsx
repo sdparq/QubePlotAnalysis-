@@ -14,6 +14,7 @@ import {
   effectiveMixPctForCategory,
   resolveTypologyMix,
 } from "@/lib/calc/program-autofill";
+import { residentialSubGFA } from "@/lib/calc/gfa";
 
 const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penthouse"];
 
@@ -52,6 +53,7 @@ export default function TypologiesTab() {
     () => classForZone(project.zone, library),
     [project.zone, library],
   );
+  const apartmentsGFA = useMemo(() => residentialSubGFA(project, "apartments"), [project]);
 
   function addNew() {
     upsert({
@@ -206,6 +208,11 @@ export default function TypologiesTab() {
     const resolvedMix = resolveTypologyMix(projAfter, row.typologyMix);
     const fill = computeProgramAutoFill(projAfter, resolvedMix);
     patch({ program: fill?.cells ?? [] });
+    if (!fill && !opts?.silent) {
+      alert(
+        "Typologies created — but the Apartments matrix stays EMPTY because this project has no Residential GFA target yet.\n\nSet Target GFA and the Residential row in Setup → GFA breakdown, then re-apply the mix here (or use Apartments → Apply to N floors).",
+      );
+    }
   }
 
   // Auto-seed the typology list the first time a project lands on this tab with
@@ -225,6 +232,18 @@ export default function TypologiesTab() {
 
   return (
     <div className="grid gap-6">
+      {detectedClass && apartmentsGFA <= 0 && (
+        <div className="card bg-amber-50 border-amber-200">
+          <div className="eyebrow text-amber-800 text-[10px]">No Residential GFA set</div>
+          <p className="text-[12.5px] text-ink-800 mt-1 leading-snug">
+            Typologies can be created here, but the <strong>Apartments matrix will stay empty</strong>:
+            the auto-fill needs a m² target to distribute units against. Set <strong>Target GFA</strong>{" "}
+            and the <strong>Residential</strong> row in Setup → GFA breakdown first — then apply the
+            class mix (or edit any Unit mix % below) and Apartments fills automatically.
+          </p>
+        </div>
+      )}
+
       {!detectedClass && (
         <div className="card bg-amber-50 border-amber-200">
           <div className="eyebrow text-amber-800 text-[10px]">No class detected for this zone</div>
