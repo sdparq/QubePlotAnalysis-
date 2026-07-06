@@ -1,8 +1,43 @@
 "use client";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { Project, Typology, ProgramCell, CommonArea, ParkingLevel, OtherUse } from "./types";
 import { PRODUCTION_CITY_SAMPLE, emptyProject, newId } from "./sample";
+
+/** localStorage wrapper that survives QuotaExceededError. The whole store is
+ *  one key rewritten on every change; plan images (parcel.imageDataUrl) can be
+ *  megabytes each, so with a few plans stored the browser quota gets hit and a
+ *  plain setItem throws — zustand's persist swallows that, leaving disk state
+ *  frozen mid-write-sequence. Symptom: an Apply that upserts N typologies looks
+ *  fine in memory but only the writes before the quota hit survive a reload
+ *  ("only Studio remains"). On quota failure we retry once with every plan
+ *  image stripped: the numeric project data ALWAYS persists; the images are
+ *  the sacrificial payload (UI offers a re-upload when one is missing). */
+const resilientStorage = {
+  getItem: (name: string) => (typeof window === "undefined" ? null : window.localStorage.getItem(name)),
+  removeItem: (name: string) => {
+    if (typeof window !== "undefined") window.localStorage.removeItem(name);
+  },
+  setItem: (name: string, value: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(name, value);
+    } catch {
+      try {
+        const parsed = JSON.parse(value) as { state?: { projects?: Record<string, Project> } };
+        for (const p of Object.values(parsed.state?.projects ?? {})) {
+          if (p.parcel?.imageDataUrl) p.parcel = { ...p.parcel, imageDataUrl: "" };
+        }
+        window.localStorage.setItem(name, JSON.stringify(parsed));
+        console.warn(
+          "qube: localStorage quota exceeded — project data saved, but plan images were dropped from local storage. Re-upload a plan drawing to see it again.",
+        );
+      } catch (e2) {
+        console.error("qube: could not persist project data at all", e2);
+      }
+    }
+  },
+};
 
 interface State {
   projects: Record<string, Project>;
@@ -235,6 +270,7 @@ export const useStore = create<State>()(
     {
       name: "qube-plot-analysis",
       version: 2,
+      storage: createJSONStorage(() => resilientStorage),
       migrate: (persisted: unknown, fromVersion: number) => {
         // v0/v1 shape: { project: Project (without id) }
         if (fromVersion < 2 && persisted && typeof persisted === "object" && "project" in persisted) {

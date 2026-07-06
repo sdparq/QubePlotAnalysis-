@@ -73,6 +73,15 @@ export default function PlotTab() {
       const result = await processParcel(file);
       const autoPoly =
         result.autoParcelIndex !== null ? result.candidatePolygons[result.autoParcelIndex] : null;
+      // If the previous image was dropped to free localStorage quota but the
+      // trace/calibration survived, and the re-uploaded file renders at the
+      // same pixel size (same drawing), keep the existing geometry intact.
+      const preserve =
+        !!parcel &&
+        !parcel.imageDataUrl &&
+        !!parcel.tracePolygonPx &&
+        parcel.imageNaturalWidth === result.imageNaturalWidth &&
+        parcel.imageNaturalHeight === result.imageNaturalHeight;
       const next: ParcelInfo = {
         fileName: file.name,
         fileType: file.type || "image/jpeg",
@@ -81,15 +90,19 @@ export default function PlotTab() {
         imageNaturalWidth: result.imageNaturalWidth,
         imageNaturalHeight: result.imageNaturalHeight,
         // The DLD parcel highlight was recognised — trace it without asking.
-        tracePolygonPx: autoPoly ?? undefined,
+        tracePolygonPx: preserve ? parcel.tracePolygonPx : autoPoly ?? undefined,
+        calibration: preserve ? parcel.calibration : undefined,
+        tierTracesPx: preserve ? parcel.tierTracesPx : undefined,
       };
       patch({ parcel: next });
       setCandidates(result.candidatePolygons);
       setTextItems(result.textItems);
       setAutoCalib(null);
       setAutoCalibTried(false);
-      setAutoPicked(!!autoPoly);
-      if (autoPoly) {
+      setAutoPicked(!!autoPoly && !preserve);
+      if (preserve) {
+        setTraceMode("idle");
+      } else if (autoPoly) {
         // Polygon locked in — run scale detection immediately; when the cota
         // consensus is strong this applies polygon + area with no clicks at
         // all. Pass the text items explicitly: the setTextItems above hasn't
@@ -401,6 +414,21 @@ export default function PlotTab() {
           <Dropzone onFiles={handleFiles} inputRef={inputRef} />
         )}
 
+        {parcel && !parcel.imageDataUrl && (phase === "done" || phase === "idle") && (
+          <div className="grid gap-4">
+            <div className="border border-amber-300 bg-amber-50 text-amber-900 p-4 text-sm">
+              <div className="font-medium mb-1">Plan image removed to free browser storage</div>
+              <div className="text-amber-800/90">
+                Your browser&apos;s local storage filled up, so the plan drawing image
+                (<span className="font-medium">{parcel.fileName}</span>) was dropped to keep the project
+                data safe. All traced geometry, calibration and areas are intact — re-upload the same
+                drawing below to see it again.
+              </div>
+            </div>
+            <Dropzone onFiles={handleFiles} inputRef={inputRef} />
+          </div>
+        )}
+
         {phase === "rendering" && (
           <div className="border border-ink-200 bg-bone-50 p-8 text-center">
             <div className="mx-auto w-8 h-8 border-2 border-qube-500 border-t-transparent rounded-full animate-spin mb-4" />
@@ -416,7 +444,7 @@ export default function PlotTab() {
           </div>
         )}
 
-        {parcel && (phase === "done" || phase === "idle") && (
+        {parcel && !!parcel.imageDataUrl && (phase === "done" || phase === "idle") && (
           <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
             {/* Image with overlay */}
             <div>

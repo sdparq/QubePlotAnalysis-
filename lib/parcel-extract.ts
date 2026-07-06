@@ -2,7 +2,10 @@ import { polygonArea, polygonBBox, simplifyPolygon, type Point } from "./geom";
 import { parcelColorScore, type RGB } from "./parcel-colors";
 
 const MAX_DIM = 2400;
-const JPEG_QUALITY = 0.9;
+// Keep MAX_DIM stable (traces are stored in this pixel space) but compress
+// harder: the whole store lives in one localStorage key, so every plan image
+// counts against the ~5 MB browser quota.
+const JPEG_QUALITY = 0.78;
 const MAX_CANDIDATES = 40;
 const MIN_CANDIDATE_AREA_PX = 200;
 

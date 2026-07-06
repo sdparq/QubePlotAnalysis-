@@ -410,7 +410,7 @@ export default function MassingTab() {
               </div>
             </div>
 
-            {project.parcel && (
+            {project.parcel && !!project.parcel.imageDataUrl && (
               <div className="border border-ink-200 bg-bone-50 overflow-hidden">
                 <div className="px-3 py-2 border-b border-ink-200 bg-white flex items-center justify-between gap-3 flex-wrap">
                   <span className="eyebrow text-ink-500">Reference plan</span>
