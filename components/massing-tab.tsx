@@ -30,6 +30,8 @@ const MassingScene = dynamic(() => import("./massing-scene"), {
   ),
 });
 
+const MassingWalk = dynamic(() => import("./massing-walk"), { ssr: false });
+
 type AiStyle = "scheme" | "hyperreal";
 const PROMPT_FOR: Record<AiStyle, string> = {
   scheme: DEFAULT_SCHEME_PROMPT,
@@ -185,6 +187,7 @@ export default function MassingTab() {
   }
 
   const [amenityFit, setAmenityFit] = useState({ pool: true, lounge: true });
+  const [immersive, setImmersive] = useState(false);
 
   function requestPreset(kind: "iso" | "front" | "top") {
     setAutoRotate(false);
@@ -384,6 +387,11 @@ export default function MassingTab() {
                   className="px-3 py-1.5 border border-ink-200 bg-white/90 backdrop-blur-sm text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 shadow-sm transition-colors"
                   title="Download the current view as a PNG image"
                 >↓ PNG</button>
+                <button
+                  onClick={() => setImmersive(true)}
+                  className="px-3 py-1.5 border border-qube-600 bg-qube-500 text-white text-[10.5px] font-semibold uppercase tracking-[0.10em] hover:bg-qube-600 shadow-sm transition-colors"
+                  title="Walk around the building in first person — WASD + mouse"
+                >🎮 Immersive</button>
               </div>
             </div>
 
@@ -563,6 +571,17 @@ export default function MassingTab() {
           </div>
         </div>
       </div>
+
+      {/* First-person immersive walk */}
+      {immersive && (
+        <MassingWalk
+          plot={plotPoly}
+          volumes={sceneVolumes}
+          floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
+          facade={facadeParams}
+          onExit={() => setImmersive(false)}
+        />
+      )}
 
       {/* Gemini API key dialog */}
       {keyDialog.open && (

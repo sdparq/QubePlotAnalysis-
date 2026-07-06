@@ -34,8 +34,8 @@ export interface FacadeParams {
   podiumLoungeBbq: boolean;
 }
 
-const SIDEWALK_W = 3; // sidewalk ring width around the plot (m)
-const ROAD_W = 8;     // road ring width beyond the sidewalk (m)
+export const SIDEWALK_W = 3; // sidewalk ring width around the plot (m)
+export const ROAD_W = 8;     // road ring width beyond the sidewalk (m)
 
 /** Deterministic per-cell hash → [0,1). Stable across renders for a given seed. */
 function cellRand(seed: number, i: number, j: number, salt = 0): number {
@@ -551,7 +551,7 @@ function FloorRing({
 }
 
 /** Flat ring between two nested polygons (outer minus inner), lying on the ground plane. */
-function GroundRing({
+export function GroundRing({
   inner, outer, y, color, roughness = 1,
 }: {
   inner: Point[];
@@ -583,7 +583,7 @@ function GroundRing({
   );
 }
 
-function polyToShape(points: Point[]): THREE.Shape | null {
+export function polyToShape(points: Point[]): THREE.Shape | null {
   if (points.length < 3) return null;
   const s = new THREE.Shape();
   s.moveTo(points[0].x, points[0].y);
@@ -627,7 +627,7 @@ const RAIL_H = 1.05;          // balustrade height (m)
  * a recessed glazing body, vertical mullions on a parametric bay rhythm and
  * balconies on every Nth bay. All repeated elements are instanced.
  */
-function ResidentialFacade({
+export function ResidentialFacade({
   polygon, hole, fromY, toY, floorHeight, params,
 }: {
   polygon: Point[];
@@ -840,7 +840,7 @@ function InstancedBoxes({
  * footprint — thin blades spaced along the perimeter, projecting outward
  * from the facade line, in front of the solid tier volume.
  */
-function VerticalFinScreen({
+export function VerticalFinScreen({
   polygon, fromY, toY, params,
 }: {
   polygon: Point[];
@@ -908,7 +908,7 @@ function boxMatrix(center: Point, y: number, sizeAlong: number, height: number, 
   return new THREE.Matrix4().compose(pos, quat, scale);
 }
 
-function PodiumAmenities({
+export function PodiumAmenities({
   pool, lounge, toY,
 }: {
   pool: PlacedAmenity | null;
@@ -982,7 +982,7 @@ function LoungeBbq({ plan, toY }: { plan: PlacedAmenity; toY: number }) {
   );
 }
 
-function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {
+export function colourForKind(kind?: "tower" | "ground" | "podium" | "basement") {
   switch (kind) {
     case "ground":
       return { fill: "#8a9a76", edge: "#3a4a30", opacity: 1, roughness: 0.75 };
