@@ -5,6 +5,7 @@ import type { Typology, UnitCategory } from "@/lib/types";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import {
   classForZone,
+  DEFAULT_ZONE_CLASSES,
   TYPOLOGY_LABELS,
   type TypologyKey,
   type ZoneClass,
@@ -161,14 +162,22 @@ export default function TypologiesTab() {
    */
   function applyClassMix(letter: ZoneClass, opts?: { silent?: boolean }) {
     const row = library[letter];
-    const balconyShare = row.balconyPctOfNsa;
+    const seed = DEFAULT_ZONE_CLASSES[letter];
+    const balconyShare =
+      Number.isFinite(row.balconyPctOfNsa) && row.balconyPctOfNsa >= 0 && row.balconyPctOfNsa < 1
+        ? row.balconyPctOfNsa
+        : seed.balconyPctOfNsa;
     const created: Typology[] = [];
-    for (const key of (Object.keys(row.typologyMix) as TypologyKey[])) {
-      const pct = row.typologyMix[key];
+    for (const key of (Object.keys(seed.typologyMix) as TypologyKey[])) {
+      // Belt and braces on top of the library sanitiser: fall back to the seed
+      // matrix per field so a malformed stored row can never produce an empty
+      // typology list.
+      const pct = Number.isFinite(row.typologyMix?.[key]) ? row.typologyMix[key] : seed.typologyMix[key];
       if (pct < 0.005) continue;
       const cat = CATEGORY_FOR_TYPOLOGY_KEY[key];
       if (!cat) continue;
-      const [lo] = row.avgAreaSqft[key];
+      const range = row.avgAreaSqft?.[key];
+      const lo = Array.isArray(range) && Number.isFinite(range[0]) && range[0] > 0 ? range[0] : seed.avgAreaSqft[key][0];
       const totalM2 = lo / SQFT_PER_M2;
       if (totalM2 <= 0) continue;
       const balconyM2 = totalM2 * balconyShare;
@@ -187,7 +196,11 @@ export default function TypologiesTab() {
       // Mark as seeded even when nothing was created — otherwise the auto-seed
       // effect retries (and alerts) on every mount of this tab.
       if (!project.typologiesSeeded) patch({ typologiesSeeded: true });
-      if (!opts?.silent) alert("This class has no positive mix entries to apply.");
+      if (!opts?.silent) {
+        alert(
+          `Class ${letter}'s data produced no typologies — its typology mix or unit areas look corrupted in this browser's Class Library.\n\nOpen the Class Library tab and press "Reset class ${letter}" (or "Reset all") to restore the seed values, then apply again.`,
+        );
+      }
       return;
     }
     if (project.typologies.length > 0) {
