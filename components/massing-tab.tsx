@@ -984,48 +984,30 @@ function FacadePanel({
       {fins && (
         <div className="p-3 grid gap-2">
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Spacing m">
-              <input
-                type="number"
-                step={0.1}
-                min={0.2}
-                className="cell-input text-right"
-                value={Number(params.finSpacingM.toFixed(2))}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 0.2) onPatch({ finSpacingM: n });
-                }}
-                title="Centre-to-centre spacing between fins"
-              />
-            </Field>
-            <Field label="Width m">
-              <input
-                type="number"
-                step={0.02}
-                min={0.03}
-                className="cell-input text-right"
-                value={Number(params.finWidthM.toFixed(2))}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 0.03) onPatch({ finWidthM: n });
-                }}
-                title="Fin blade width along the facade"
-              />
-            </Field>
-            <Field label="Depth m">
-              <input
-                type="number"
-                step={0.05}
-                min={0.05}
-                className="cell-input text-right"
-                value={Number(params.finDepthM.toFixed(2))}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 0.05) onPatch({ finDepthM: n });
-                }}
-                title="How far the fins project outward from the facade"
-              />
-            </Field>
+            <DecimalField
+              label="Spacing m"
+              value={params.finSpacingM}
+              step={0.1}
+              min={0.2}
+              onChange={(n) => onPatch({ finSpacingM: n })}
+              title="Centre-to-centre spacing between fins"
+            />
+            <DecimalField
+              label="Width m"
+              value={params.finWidthM}
+              step={0.02}
+              min={0.03}
+              onChange={(n) => onPatch({ finWidthM: n })}
+              title="Fin blade width along the facade"
+            />
+            <DecimalField
+              label="Depth m"
+              value={params.finDepthM}
+              step={0.05}
+              min={0.05}
+              onChange={(n) => onPatch({ finDepthM: n })}
+              title="How far the fins project outward from the facade"
+            />
           </div>
           <p className="text-[10.5px] text-ink-500 leading-snug">
             Full-height vertical blades wrap the Ground and Podium perimeter, spaced evenly
@@ -1189,6 +1171,57 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-[10.5px] uppercase tracking-[0.10em] text-ink-500">{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * Decimal input backed by its own text state, decoupled from the numeric
+ * prop. A plain controlled `<input value={num}>` re-snaps to the last valid
+ * number on every keystroke that fails the `min` check — which blocks typing
+ * any value below `min` digit-by-digit (e.g. "0.5" with min=0.03: the
+ * intermediate "0" fails 0 >= 0.03, so onChange is never called and the field
+ * reverts before "." or "5" can be typed). Keeping local text lets the user
+ * type freely; the parent only hears about it once the string parses to a
+ * valid number, and the field only snaps back to the last good value on blur.
+ */
+function DecimalField({
+  label, value, onChange, step = 0.1, min = 0, title,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  min?: number;
+  title?: string;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    const parsed = parseFloat(text);
+    if (!Number.isFinite(parsed) || parsed !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <Field label={label}>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        className="cell-input text-right"
+        value={text}
+        title={title}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          const n = parseFloat(raw);
+          if (Number.isFinite(n) && n >= min) onChange(n);
+        }}
+        onBlur={() => {
+          const n = parseFloat(text);
+          if (!Number.isFinite(n) || n < min) setText(String(value));
+        }}
+      />
+    </Field>
   );
 }
 
