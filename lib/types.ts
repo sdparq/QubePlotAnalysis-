@@ -76,6 +76,14 @@ export interface ParcelInfo {
   imageNaturalHeight?: number;
   /** Plot polygon vertices traced on top of the drawing, in image-pixel coords. */
   tracePolygonPx?: { x: number; y: number }[];
+  /** Optional per-tier building footprints traced on the same drawing, in
+   *  image-pixel coords — for plots where the tower/podium shape differs from
+   *  a simple setback offset of the plot line. */
+  tierTracesPx?: {
+    ground?: { x: number; y: number }[];
+    podium?: { x: number; y: number }[];
+    tower?: { x: number; y: number }[];
+  };
   /** Calibration: two points in pixel coords plus their real-world distance (m). */
   calibration?: {
     p1: { x: number; y: number };
@@ -129,6 +137,13 @@ export interface Project {
   plotDepth?: number;
   /** Polygon vertices in plot-local metres. Used when plotMode === "polygon". */
   plotPolygon?: { x: number; y: number }[];
+  /** Custom tier footprints in plot-local metres (same frame as plotPolygon),
+   *  traced on the Plot drawing. When set for a tier, Massing uses it verbatim
+   *  instead of deriving that tier's footprint from per-edge setbacks — for
+   *  plots where the tower/podium shape differs from the plot outline. */
+  groundPolygon?: { x: number; y: number }[];
+  podiumPolygon?: { x: number; y: number }[];
+  towerPolygon?: { x: number; y: number }[];
   /** Uniform fallback setback (m) for the ground-floor footprint. Used when
    *  `groundSetbackPerEdge` is not set or has a different length than the plot
    *  polygon. Basements always use 0 (full plot polygon). */

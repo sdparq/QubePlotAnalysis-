@@ -15,6 +15,24 @@ import PlanTrace, { type TraceMode } from "./plan-trace";
 
 type Phase = "idle" | "rendering" | "done" | "error";
 
+type TraceTarget = "plot" | "ground" | "podium" | "tower";
+const TIER_TARGETS = ["ground", "podium", "tower"] as const;
+const TIER_LABELS: Record<(typeof TIER_TARGETS)[number], string> = {
+  ground: "Ground",
+  podium: "Podium",
+  tower: "Tower",
+};
+const TIER_COLORS: Record<(typeof TIER_TARGETS)[number], string> = {
+  ground: "#8a9a76",
+  podium: "#a17e4c",
+  tower: "#3f5135",
+};
+const TIER_POLY_FIELD = {
+  ground: "groundPolygon",
+  podium: "podiumPolygon",
+  tower: "towerPolygon",
+} as const;
+
 export default function PlotTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
@@ -26,6 +44,7 @@ export default function PlotTab() {
 
   // Trace state
   const [traceMode, setTraceMode] = useState<TraceMode>("idle");
+  const [traceTarget, setTraceTarget] = useState<TraceTarget>("plot");
   const [livePoints, setLivePoints] = useState<{ x: number; y: number }[]>([]);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [calibInput, setCalibInput] = useState<string>("");
@@ -146,6 +165,7 @@ export default function PlotTab() {
 
   /* ---------- Trace flow ---------- */
   function startTrace() {
+    setTraceTarget("plot");
     setTraceMode("tracing");
     setLivePoints([]);
     setAutoCalib(null);
@@ -155,14 +175,80 @@ export default function PlotTab() {
   }
   function cancelTrace() {
     setTraceMode("idle");
+    setTraceTarget("plot");
     setLivePoints([]);
   }
+
+  /** Similarity transform (uniform scale + Y flip + translation) that maps the
+   *  traced plot outline (px) onto the persisted plot polygon (plot-local
+   *  metres). Applying it to a tier trace lands the tier footprint in exactly
+   *  the same frame Massing works in — including area-anchored calibrations,
+   *  which only differ by a uniform scale. */
+  function tierPxToLocal(px: Point[]): Point[] | null {
+    const tracePx = parcel?.tracePolygonPx;
+    const plotLocal = project.plotPolygon;
+    if (!tracePx || !plotLocal || tracePx.length < 2 || tracePx.length !== plotLocal.length) return null;
+    let ai = 0, bi = 1, best = -1;
+    for (let i = 0; i < tracePx.length; i++) {
+      for (let j = i + 1; j < tracePx.length; j++) {
+        const d = Math.hypot(tracePx[i].x - tracePx[j].x, tracePx[i].y - tracePx[j].y);
+        if (d > best) { best = d; ai = i; bi = j; }
+      }
+    }
+    const dLocal = Math.hypot(plotLocal[ai].x - plotLocal[bi].x, plotLocal[ai].y - plotLocal[bi].y);
+    if (best < 1e-6 || dLocal <= 0) return null;
+    const s = dLocal / best;
+    let tx = 0, ty = 0;
+    for (let i = 0; i < tracePx.length; i++) {
+      tx += plotLocal[i].x - s * tracePx[i].x;
+      ty += plotLocal[i].y + s * tracePx[i].y;
+    }
+    tx /= tracePx.length;
+    ty /= tracePx.length;
+    return px.map((p) => ({ x: s * p.x + tx, y: -s * p.y + ty }));
+  }
+
+  function startTierTrace(tier: (typeof TIER_TARGETS)[number]) {
+    setTraceTarget(tier);
+    setTraceMode("tracing");
+    setLivePoints([]);
+  }
+
+  function commitTierTrace(tier: (typeof TIER_TARGETS)[number], px: Point[]) {
+    const local = tierPxToLocal(px);
+    if (!local) {
+      alert(
+        "The plot polygon no longer matches the traced outline (it was edited in Massing, or the plot isn't calibrated). Re-trace and calibrate the plot first.",
+      );
+      return;
+    }
+    if (!parcel) return;
+    patch({
+      [TIER_POLY_FIELD[tier]]: local,
+      parcel: { ...parcel, tierTracesPx: { ...parcel.tierTracesPx, [tier]: px } },
+    });
+  }
+
+  function clearTierTrace(tier: (typeof TIER_TARGETS)[number]) {
+    patch({
+      [TIER_POLY_FIELD[tier]]: undefined,
+      parcel: parcel ? { ...parcel, tierTracesPx: { ...parcel.tierTracesPx, [tier]: undefined } } : parcel,
+    });
+  }
+
   function finishTrace() {
     if (livePoints.length < 3) {
       alert("Click at least 3 corners to define a polygon.");
       return;
     }
     if (!parcel) return;
+    if (traceTarget !== "plot") {
+      commitTierTrace(traceTarget, livePoints);
+      setTraceMode("idle");
+      setTraceTarget("plot");
+      setLivePoints([]);
+      return;
+    }
     const nextParcel: ParcelInfo = { ...parcel, tracePolygonPx: livePoints, calibration: undefined };
     patch({ parcel: nextParcel });
     setTraceMode("idle");
@@ -179,12 +265,15 @@ export default function PlotTab() {
       if (dist < W * 0.02) {
         // Close
         const final = livePoints;
-        if (parcel) {
+        if (traceTarget !== "plot") {
+          commitTierTrace(traceTarget, final);
+        } else if (parcel) {
           const nextParcel: ParcelInfo = { ...parcel, tracePolygonPx: final, calibration: undefined };
           patch({ parcel: nextParcel });
           runAutoCalibration(final, nextParcel);
         }
         setTraceMode("idle");
+        setTraceTarget("plot");
         setLivePoints([]);
         return;
       }
@@ -336,7 +425,7 @@ export default function PlotTab() {
                   parcel={parcel}
                   mode={traceMode}
                   tracePolygonPx={
-                    traceMode === "idle" || traceMode === "calibrating"
+                    traceMode === "idle" || traceMode === "calibrating" || traceTarget !== "plot"
                       ? parcel.tracePolygonPx
                       : undefined
                   }
@@ -345,6 +434,12 @@ export default function PlotTab() {
                   hoverPoint={hoverPoint}
                   candidates={traceMode === "selecting" ? candidates : undefined}
                   onSelectCandidate={selectCandidate}
+                  extraPolygons={TIER_TARGETS.flatMap((t) => {
+                    const pts = parcel.tierTracesPx?.[t];
+                    return pts && pts.length >= 3
+                      ? [{ points: pts, color: TIER_COLORS[t], label: TIER_LABELS[t] }]
+                      : [];
+                  })}
                   onPick={(p) => {
                     if (traceMode === "tracing") onTraceClick(p);
                     else if (traceMode === "calibrating") onCalibClick(p);
@@ -540,6 +635,65 @@ export default function PlotTab() {
                     Saved to Massing tab in polygon mode.
                   </div>
                 </div>
+              )}
+
+              {isCalibrated && (
+                <StepBlock
+                  step="3"
+                  title="Building footprints (optional)"
+                  done={TIER_TARGETS.some((t) => (project[TIER_POLY_FIELD[t]]?.length ?? 0) >= 3)}
+                  description="For plots where the tower / podium shape differs from a setback offset of the plot line: trace each tier's footprint on the drawing. Massing uses a traced footprint verbatim instead of that tier's setbacks."
+                >
+                  <div className="grid gap-1.5">
+                    {TIER_TARGETS.map((tier) => {
+                      const poly = project[TIER_POLY_FIELD[tier]];
+                      const has = (poly?.length ?? 0) >= 3;
+                      const tracingThis = traceMode === "tracing" && traceTarget === tier;
+                      return (
+                        <div key={tier} className="flex items-center gap-2 text-[11.5px]">
+                          <span
+                            className="inline-block w-3 h-3 shrink-0 rounded-sm"
+                            style={{ backgroundColor: TIER_COLORS[tier] }}
+                          />
+                          <span className="w-14 text-ink-900">{TIER_LABELS[tier]}</span>
+                          <span className="flex-1 text-ink-500 tabular-nums">
+                            {tracingThis
+                              ? `${livePoints.length} point${livePoints.length === 1 ? "" : "s"}…`
+                              : has
+                              ? `${fmt2(polygonArea(poly!))} m²`
+                              : "from setbacks"}
+                          </span>
+                          {tracingThis ? (
+                            <>
+                              <button className="btn btn-primary btn-xs" onClick={finishTrace}>Done</button>
+                              <button className="btn btn-secondary btn-xs" onClick={cancelTrace}>Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-secondary btn-xs"
+                                onClick={() => startTierTrace(tier)}
+                                disabled={traceMode !== "idle"}
+                              >{has ? "Re-trace" : "Trace"}</button>
+                              {has && (
+                                <button
+                                  className="btn btn-danger btn-xs"
+                                  onClick={() => clearTierTrace(tier)}
+                                  disabled={traceMode !== "idle"}
+                                >✕</button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
+                    Click each corner on the drawing; click the first point (or Done) to close.
+                    The footprint must sit inside the plot for setbacks compliance — the app
+                    doesn&apos;t enforce it.
+                  </p>
+                </StepBlock>
               )}
             </div>
           </div>

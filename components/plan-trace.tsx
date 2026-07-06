@@ -26,6 +26,8 @@ export interface PlanTraceProps {
   onSelectCandidate?: (index: number) => void;
   /** Optional per-edge colors for the trace polygon outline. Length should match tracePolygonPx.length. */
   edgeColors?: string[];
+  /** Extra display-only polygons (px coords) — e.g. traced tier footprints. */
+  extraPolygons?: { points: { x: number; y: number }[]; color: string; label?: string }[];
 }
 
 export default function PlanTrace({
@@ -42,6 +44,7 @@ export default function PlanTrace({
   candidates,
   onSelectCandidate,
   edgeColors,
+  extraPolygons,
 }: PlanTraceProps) {
   const [hoveredCandidate, setHoveredCandidate] = useState<number | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -151,6 +154,34 @@ export default function PlanTrace({
               strokeWidth={Math.max(0.8, W * 0.0008)}
             />
           ))}
+
+          {/* Extra display-only polygons (traced tier footprints) */}
+          {extraPolygons?.map((ep, i) =>
+            ep.points.length >= 3 ? (
+              <g key={`xp-${i}`}>
+                <polygon
+                  points={ep.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="none"
+                  stroke={ep.color}
+                  strokeWidth={Math.max(1.6, W * 0.0022)}
+                  strokeDasharray={`${W * 0.008},${W * 0.005}`}
+                />
+                {ep.label && (
+                  <text
+                    x={ep.points.reduce((s, p) => s + p.x, 0) / ep.points.length}
+                    y={ep.points.reduce((s, p) => s + p.y, 0) / ep.points.length}
+                    textAnchor="middle"
+                    fontSize={W * 0.016}
+                    fontWeight="700"
+                    fill={ep.color}
+                    stroke="white"
+                    strokeWidth={W * 0.002}
+                    paintOrder="stroke"
+                  >{ep.label}</text>
+                )}
+              </g>
+            ) : null,
+          )}
 
           {/* Live tracing path */}
           {liveVertexPath && liveVertexPath.length >= 2 && (

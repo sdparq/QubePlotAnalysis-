@@ -90,9 +90,24 @@ export default function MassingTab() {
     [plotPoly, towerUni, project.towerSetbackPerEdge],
   );
 
-  const groundPoly = useMemo(() => tierPolygon(plotPoly, groundEdges), [plotPoly, groundEdges]);
-  const podiumPoly = useMemo(() => tierPolygon(plotPoly, podiumEdges), [plotPoly, podiumEdges]);
-  const towerPolyCentered = useMemo(() => tierPolygon(plotPoly, towerEdges), [plotPoly, towerEdges]);
+  // Custom tier footprints traced in the Plot tab win over setback-derived
+  // outlines — for plots where the tower/podium shape differs from the plot line.
+  const customGround = (project.groundPolygon?.length ?? 0) >= 3 ? project.groundPolygon! : null;
+  const customPodium = (project.podiumPolygon?.length ?? 0) >= 3 ? project.podiumPolygon! : null;
+  const customTower = (project.towerPolygon?.length ?? 0) >= 3 ? project.towerPolygon! : null;
+
+  const groundPoly = useMemo(
+    () => customGround ?? tierPolygon(plotPoly, groundEdges),
+    [customGround, plotPoly, groundEdges],
+  );
+  const podiumPoly = useMemo(
+    () => customPodium ?? tierPolygon(plotPoly, podiumEdges),
+    [customPodium, plotPoly, podiumEdges],
+  );
+  const towerPolyCentered = useMemo(
+    () => customTower ?? tierPolygon(plotPoly, towerEdges),
+    [customTower, plotPoly, towerEdges],
+  );
 
   const towerDx = project.towerOffsetXM ?? 0;
   const towerDy = project.towerOffsetYM ?? 0;
@@ -413,6 +428,14 @@ export default function MassingTab() {
                       ? project.parcel.tracePolygonPx.map((_, i) => edgeColor(i))
                       : undefined
                   }
+                  extraPolygons={([
+                    ["ground", "#8a9a76", "Ground"],
+                    ["podium", "#a17e4c", "Podium"],
+                    ["tower", "#3f5135", "Tower"],
+                  ] as const).flatMap(([key, color, label]) => {
+                    const pts = project.parcel!.tierTracesPx?.[key];
+                    return pts && pts.length >= 3 ? [{ points: pts, color, label }] : [];
+                  })}
                 />
               </div>
             )}
@@ -433,6 +456,39 @@ export default function MassingTab() {
               towerArea={towerArea}
               plotArea={plotPolyArea}
             />
+
+            {(customGround || customPodium || customTower) && (
+              <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
+                <div className="eyebrow text-qube-800 text-[10px] mb-1">Custom footprints from Plot</div>
+                {([
+                  ["Ground", customGround, "groundPolygon"],
+                  ["Podium", customPodium, "podiumPolygon"],
+                  ["Tower", customTower, "towerPolygon"],
+                ] as const).map(([label, poly, field]) =>
+                  poly ? (
+                    <div key={field} className="flex items-center justify-between gap-2 py-0.5">
+                      <span>
+                        <strong>{label}</strong> uses a traced footprint ({fmt2(polygonArea(poly))} m²) — its
+                        setbacks below are ignored.
+                      </span>
+                      <button
+                        className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
+                        onClick={() => {
+                          const tierKey = field === "groundPolygon" ? "ground" : field === "podiumPolygon" ? "podium" : "tower";
+                          patch({
+                            [field]: undefined,
+                            parcel: project.parcel
+                              ? { ...project.parcel, tierTracesPx: { ...project.parcel.tierTracesPx, [tierKey]: undefined } }
+                              : project.parcel,
+                          });
+                        }}
+                        title="Remove the traced footprint and fall back to setbacks"
+                      >clear</button>
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            )}
 
             <SetbacksTable
               plotPoly={plotPoly}
