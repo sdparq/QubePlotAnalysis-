@@ -32,11 +32,22 @@ export function useAuth(): {
       return;
     }
     let mounted = true;
-    sb.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    // A rejected promise here (dead network, corrupted persisted session token,
+    // Supabase project paused/unreachable) must not leave `loading` stuck at
+    // `true` forever — that reads as "the cloud widget silently disappeared"
+    // since CloudStatus renders nothing but "Cloud…" while loading is true.
+    sb.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+      })
+      .catch((e) => {
+        console.error("getSession failed", e);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
     const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
@@ -53,12 +64,19 @@ export function useAuth(): {
 export async function signInWithPassword(password: string): Promise<string | null> {
   const sb = getSupabase();
   if (!sb) return "Cloud not configured";
-  const { error } = await sb.auth.signInWithPassword({
-    email: sharedEmail,
-    password,
-  });
-  if (error) return error.message;
-  return null;
+  try {
+    const { error } = await sb.auth.signInWithPassword({
+      email: sharedEmail,
+      password,
+    });
+    if (error) return error.message;
+    return null;
+  } catch (e) {
+    // A network/CORS/DNS failure (wrong URL, paused or deleted Supabase
+    // project, offline) throws here instead of resolving with `{ error }` —
+    // without this catch the caller's "signing in…" state never clears.
+    return e instanceof Error ? e.message : "Could not reach Supabase";
+  }
 }
 
 export async function signOut(): Promise<void> {

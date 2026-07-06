@@ -155,16 +155,26 @@ export default function CloudStatus() {
       if (!pwd) return;
       setSigningIn(true);
       setPwdErr(null);
-      const err = await signInWithPassword(pwd);
-      setSigningIn(false);
-      if (err) {
-        setPwdErr("Wrong password");
-      } else {
-        setPwd("");
+      try {
+        const err = await signInWithPassword(pwd);
+        if (err) {
+          // "Invalid login credentials" is Supabase's generic wrong-email-or-
+          // password response — translate that one. Anything else (network
+          // failure, paused/deleted project, misconfigured URL/key) is shown
+          // as-is: it's not a password problem and saying "Wrong password"
+          // would send whoever's debugging this straight down the wrong path.
+          setPwdErr(/invalid login credentials/i.test(err) ? "Wrong password" : err);
+        } else {
+          setPwd("");
+        }
+      } finally {
+        // Always runs, even if signInWithPassword itself threw — otherwise the
+        // button stays stuck on "…" forever with no visible error.
+        setSigningIn(false);
       }
     }
     return (
-      <form onSubmit={handleSignIn} className="flex items-center gap-1">
+      <form onSubmit={handleSignIn} className="flex items-center gap-1 flex-wrap justify-end max-w-[320px]">
         <input
           type="password"
           value={pwd}
@@ -176,7 +186,9 @@ export default function CloudStatus() {
         <button type="submit" className={ghostBtn} disabled={signingIn || !pwd}>
           {signingIn ? "…" : "Unlock"}
         </button>
-        {pwdErr && <span className="text-[10px] text-red-300 ml-1">{pwdErr}</span>}
+        {pwdErr && (
+          <span className="basis-full text-[10px] text-red-300 text-right leading-snug">{pwdErr}</span>
+        )}
       </form>
     );
   }
