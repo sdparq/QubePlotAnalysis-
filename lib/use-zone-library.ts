@@ -27,6 +27,24 @@ export function useZoneLibrary() {
         for (const letter of Object.keys(DEFAULT_ZONE_CLASSES) as ZoneClass[]) {
           merged[letter] = { ...DEFAULT_ZONE_CLASSES[letter], ...(parsed[letter] ?? {}) };
         }
+        // `locations` is a whole-array field, so the shallow merge above makes
+        // a saved snapshot permanently shadow any zone we add to the defaults
+        // later (e.g. the Abu Dhabi seed) — the user would never see it,
+        // however many times we ship it, because their stored array simply
+        // doesn't have it and the merge never looks inside the array. Backfill
+        // any default zone that isn't anywhere in the user's saved library yet
+        // into whichever class the current code assigns it to, without
+        // touching zones they've already customised (moved, renamed, removed).
+        const known = new Set(
+          (Object.keys(DEFAULT_ZONE_CLASSES) as ZoneClass[]).flatMap((l) => merged[l].locations),
+        );
+        for (const letter of Object.keys(DEFAULT_ZONE_CLASSES) as ZoneClass[]) {
+          const missing = DEFAULT_ZONE_CLASSES[letter].locations.filter((loc) => !known.has(loc));
+          if (missing.length > 0) {
+            merged[letter] = { ...merged[letter], locations: [...merged[letter].locations, ...missing] };
+            missing.forEach((loc) => known.add(loc));
+          }
+        }
         setLibrary(merged);
       }
     } catch {
