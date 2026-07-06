@@ -213,6 +213,16 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
   const actualInteriorGFA = targets.reduce((s, x) => s + x.units * x.typology.internalArea, 0);
   const interiorGFADrift = actualInteriorGFA - apartmentsGFA;
 
+  // What the matrix holds RIGHT NOW, so we can warn before Apply overwrites a
+  // table that no longer matches the auto-fill (edited by hand, or filled
+  // under earlier Setup / mix / typology values).
+  const current = useMemo(() => computeProgram(project), [project]);
+  const matrixDiverges =
+    existingProgramCount > 0 &&
+    !!fill &&
+    totalUnits > 0 &&
+    (current.totalUnits !== totalUnits || Math.abs(current.totalInteriorGFA - actualInteriorGFA) > 1);
+
   function apply() {
     if (apartmentsGFA <= 0) {
       alert("Set the Residential GFA in the Setup tab first (GFA breakdown → Residential).");
@@ -224,7 +234,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
     }
     if (existingProgramCount > 0) {
       const ok = confirm(
-        `Replace every existing cell in the Program matrix? The matrix will be filled with ${totalUnits} units distributed across ${numFloors} floors so that Σ Interior GFA ≈ ${Math.round(apartmentsGFA).toLocaleString("en-US")} m².`,
+        `Replace the current matrix (${current.totalUnits} units · Σ ${Math.round(current.totalInteriorGFA).toLocaleString("en-US")} m² interior) with ${totalUnits} units across ${numFloors} floors (Σ Interior ≈ ${Math.round(actualInteriorGFA).toLocaleString("en-US")} m²)? This recomputes everything from the current class mix, Apartments GFA and typology areas — manual edits to the matrix are lost.`,
       );
       if (!ok) return;
     }
@@ -286,6 +296,16 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
               project — those units are dropped (categories: {droppedKeys.join(", ")}).
               Add a typology of that category in the Typologies tab to capture them.
             </p>
+          )}
+
+          {matrixDiverges && (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 p-2.5 mt-3 text-[11.5px] leading-snug">
+              The matrix below currently holds <strong>{current.totalUnits} units</strong> (Σ{" "}
+              {Math.round(current.totalInteriorGFA).toLocaleString("en-US")} m² interior) — different
+              from the <strong>{totalUnits} units</strong> this auto-fill would produce. It was
+              either edited by hand or filled when Setup / unit mix / typology areas had other
+              values. <strong>Apply replaces it entirely</strong> with the recomputed distribution.
+            </div>
           )}
 
           {targets.length > 0 && totalUnits > 0 && (
