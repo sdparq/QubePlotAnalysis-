@@ -628,7 +628,7 @@ const RAIL_H = 1.05;          // balustrade height (m)
  * balconies on every Nth bay. All repeated elements are instanced.
  */
 export function ResidentialFacade({
-  polygon, hole, fromY, toY, floorHeight, params,
+  polygon, hole, fromY, toY, floorHeight, params, greenery = false,
 }: {
   polygon: Point[];
   hole?: Point[];
@@ -636,6 +636,8 @@ export function ResidentialFacade({
   toY: number;
   floorHeight: number;
   params: FacadeParams;
+  /** Cascading planter hedges hanging from the balcony edges (archviz dressing). */
+  greenery?: boolean;
 }) {
   const { panelWidthM, balconyDepthM, balconyEveryNBays, solidPanelRatio, balconyLayout, patternSeed } = params;
   const height = toY - fromY;
@@ -672,12 +674,14 @@ export function ResidentialFacade({
     return s;
   }, [polygon, hole]);
 
-  const { mullions, balconySlabs, rails, solidsLight, solidsDark } = useMemo(() => {
+  const { mullions, balconySlabs, rails, solidsLight, solidsDark, hedgesA, hedgesB } = useMemo(() => {
     const mullions: THREE.Matrix4[] = [];
     const balconySlabs: THREE.Matrix4[] = [];
     const rails: THREE.Matrix4[] = [];
     const solidsLight: THREE.Matrix4[] = [];
     const solidsDark: THREE.Matrix4[] = [];
+    const hedgesA: THREE.Matrix4[] = [];
+    const hedgesB: THREE.Matrix4[] = [];
     const pos = new THREE.Vector3();
     const quat = new THREE.Quaternion();
     const scale = new THREE.Vector3();
@@ -753,11 +757,24 @@ export function ResidentialFacade({
           pos.set(cx + nx * (balconyDepthM - 0.03), yBase + 0.14 + RAIL_H / 2, -(cy + ny * (balconyDepthM - 0.03)));
           scale.set(w, RAIL_H, 0.05);
           rails.push(new THREE.Matrix4().compose(pos, quat, scale));
+          // cascading planter hedge draped over the balcony edge (most, not all)
+          if (greenery && cellRand(seed, globalBay, f, 5) < 0.8) {
+            const droop = 0.55 + cellRand(seed, globalBay, f, 6) * 0.5;
+            pos.set(
+              cx + nx * (balconyDepthM + 0.06),
+              yBase + 0.2 - droop / 2,
+              -(cy + ny * (balconyDepthM + 0.06)),
+            );
+            scale.set(w * (0.7 + cellRand(seed, globalBay, f, 7) * 0.3), droop, 0.32);
+            const m = new THREE.Matrix4().compose(pos, quat, scale);
+            if (cellRand(seed, globalBay, f, 8) < 0.6) hedgesA.push(m);
+            else hedgesB.push(m);
+          }
         }
       }
     }
-    return { mullions, balconySlabs, rails, solidsLight, solidsDark };
-  }, [polygon, fromY, floors, floorH, panelWidthM, balconyDepthM, balconyEveryNBays, solidPanelRatio, balconyLayout, patternSeed]);
+    return { mullions, balconySlabs, rails, solidsLight, solidsDark, hedgesA, hedgesB };
+  }, [polygon, fromY, floors, floorH, panelWidthM, balconyDepthM, balconyEveryNBays, solidPanelRatio, balconyLayout, patternSeed, greenery]);
 
   return (
     <group>
@@ -792,6 +809,8 @@ export function ResidentialFacade({
       <InstancedBoxes matrices={solidsDark} color="#b9b2a0" roughness={0.85} />
       <InstancedBoxes matrices={balconySlabs} color="#ddd8ca" roughness={0.85} />
       <InstancedBoxes matrices={rails} color="#9fb7ae" roughness={0.15} metalness={0.2} opacity={0.45} />
+      <InstancedBoxes matrices={hedgesA} color="#4d6b34" roughness={0.95} />
+      <InstancedBoxes matrices={hedgesB} color="#617d3d" roughness={0.95} />
     </group>
   );
 }
