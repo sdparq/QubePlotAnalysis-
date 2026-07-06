@@ -225,6 +225,24 @@ export default function TypologiesTab() {
 
   return (
     <div className="grid gap-6">
+      {!detectedClass && (
+        <div className="card bg-amber-50 border-amber-200">
+          <div className="eyebrow text-amber-800 text-[10px]">No class detected for this zone</div>
+          <p className="text-[12.5px] text-ink-800 mt-1 leading-snug">
+            Current zone: <strong>{project.zone ? `"${project.zone}"` : "(empty)"}</strong>. It doesn&apos;t match
+            any location in the Class Library, so there is no suggested mix and no{" "}
+            <strong>Apply class mix</strong> button here. Either:
+          </p>
+          <ul className="text-[12.5px] text-ink-800 mt-1.5 leading-snug list-disc pl-5 space-y-0.5">
+            <li>Pick a listed zone in <strong>Setup</strong> (tab 01, &quot;Dubai zone&quot;), or</li>
+            <li>Open <strong>Class Library</strong> (tab L) and add this exact zone name to whichever class fits it.</li>
+          </ul>
+          <p className="text-[11px] text-ink-600 mt-2 leading-snug">
+            You can still add typologies manually below without a detected class.
+          </p>
+        </div>
+      )}
+
       {detectedClass && (
         <div className="card bg-qube-50 border-qube-200">
           <div className="flex items-start gap-4 flex-wrap">
