@@ -279,268 +279,6 @@ function CaptureBridge({ captureRef }: { captureRef: MutableRefObject<(() => str
   return null;
 }
 
-/* ------------------------------- Paint game -------------------------------
- * Arcade mode: click throws a paint balloon from the camera. Balloons fly on
- * a gravity arc; each frame a short raycast along the velocity step detects
- * the first surface hit (building facade, podium, ground, trees...) and
- * leaves a procedurally-shaped paint splat stuck to it. */
-
-const PAINT_COLORS = ["#e63946", "#ff8500", "#ffd60a", "#2a9d8f", "#3a86ff", "#8338ec", "#ff5d8f", "#80ed99"];
-const BALLOON_SPEED = 24;   // m/s at launch
-const BALLOON_GRAVITY = 14; // slightly floaty arc, easier to aim than 9.81
-const MAX_BALLOONS = 24;
-const MAX_SPLATS = 250;
-
-/** White splat silhouette on transparent canvas (tinted per-splat via material
- *  color): irregular core blob + satellite droplets + drips running towards
- *  the canvas bottom, which the splat basis keeps pointing world-down. */
-function makeSplatTexture(seed: number): THREE.CanvasTexture {
-  const S = 256;
-  const c = document.createElement("canvas");
-  c.width = c.height = S;
-  const ctx = c.getContext("2d")!;
-  ctx.clearRect(0, 0, S, S);
-  ctx.fillStyle = "#fff";
-  const cx = S / 2;
-  const cy = S / 2 - 16;
-  const R = S * 0.21;
-  ctx.beginPath();
-  for (let a = 0; a <= 64; a++) {
-    const t = (a / 64) * Math.PI * 2;
-    const r = R * (0.72 + 0.5 * hash01(a % 64, seed));
-    const x = cx + Math.cos(t) * r;
-    const y = cy + Math.sin(t) * r;
-    if (a === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.fill();
-  for (let i = 0; i < 26; i++) {
-    const t = hash01(i, seed + 1) * Math.PI * 2;
-    const d = R * (1.05 + hash01(i, seed + 2) * 1.6);
-    const r = 2 + hash01(i, seed + 3) * 9;
-    ctx.beginPath();
-    ctx.arc(cx + Math.cos(t) * d, cy + Math.sin(t) * d, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const drips = 2 + Math.floor(hash01(1, seed + 4) * 3);
-  for (let i = 0; i < drips; i++) {
-    const x = cx + (hash01(i, seed + 5) - 0.5) * R * 1.7;
-    const len = R * (0.8 + hash01(i, seed + 6) * 1.9);
-    const w = 4 + hash01(i, seed + 7) * 7;
-    ctx.beginPath();
-    ctx.ellipse(x, cy + R * 0.5 + len / 2, w / 2, len / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x, cy + R * 0.5 + len, w * 0.72, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-const _pbStep = new THREE.Vector3();
-const _pbDir = new THREE.Vector3();
-const _pbNormal = new THREE.Vector3();
-const _pbUp = new THREE.Vector3();
-const _pbBasis = new THREE.Matrix4();
-const _pbInst = new THREE.Matrix4();
-const _pbInstWorld = new THREE.Matrix4();
-
-interface FlyingBalloon {
-  mesh: THREE.Mesh;
-  vel: THREE.Vector3;
-  color: THREE.Color;
-  life: number;
-}
-
-function PaintBalloons({
-  enabled,
-  onSplat,
-  clearRef,
-}: {
-  enabled: boolean;
-  onSplat: () => void;
-  clearRef: MutableRefObject<(() => void) | null>;
-}) {
-  const { camera, scene } = useThree();
-  const root = useRef<THREE.Group>(null);
-  const splatRoot = useRef<THREE.Group>(null);
-  const balloons = useRef<FlyingBalloon[]>([]);
-  const splats = useRef<THREE.Mesh[]>([]);
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const balloonGeom = useMemo(() => new THREE.SphereGeometry(0.13, 12, 10), []);
-  const splatGeom = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
-  const splatTextures = useMemo(() => [0, 1, 2, 3, 4, 5].map((i) => makeSplatTexture(i * 97 + 13)), []);
-
-  useEffect(
-    () => () => {
-      balloonGeom.dispose();
-      splatGeom.dispose();
-      splatTextures.forEach((t) => t.dispose());
-    },
-    [balloonGeom, splatGeom, splatTextures],
-  );
-
-  useEffect(() => {
-    clearRef.current = () => {
-      for (const s of splats.current) {
-        s.removeFromParent();
-        (s.material as THREE.Material).dispose();
-      }
-      splats.current = [];
-      for (const b of balloons.current) {
-        b.mesh.removeFromParent();
-        (b.mesh.material as THREE.Material).dispose();
-      }
-      balloons.current = [];
-    };
-    return () => {
-      clearRef.current = null;
-    };
-  }, [clearRef]);
-
-  // Click = throw. Only while pointer-locked (the lock-acquiring click itself
-  // happens before pointerLockElement is set, so it never fires a balloon).
-  useEffect(() => {
-    if (!enabled) return;
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 0 || !document.pointerLockElement || !root.current) return;
-      if (balloons.current.length >= MAX_BALLOONS) return;
-      const color = new THREE.Color(PAINT_COLORS[Math.floor(Math.random() * PAINT_COLORS.length)]);
-      const mesh = new THREE.Mesh(
-        balloonGeom,
-        new THREE.MeshStandardMaterial({ color, roughness: 0.25, metalness: 0 }),
-      );
-      mesh.scale.set(1, 1.25, 1);
-      mesh.userData.noPaint = true;
-      const dir = camera.getWorldDirection(new THREE.Vector3());
-      mesh.position.copy(camera.position).addScaledVector(dir, 0.55);
-      mesh.position.y -= 0.12;
-      root.current.add(mesh);
-      balloons.current.push({
-        mesh,
-        vel: dir.multiplyScalar(BALLOON_SPEED).add(new THREE.Vector3(0, 2.2, 0)),
-        color,
-        life: 6,
-      });
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [enabled, camera, balloonGeom]);
-
-  function addSplat(point: THREE.Vector3, n: THREE.Vector3, color: THREE.Color) {
-    const parent = splatRoot.current;
-    if (!parent) return;
-    const tex = splatTextures[Math.floor(Math.random() * splatTextures.length)];
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      color,
-      transparent: true,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -4,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(splatGeom, mat);
-    // Basis: plane faces the surface (+Z = normal) with local -Y kept pointing
-    // world-down so the painted drips run downwards on walls.
-    _pbUp.set(0, 1, 0);
-    if (Math.abs(n.y) > 0.92) _pbUp.set(1, 0, 0);
-    const x = new THREE.Vector3().crossVectors(_pbUp, n).normalize();
-    const y = new THREE.Vector3().crossVectors(n, x);
-    mesh.quaternion.setFromRotationMatrix(_pbBasis.makeBasis(x, y, n));
-    mesh.rotateZ((Math.random() - 0.5) * 0.5);
-    mesh.position.copy(point).addScaledVector(n, 0.02 + Math.random() * 0.015);
-    const size = 1.1 + Math.random() * 1.3;
-    mesh.userData.noPaint = true;
-    mesh.userData.size = size;
-    mesh.scale.setScalar(0.08);
-    mesh.renderOrder = 5;
-    parent.add(mesh);
-    splats.current.push(mesh);
-    if (splats.current.length > MAX_SPLATS) {
-      const old = splats.current.shift()!;
-      old.removeFromParent();
-      (old.material as THREE.Material).dispose();
-    }
-    onSplat();
-  }
-
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
-    // Splash-in scale animation
-    for (const s of splats.current) {
-      const target = s.userData.size as number;
-      if (s.scale.x < target) s.scale.setScalar(Math.min(target, s.scale.x + target * dt * 9));
-    }
-    if (!balloons.current.length) return;
-    const keep: FlyingBalloon[] = [];
-    for (const b of balloons.current) {
-      b.vel.y -= BALLOON_GRAVITY * dt;
-      _pbStep.copy(b.vel).multiplyScalar(dt);
-      const stepLen = _pbStep.length();
-      _pbDir.copy(_pbStep).normalize();
-      raycaster.set(b.mesh.position, _pbDir);
-      raycaster.far = stepLen + 0.14;
-      const hits = raycaster.intersectObjects(scene.children, true);
-      let hit: THREE.Intersection | null = null;
-      for (const h of hits) {
-        if (!(h.object as THREE.Mesh).isMesh) continue;
-        let skip = false;
-        for (let o: THREE.Object3D | null = h.object; o; o = o.parent) {
-          if (o.userData.noPaint) {
-            skip = true;
-            break;
-          }
-        }
-        if (!skip) {
-          hit = h;
-          break;
-        }
-      }
-      if (hit) {
-        if (hit.face) {
-          // Instanced meshes (facade panels, trees...) rotate per instance —
-          // compose the instance matrix into the normal transform.
-          const inst = hit.object as THREE.InstancedMesh;
-          if (inst.isInstancedMesh && hit.instanceId !== undefined) {
-            inst.getMatrixAt(hit.instanceId, _pbInst);
-            _pbInstWorld.multiplyMatrices(hit.object.matrixWorld, _pbInst);
-            _pbNormal.copy(hit.face.normal).transformDirection(_pbInstWorld).normalize();
-          } else {
-            _pbNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
-          }
-        } else {
-          _pbNormal.copy(_pbDir).negate();
-        }
-        if (_pbNormal.dot(_pbDir) > 0) _pbNormal.negate();
-        addSplat(hit.point, _pbNormal, b.color);
-        b.mesh.removeFromParent();
-        (b.mesh.material as THREE.Material).dispose();
-        continue;
-      }
-      b.mesh.position.add(_pbStep);
-      b.life -= dt;
-      if (b.life <= 0 || b.mesh.position.y < -2) {
-        b.mesh.removeFromParent();
-        (b.mesh.material as THREE.Material).dispose();
-        continue;
-      }
-      keep.push(b);
-    }
-    balloons.current = keep;
-  });
-
-  return (
-    <>
-      <group ref={root} userData={{ noPaint: true }} />
-      <group ref={splatRoot} userData={{ noPaint: true }} />
-    </>
-  );
-}
-
 /* ----------------------------- Vegetation -------------------------------- */
 
 function Palm({ x, z, s, seedI }: { x: number; z: number; s: number; seedI: number }) {
@@ -987,16 +725,6 @@ export default function MassingWalk(props: WalkProps) {
   const [verticals, setVerticals] = useState(false);
   const pitchBank = useRef(0);
 
-  // Paint-balloon game
-  const [game, setGame] = useState(false);
-  const [splatCount, setSplatCount] = useState(0);
-  const clearPaintRef = useRef<(() => void) | null>(null);
-  const onSplat = useCallback(() => setSplatCount((c) => c + 1), []);
-  const clearPaint = useCallback(() => {
-    clearPaintRef.current?.();
-    setSplatCount(0);
-  }, []);
-
   const [aiBusy, setAiBusy] = useState(false);
   const [aiResult, setAiResult] = useState<{ img: string; note?: string } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -1044,7 +772,6 @@ export default function MassingWalk(props: WalkProps) {
       if (e.key === "Escape" && !document.pointerLockElement && !aiOpen) onExit();
       if (e.code === "KeyV" && document.pointerLockElement) setVerticals((v) => !v);
       if (e.code === "KeyR" && document.pointerLockElement && !aiOpen) void handleRender();
-      if (e.code === "KeyG" && document.pointerLockElement) setGame((g) => !g);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1082,7 +809,6 @@ export default function MassingWalk(props: WalkProps) {
         }}
       >
         <WalkScene {...props} />
-        <PaintBalloons enabled={game && locked && !aiOpen} onSplat={onSplat} clearRef={clearPaintRef} />
         <CameraTuner fov={fov} verticals={verticals} pitchBank={pitchBank} />
         <CaptureBridge captureRef={captureRef} />
         <PointerLockControls
@@ -1093,13 +819,7 @@ export default function MassingWalk(props: WalkProps) {
       </Canvas>
 
       {locked && (
-        <div
-          className={
-            game
-              ? "pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white/80 shadow"
-              : "pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-white/70 shadow"
-          }
-        />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-white/70 shadow" />
       )}
 
       {locked && (
@@ -1107,21 +827,8 @@ export default function MassingWalk(props: WalkProps) {
           WASD move · mouse look · Shift run · ESC pause
           <br />
           <span className="text-white/65">
-            wheel FOV ({fov}°) · V verticals {verticals ? "ON" : "off"} · R hyperreal render · G paint game{" "}
-            {game ? "ON" : "off"}
+            wheel FOV ({fov}°) · V verticals {verticals ? "ON" : "off"} · R hyperreal render
           </span>
-          {game && (
-            <>
-              <br />
-              <span className="text-amber-200/90">🎈 click to throw a paint balloon · G to stop</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {locked && game && (
-        <div className="pointer-events-none absolute top-4 right-4 px-3 py-1.5 bg-black/55 text-white/85 text-[12px] tracking-wide rounded-sm">
-          🎈 {splatCount} splat{splatCount === 1 ? "" : "s"}
         </div>
       )}
 
@@ -1140,7 +847,7 @@ export default function MassingWalk(props: WalkProps) {
               <strong>WASD</strong> to move · <strong>mouse</strong> to look · <strong>Shift</strong> to run
               <br />
               <strong>wheel</strong> zoom (FOV) · <strong>V</strong> corrected verticals ·{" "}
-              <strong>R</strong> hyperreal render · <strong>G</strong> paint game · <strong>ESC</strong> to pause
+              <strong>R</strong> hyperreal render · <strong>ESC</strong> to pause
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap">
               <button
@@ -1148,16 +855,6 @@ export default function MassingWalk(props: WalkProps) {
                 className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] bg-qube-500 text-white hover:bg-qube-600 transition-colors"
               >
                 ▶ Enter
-              </button>
-              <button
-                onClick={() => {
-                  setGame(true);
-                  controlsRef.current?.lock();
-                }}
-                className="px-6 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] border border-amber-300/60 text-amber-200 hover:bg-amber-400/20 transition-colors"
-                title="Walk around and throw paint balloons at the facade — click to throw"
-              >
-                🎈 Play game
               </button>
               <button
                 onClick={() => void handleRender()}
@@ -1173,14 +870,6 @@ export default function MassingWalk(props: WalkProps) {
                 Exit
               </button>
             </div>
-            {splatCount > 0 && (
-              <button
-                onClick={clearPaint}
-                className="mt-4 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-bone-200/70 border border-bone-100/20 hover:bg-white/10 transition-colors"
-              >
-                ✕ Clear paint ({splatCount} splat{splatCount === 1 ? "" : "s"})
-              </button>
-            )}
           </div>
         </div>
       )}
