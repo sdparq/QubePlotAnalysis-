@@ -214,6 +214,10 @@ export interface Project {
   commonAreasInputMode?: "absolute" | "percentage";
   /** Real-estate economic analysis configuration. */
   economic?: EconomicConfig;
+  /** Per-bucket construction rates (AED/m² BUA) for the premium/medium/low
+   *  cost cases in Areas Summary. Missing buckets/cases fall back to
+   *  DEFAULT_BUA_COST_RATES. */
+  buaCostRates?: Partial<Record<BuaCostBucketKey, Partial<BuaCostRates>>>;
   /** Parametric facade treatment for the Massing viewer. */
   facade?: FacadeConfig;
 }
@@ -283,6 +287,33 @@ export const DEFAULT_RESIDENTIAL_BREAKDOWN: ResidentialBreakdown = {
   amenities:  { pct:  1, countsAsGFA: true },
   circulation:{ pct: 10, countsAsGFA: true },
   services:   { pct: 10, countsAsGFA: true },
+};
+
+/** Construction cost buckets used in Areas Summary — each carries a distinct
+ *  AED/m² BUA rate for the three cost scenarios. */
+export type BuaCostBucketKey =
+  | "apartmentsInterior"
+  | "balconies"
+  | "amenities"
+  | "circulation"
+  | "services"
+  | "groundPodium"
+  | "basements";
+
+export type BuaCostCase = "premium" | "medium" | "low";
+
+export type BuaCostRates = Record<BuaCostCase, number>;
+
+/** Indicative Dubai/Abu Dhabi construction rates (AED per m² of BUA) —
+ *  starting points only; every cell is editable in Areas Summary. */
+export const DEFAULT_BUA_COST_RATES: Record<BuaCostBucketKey, BuaCostRates> = {
+  apartmentsInterior: { premium: 6500, medium: 5000, low: 3800 },
+  balconies:          { premium: 3500, medium: 2800, low: 2200 },
+  amenities:          { premium: 8000, medium: 6000, low: 4500 },
+  circulation:        { premium: 5500, medium: 4200, low: 3200 },
+  services:           { premium: 5000, medium: 4000, low: 3000 },
+  groundPodium:       { premium: 5500, medium: 4500, low: 3500 },
+  basements:          { premium: 3800, medium: 3200, low: 2600 },
 };
 
 export type CommonAreasGroup = "amenities" | "circulation" | "services";
