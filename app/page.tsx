@@ -15,7 +15,6 @@ import SummaryTab from "@/components/summary-tab";
 import HeaderBar from "@/components/header-bar";
 
 const TABS = [
-  { id: "zones", num: "L", label: "Class Library" },
   { id: "plot", num: "00", label: "Plot" },
   { id: "setup", num: "01", label: "Setup" },
   { id: "common", num: "02", label: "Distribution" },
@@ -28,22 +27,68 @@ const TABS = [
   { id: "economic", num: "09", label: "Economic" },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId = (typeof TABS)[number]["id"] | "zones";
+
+/** The Class Library is the shared pricing/mix database — hidden from the
+ *  regular tab bar and admin-gated. Only the SHA-256 of the password ships in
+ *  the bundle. Override at build time with NEXT_PUBLIC_LIBRARY_PASSWORD_SHA256. */
+const LIBRARY_PASSWORD_SHA256 =
+  process.env.NEXT_PUBLIC_LIBRARY_PASSWORD_SHA256 ??
+  "f8a23191d373d8775c92fb267f8333b8331ed31a23d94da28ca7e7a857bb4cf5";
+const LIBRARY_UNLOCK_KEY = "qube-library-unlock";
+
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 export default function Page() {
   const [tab, setTab] = useState<TabId>("setup");
   const [hydrated, setHydrated] = useState(false);
+  const [libraryUnlocked, setLibraryUnlocked] = useState(false);
   const project = useProject();
 
-  useEffect(() => setHydrated(true), []);
+  useEffect(() => {
+    setLibraryUnlocked(window.sessionStorage.getItem(LIBRARY_UNLOCK_KEY) === "1");
+    setHydrated(true);
+  }, []);
   if (!hydrated) return null;
+
+  async function openLibrary() {
+    if (libraryUnlocked) {
+      setTab("zones");
+      return;
+    }
+    const pw = window.prompt("The Class Library is restricted.\nEnter the admin password:");
+    if (pw == null || pw === "") return;
+    try {
+      if ((await sha256Hex(pw)) !== LIBRARY_PASSWORD_SHA256) {
+        window.alert("Wrong password.");
+        return;
+      }
+    } catch {
+      window.alert("Password check needs a secure (https) context — open the deployed site.");
+      return;
+    }
+    window.sessionStorage.setItem(LIBRARY_UNLOCK_KEY, "1");
+    setLibraryUnlocked(true);
+    setTab("zones");
+  }
+
+  function lockLibrary() {
+    window.sessionStorage.removeItem(LIBRARY_UNLOCK_KEY);
+    setLibraryUnlocked(false);
+    setTab("setup");
+  }
 
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden">
       <HeaderBar />
       <nav className="border-b border-ink-200 bg-white sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="flex flex-wrap gap-x-1 gap-y-0">
+          <div className="flex flex-wrap gap-x-1 gap-y-0 items-center">
             {TABS.map((t) => {
               const active = tab === t.id;
               return (
@@ -61,12 +106,43 @@ export default function Page() {
                 </button>
               );
             })}
+            {libraryUnlocked ? (
+              <div className="ml-auto flex items-center">
+                <button
+                  onClick={() => setTab("zones")}
+                  className={`relative px-4 py-4 text-[13px] font-semibold transition-colors flex items-baseline gap-2 ${
+                    tab === "zones" ? "text-ink-900" : "text-ink-500 hover:text-ink-900"
+                  }`}
+                  style={{ letterSpacing: "0.06em" }}
+                >
+                  <span className={`text-[10px] font-medium ${tab === "zones" ? "text-qube-600" : "text-ink-400"}`}>L</span>
+                  <span className="uppercase">Class Library</span>
+                  {tab === "zones" && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-qube-500" />}
+                </button>
+                <button
+                  onClick={lockLibrary}
+                  className="px-2 py-4 text-[12px] text-ink-400 hover:text-ink-700 transition-colors"
+                  title="Lock the Class Library again"
+                >
+                  🔓
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => void openLibrary()}
+                className="ml-auto px-3 py-4 text-[12px] text-ink-300 hover:text-ink-600 transition-colors"
+                title="Admin"
+                aria-label="Admin access"
+              >
+                🔒
+              </button>
+            )}
           </div>
         </div>
       </nav>
       <main className="flex-1 w-full">
         <div className="max-w-7xl mx-auto px-6 py-8 min-w-0">
-          {tab === "zones" && <ZonesTab />}
+          {tab === "zones" && libraryUnlocked && <ZonesTab />}
           {tab === "plot" && <PlotTab />}
           {tab === "setup" && <SetupTab />}
           {tab === "typologies" && <TypologiesTab />}

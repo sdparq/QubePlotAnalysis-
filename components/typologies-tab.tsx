@@ -198,7 +198,7 @@ export default function TypologiesTab() {
       if (!project.typologiesSeeded) patch({ typologiesSeeded: true });
       if (!opts?.silent) {
         alert(
-          `Class ${letter}'s data produced no typologies — its typology mix or unit areas look corrupted in this browser's Class Library.\n\nOpen the Class Library tab and press "Reset class ${letter}" (or "Reset all") to restore the seed values, then apply again.`,
+          `Class ${letter}'s data produced no typologies — its typology mix or unit areas look corrupted in this browser's Class Library.\n\nAsk an admin to open the Class Library (padlock icon in the tab bar) and press "Reset class ${letter}" (or "Reset all") to restore the seed values, then apply again.`,
         );
       }
       return;
@@ -267,7 +267,7 @@ export default function TypologiesTab() {
           </p>
           <ul className="text-[12.5px] text-ink-800 mt-1.5 leading-snug list-disc pl-5 space-y-0.5">
             <li>Pick a listed zone in <strong>Setup</strong> (tab 01, &quot;Zone (Dubai / Abu Dhabi)&quot;), or</li>
-            <li>Open <strong>Class Library</strong> (tab L) and add this exact zone name to whichever class fits it.</li>
+            <li>Ask an admin to add this exact zone name to a class in the <strong>Class Library</strong> (🔒 icon at the right of the tab bar).</li>
           </ul>
           <p className="text-[11px] text-ink-600 mt-2 leading-snug">
             You can still add typologies manually below without a detected class.
