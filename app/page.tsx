@@ -9,7 +9,6 @@ import CommonAreasTab from "@/components/common-areas-tab";
 import ParkingTab from "@/components/parking-tab";
 import LiftsTab from "@/components/lifts-tab";
 import MassingTab from "@/components/massing-tab";
-import EconomicTab from "@/components/economic-tab";
 import ZonesTab from "@/components/zones-tab";
 import SummaryTab from "@/components/summary-tab";
 import HeaderBar from "@/components/header-bar";
@@ -24,7 +23,6 @@ const TABS = [
   { id: "lifts", num: "06", label: "Lifts" },
   { id: "massing", num: "07", label: "Massing" },
   { id: "summary", num: "08", label: "Areas Summary" },
-  { id: "economic", num: "09", label: "Economic" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"] | "zones";
@@ -152,7 +150,6 @@ export default function Page() {
           {tab === "parking" && <ParkingTab />}
           {tab === "lifts" && <LiftsTab />}
           {tab === "massing" && <MassingTab />}
-          {tab === "economic" && <EconomicTab />}
         </div>
       </main>
       <footer className="border-t border-ink-200 bg-bone-50 py-4">
