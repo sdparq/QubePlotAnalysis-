@@ -2,20 +2,13 @@
 import { useMemo } from "react";
 import { useProject } from "@/lib/store";
 import {
-  residentialBUA,
-  residentialSubBUA,
-  residentialSubGFA,
   residentialSubPct,
   residentialSubQuota,
   residentialGFATarget,
-  RESIDENTIAL_SUBS,
 } from "@/lib/calc/gfa";
 import { computeProgram } from "@/lib/calc/program";
 import { computeTowerYield } from "@/lib/calc/tower-yield";
-import {
-  type GfaUseCategory,
-  type ResidentialSubCategory,
-} from "@/lib/types";
+import { type GfaUseCategory } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
 function fmtSqft(m2: number): string {
@@ -30,13 +23,6 @@ function fmt0(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
-const RESIDENTIAL_SUB_LABEL: Record<ResidentialSubCategory, string> = {
-  apartments: "Apartments",
-  amenities: "Amenities",
-  circulation: "Circulation",
-  services: "Services",
-};
-
 const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
   { key: "retail", label: "Retail" },
   { key: "commercial", label: "Commercial / Office" },
@@ -49,7 +35,6 @@ export default function SummaryTab() {
   const target = project.targetGFA ?? 0;
 
   // ── Residential breakdown ───────────────────────────────────────────────
-  const residentialBuaTotal = useMemo(() => residentialBUA(project), [project]);
   const residentialGfaTotal = useMemo(() => residentialGFATarget(project), [project]);
   const program = useMemo(() => computeProgram(project), [project]);
   const yield_ = useMemo(() => computeTowerYield(project), [project]);
@@ -170,46 +155,33 @@ export default function SummaryTab() {
     },
   ];
 
-  // ── Build the by-use table rows (GFA accounting) ────────────────────────
-  type Row =
-    | { type: "category"; label: string; bua: number; gfa: number }
-    | { type: "sub1"; label: string; bua: number; gfa: number; flag: string }
-    | { type: "total"; label: string; bua: number; gfa: number };
-
-  const rows: Row[] = [];
-
-  if (residentialBuaTotal > 0) {
-    rows.push({
-      type: "category",
-      label: "Residential",
-      bua: residentialBuaTotal,
-      gfa: residentialGfaTotal,
-    });
-    for (const sub of RESIDENTIAL_SUBS) {
-      const subBUA = residentialSubBUA(project, sub);
-      const subGFA = residentialSubGFA(project, sub);
-      if (subBUA <= 0) continue;
-      const flag = subGFA > 0 ? "GFA" : "Non-GFA";
-      rows.push({
-        type: "sub1",
-        label: RESIDENTIAL_SUB_LABEL[sub],
-        bua: subBUA,
-        gfa: subGFA,
-        flag,
-      });
-    }
-  }
-
-  for (const u of otherUses) {
-    rows.push({
-      type: "category",
-      label: u.label,
-      bua: u.gfa,
-      gfa: u.gfa,
-    });
-  }
-
-  rows.push({ type: "total", label: "TOTAL", bua: residentialBuaTotal + otherUsesGFA, gfa: totalGFA });
+  // ── Efficiency ratios ───────────────────────────────────────────────────
+  const ratios = [
+    {
+      label: "GSA / GFA",
+      num: gsaTotal,
+      den: totalGFA,
+      numLabel: "GSA",
+      denLabel: "GFA",
+      hint: "Sellable share of the gross floor area — how much of the FAR-counted area you can sell.",
+    },
+    {
+      label: "GFA / BUA",
+      num: totalGFA,
+      den: constructionBUA,
+      numLabel: "GFA",
+      denLabel: "BUA",
+      hint: "FAR-counted share of everything you build — the rest (basements, services, balconies...) costs money but consumes no GFA.",
+    },
+    {
+      label: "GSA / BUA",
+      num: gsaTotal,
+      den: constructionBUA,
+      numLabel: "GSA",
+      denLabel: "BUA",
+      hint: "Sellable share of everything you build — the headline construction efficiency of the scheme.",
+    },
+  ];
 
   return (
     <div className="grid gap-6">
@@ -323,87 +295,34 @@ export default function SummaryTab() {
         </DerivBlock>
       </div>
 
-      {/* Use-based accounting table */}
+      {/* Efficiency ratios */}
       <div className="card">
         <div className="mb-4">
-          <h2 className="section-title">By use · BUA vs GFA</h2>
+          <h2 className="section-title">Efficiency ratios</h2>
           <p className="section-sub">
-            FAR accounting per use and subcategory — which built areas count toward the GFA target
-            and which are BUA only.
+            Computed from the three totals above — GSA {fmtM2(gsaTotal)}, GFA {fmtM2(totalGFA)},
+            BUA {fmtM2(constructionBUA)}.
           </p>
         </div>
-        <div className="border border-ink-200 overflow-x-auto">
-          <table className="w-full text-[12px] tabular-nums">
-            <colgroup>
-              <col />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 90 }} />
-            </colgroup>
-            <thead>
-              <tr className="bg-bone-50 border-b border-ink-200 text-[10.5px] uppercase tracking-[0.08em] text-ink-500">
-                <th className="text-left px-3 py-2 font-medium">Category / Subcategory</th>
-                <th className="text-right px-2 py-2 font-medium">BUA m²</th>
-                <th className="text-right px-2 py-2 font-medium">GFA m²</th>
-                <th className="text-right px-2 py-2 font-medium">BUA sqft</th>
-                <th className="text-right px-2 py-2 font-medium">GFA sqft</th>
-                <th className="text-center px-2 py-2 font-medium">Counts as</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const isCategory = r.type === "category";
-                const isTotal = r.type === "total";
-                const indent = r.type === "sub1" ? "pl-8" : "pl-3";
-                const cls =
-                  isTotal
-                    ? "bg-qube-50 font-medium text-qube-800 border-t-2 border-qube-200"
-                    : isCategory
-                      ? "bg-bone-50/60 font-medium text-ink-900 border-t border-ink-200"
-                      : "border-t border-ink-100 text-ink-900";
-                return (
-                  <tr key={`${r.type}-${r.label}-${i}`} className={cls}>
-                    <td className={`${indent} py-1.5 pr-2`}>
-                      {r.type === "sub1" && <span className="text-ink-300 mr-1">└</span>}
-                      {r.label}
-                    </td>
-                    <td className="text-right px-2 py-1.5">
-                      {r.bua > 0 ? Math.round(r.bua).toLocaleString("en-US") : "—"}
-                    </td>
-                    <td className={`text-right px-2 py-1.5 ${isCategory || isTotal ? "" : "text-qube-800 font-medium"}`}>
-                      {r.gfa > 0 ? Math.round(r.gfa).toLocaleString("en-US") : "—"}
-                    </td>
-                    <td className="text-right px-2 py-1.5 text-ink-500">
-                      {r.bua > 0 ? `${Math.round(r.bua * M2_TO_SQFT).toLocaleString("en-US")}` : "—"}
-                    </td>
-                    <td className="text-right px-2 py-1.5 text-ink-500">
-                      {r.gfa > 0 ? `${Math.round(r.gfa * M2_TO_SQFT).toLocaleString("en-US")}` : "—"}
-                    </td>
-                    <td className="text-center px-2 py-1.5">
-                      {("flag" in r) && (
-                        <span
-                          className={`px-1.5 py-0.5 text-[9.5px] uppercase tracking-[0.10em] border ${
-                            r.flag === "GFA"
-                              ? "bg-qube-100 text-qube-800 border-qube-200"
-                              : "bg-bone-100 text-ink-500 border-ink-200"
-                          }`}
-                        >{r.flag}</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {ratios.map((r) => {
+            const ok = r.num > 0 && r.den > 0;
+            return (
+              <div key={r.label} className="border border-ink-200 bg-white p-4">
+                <div className="eyebrow text-ink-500 text-[10px]">{r.label}</div>
+                <div className="text-[26px] font-light tabular-nums mt-1 text-ink-900">
+                  {ok ? `${((r.num / r.den) * 100).toFixed(1)}%` : "—"}
+                </div>
+                <div className="text-[11px] text-ink-500 mt-1 tabular-nums">
+                  {ok
+                    ? `${r.numLabel} ${fmt0(r.num)} m² ÷ ${r.denLabel} ${fmt0(r.den)} m²`
+                    : "needs both totals above"}
+                </div>
+                <p className="text-[10.5px] text-ink-400 mt-2 leading-snug">{r.hint}</p>
+              </div>
+            );
+          })}
         </div>
-
-        <p className="text-[10.5px] text-ink-500 mt-3 leading-snug">
-          BUA = Built-Up Area (total constructed area). GFA = Gross Floor Area (BUA counted
-          toward FAR). This table excludes basements and the ground/podium shell — those appear
-          in the construction cost categories above, since they don&apos;t consume the GFA target.
-        </p>
       </div>
     </div>
   );
