@@ -58,12 +58,9 @@ export default function SummaryTab() {
 
   const totalGFA = residentialGfaTotal + otherUsesGFA;
 
-  // ── Construction cost buckets (BUA) ─────────────────────────────────────
+  // ── Construction BUA (headline total; composition stays internal) ───────
   // Residential quotas, each a % of the residential GFA (Distribution tab).
   const aptPct = residentialSubPct(project, "apartments");
-  const amenitiesPct = residentialSubPct(project, "amenities");
-  const circulationPct = residentialSubPct(project, "circulation");
-  const servicesPct = residentialSubPct(project, "services");
   const aptInteriorBUA = residentialSubQuota(project, "apartments");
   const amenitiesBUA = residentialSubQuota(project, "amenities");
   const circulationBUA = residentialSubQuota(project, "circulation");
@@ -79,7 +76,6 @@ export default function SummaryTab() {
   // no footprints are set (those uses live in the ground/podium levels).
   const groundPodiumShell = yield_.groundGFA + yield_.podiumGFA;
   const groundPodiumBUA = groundPodiumShell > 0 ? groundPodiumShell : otherUsesGFA;
-  const groundPodiumFallback = groundPodiumShell <= 0 && otherUsesGFA > 0;
 
   // Basements: levels from Setup × footprint (Parking override, else plot area).
   const basementCount = project.basements?.count ?? 0;
@@ -93,67 +89,6 @@ export default function SummaryTab() {
   const gsaTotal = aptInteriorBUA + balconiesBUA;
 
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
-
-  type Bucket = { label: string; formula: string; m2: number; note?: string };
-  const buckets: Bucket[] = [
-    {
-      label: "Apartments interior",
-      formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${aptPct.toFixed(1)}% apartments`,
-      m2: aptInteriorBUA,
-    },
-    {
-      label: "Balconies",
-      formula:
-        balconyShare > 0
-          ? `Apartments ${fmt0(aptInteriorBUA)} m² × ${(balconyShare * 100).toFixed(1)}% balcony share (from the Apartments matrix)`
-          : "No balcony share yet — fill the Apartments matrix so balconies can be measured",
-      m2: balconiesBUA,
-    },
-    {
-      label: "Amenities (residential)",
-      formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${amenitiesPct.toFixed(1)}%`,
-      m2: amenitiesBUA,
-    },
-    {
-      label: "Circulation (residential)",
-      formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${circulationPct.toFixed(1)}%`,
-      m2: circulationBUA,
-    },
-    {
-      label: "Services (MEP / shafts)",
-      formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${servicesPct.toFixed(1)}% — BUA only, not GFA`,
-      m2: servicesBUA,
-    },
-    {
-      label: "Ground floor + podium",
-      formula: groundPodiumFallback
-        ? "Retail + Commercial + Hospitality GFA (no ground/podium floor plates set in Distribution)"
-        : [
-            yield_.groundFootprintM2 > 0
-              ? `${yield_.groundCount} ground × ${fmt0(yield_.groundFootprintM2)} m²`
-              : null,
-            yield_.podiumFootprintM2 > 0 && yield_.podiumCount > 0
-              ? `${yield_.podiumCount} podium × ${fmt0(yield_.podiumFootprintM2)} m²`
-              : null,
-          ]
-            .filter(Boolean)
-            .join("  +  ") || "Set ground/podium floor plates in Distribution",
-      m2: groundPodiumBUA,
-      note: groundPodiumFallback
-        ? undefined
-        : "Retail / commercial / hospitality GFA sits inside these levels — not double-counted.",
-    },
-    {
-      label: "Basements",
-      formula:
-        basementCount > 0
-          ? `${basementCount} level${basementCount === 1 ? "" : "s"} × ${fmt0(basementFootprint)} m² ${
-              project.basementFootprintM2 ? "(footprint override from Parking)" : "(plot area)"
-            }`
-          : "No basement levels in Setup",
-      m2: basementsBUA,
-    },
-  ];
 
   // ── Efficiency ratios ───────────────────────────────────────────────────
   const ratios = [
@@ -281,17 +216,14 @@ export default function SummaryTab() {
           )}
         </DerivBlock>
 
-        {/* BUA construction buckets */}
-        <DerivBlock title="BUA total (construction) — by cost category">
-          {buckets.map((b) => (
-            <DerivRow key={b.label} label={b.label} formula={b.formula} m2={b.m2} note={b.note} />
-          ))}
-          <DerivRow label="Σ BUA total (construction)" formula="sum of all categories above" m2={constructionBUA} total />
-          <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
-            Each category carries a different construction rate. Residential rows are quotas of the
-            residential GFA (Distribution); ground/podium and basements are shell areas (floors ×
-            floor plate). Basements and services count as BUA but not GFA.
-          </p>
+        {/* BUA total */}
+        <DerivBlock title="BUA total (construction)">
+          <DerivRow
+            label="Σ BUA total (construction)"
+            formula="apartments interior + balconies + amenities + circulation + services + ground floor/podium + basements"
+            m2={constructionBUA}
+            total
+          />
         </DerivBlock>
       </div>
 
