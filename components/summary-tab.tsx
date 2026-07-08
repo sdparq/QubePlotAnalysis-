@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { useProject, useStore } from "@/lib/store";
+import { useProject } from "@/lib/store";
 import {
   residentialSubPct,
   residentialSubQuota,
@@ -8,12 +8,7 @@ import {
 } from "@/lib/calc/gfa";
 import { computeProgram } from "@/lib/calc/program";
 import { computeTowerYield } from "@/lib/calc/tower-yield";
-import {
-  DEFAULT_BUA_COST_RATES,
-  type BuaCostBucketKey,
-  type BuaCostCase,
-  type GfaUseCategory,
-} from "@/lib/types";
+import { type GfaUseCategory } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
 function fmtSqft(m2: number): string {
@@ -27,21 +22,6 @@ function fmtM2(m2: number): string {
 function fmt0(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
-/** Compact money: 66,750,000 → "66.8M". Full value in the title tooltip. */
-function fmtAED(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "—";
-  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${Math.round(n / 1e3).toLocaleString("en-US")}k`;
-  return `${Math.round(n)}`;
-}
-
-const COST_CASES: BuaCostCase[] = ["premium", "medium", "low"];
-const COST_CASE_LABEL: Record<BuaCostCase, string> = {
-  premium: "Premium",
-  medium: "Medium",
-  low: "Low",
-};
 
 const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
   { key: "retail", label: "Retail" },
@@ -51,22 +31,8 @@ const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
 
 export default function SummaryTab() {
   const project = useProject();
-  const patch = useStore((s) => s.patch);
 
   const target = project.targetGFA ?? 0;
-
-  // Effective construction rates: project override → default seed.
-  function rateFor(bucket: BuaCostBucketKey, c: BuaCostCase): number {
-    const v = project.buaCostRates?.[bucket]?.[c];
-    return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : DEFAULT_BUA_COST_RATES[bucket][c];
-  }
-  function setRate(bucket: BuaCostBucketKey, c: BuaCostCase, v: number) {
-    const next = {
-      ...project.buaCostRates,
-      [bucket]: { ...project.buaCostRates?.[bucket], [c]: Number.isFinite(v) && v >= 0 ? v : undefined },
-    };
-    patch({ buaCostRates: next });
-  }
 
   // ── Residential breakdown ───────────────────────────────────────────────
   const residentialGfaTotal = useMemo(() => residentialGFATarget(project), [project]);
@@ -128,16 +94,14 @@ export default function SummaryTab() {
 
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
 
-  type Bucket = { key: BuaCostBucketKey; label: string; formula: string; m2: number; note?: string };
+  type Bucket = { label: string; formula: string; m2: number; note?: string };
   const buckets: Bucket[] = [
     {
-      key: "apartmentsInterior",
       label: "Apartments interior",
       formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${aptPct.toFixed(1)}% apartments`,
       m2: aptInteriorBUA,
     },
     {
-      key: "balconies",
       label: "Balconies",
       formula:
         balconyShare > 0
@@ -146,25 +110,21 @@ export default function SummaryTab() {
       m2: balconiesBUA,
     },
     {
-      key: "amenities",
       label: "Amenities (residential)",
       formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${amenitiesPct.toFixed(1)}%`,
       m2: amenitiesBUA,
     },
     {
-      key: "circulation",
       label: "Circulation (residential)",
       formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${circulationPct.toFixed(1)}%`,
       m2: circulationBUA,
     },
     {
-      key: "services",
       label: "Services (MEP / shafts)",
       formula: `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${servicesPct.toFixed(1)}% — BUA only, not GFA`,
       m2: servicesBUA,
     },
     {
-      key: "groundPodium",
       label: "Ground floor + podium",
       formula: groundPodiumFallback
         ? "Retail + Commercial + Hospitality GFA (no ground/podium floor plates set in Distribution)"
@@ -184,7 +144,6 @@ export default function SummaryTab() {
         : "Retail / commercial / hospitality GFA sits inside these levels — not double-counted.",
     },
     {
-      key: "basements",
       label: "Basements",
       formula:
         basementCount > 0
@@ -322,123 +281,16 @@ export default function SummaryTab() {
           )}
         </DerivBlock>
 
-        {/* BUA construction buckets + cost per case */}
-        <DerivBlock title="BUA total (construction) — by cost category · cost per case (AED)">
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px] tabular-nums">
-              <colgroup>
-                <col style={{ minWidth: 170 }} />
-                <col style={{ minWidth: 260 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 92 }} />
-                <col style={{ width: 92 }} />
-                <col style={{ width: 92 }} />
-              </colgroup>
-              <thead>
-                <tr className="bg-bone-50 border-b border-ink-200 text-[10px] uppercase tracking-[0.08em] text-ink-500">
-                  <th className="text-left px-3 py-2 font-medium">Cost category</th>
-                  <th className="text-left px-2 py-2 font-medium">How it&apos;s computed</th>
-                  <th className="text-right px-2 py-2 font-medium">BUA m²</th>
-                  {COST_CASES.map((c) => (
-                    <th key={c} className="text-right px-2 py-2 font-medium text-qube-700">{COST_CASE_LABEL[c]}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {buckets.map((b) => (
-                  <tr key={b.key} className="border-t border-ink-100">
-                    <td className="px-3 py-1.5 text-ink-900">{b.label}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-ink-500 leading-snug">
-                      {b.formula}
-                      {b.note && <span className="block text-ink-400">{b.note}</span>}
-                    </td>
-                    <td className="text-right px-2 py-1.5">{b.m2 > 0 ? fmt0(b.m2) : "—"}</td>
-                    {COST_CASES.map((c) => {
-                      const cost = b.m2 * rateFor(b.key, c);
-                      return (
-                        <td
-                          key={c}
-                          className="text-right px-2 py-1.5 text-ink-700"
-                          title={
-                            b.m2 > 0
-                              ? `${fmt0(b.m2)} m² × ${fmt0(rateFor(b.key, c))} AED/m² = ${fmt0(cost)} AED`
-                              : undefined
-                          }
-                        >
-                          {fmtAED(cost)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-                <tr className="bg-qube-50 font-medium text-qube-800 border-t-2 border-qube-200">
-                  <td className="px-3 py-1.5">Σ BUA total (construction)</td>
-                  <td className="px-2 py-1.5 text-[11px] font-normal text-qube-700">
-                    sum of all categories · costs = Σ (m² × rate per case)
-                  </td>
-                  <td className="text-right px-2 py-1.5">{constructionBUA > 0 ? fmt0(constructionBUA) : "—"}</td>
-                  {COST_CASES.map((c) => {
-                    const total = buckets.reduce((s, b) => s + b.m2 * rateFor(b.key, c), 0);
-                    return (
-                      <td key={c} className="text-right px-2 py-1.5" title={total > 0 ? `${fmt0(total)} AED` : undefined}>
-                        {fmtAED(total)}
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        {/* BUA construction buckets */}
+        <DerivBlock title="BUA total (construction) — by cost category">
+          {buckets.map((b) => (
+            <DerivRow key={b.label} label={b.label} formula={b.formula} m2={b.m2} note={b.note} />
+          ))}
+          <DerivRow label="Σ BUA total (construction)" formula="sum of all categories above" m2={constructionBUA} total />
           <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
             Each category carries a different construction rate. Residential rows are quotas of the
             residential GFA (Distribution); ground/podium and basements are shell areas (floors ×
-            floor plate). Basements and services count as BUA but not GFA. Hover a cost for the full
-            figure. Rates are editable below.
-          </p>
-        </DerivBlock>
-
-        {/* Editable construction rates */}
-        <DerivBlock title="Construction rates (AED / m² BUA) — editable per case">
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px] tabular-nums">
-              <colgroup>
-                <col />
-                <col style={{ width: 130 }} />
-                <col style={{ width: 130 }} />
-                <col style={{ width: 130 }} />
-              </colgroup>
-              <thead>
-                <tr className="bg-bone-50 border-b border-ink-200 text-[10px] uppercase tracking-[0.08em] text-ink-500">
-                  <th className="text-left px-3 py-2 font-medium">Cost category</th>
-                  {COST_CASES.map((c) => (
-                    <th key={c} className="text-right px-2 py-2 font-medium text-qube-700">{COST_CASE_LABEL[c]}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {buckets.map((b) => (
-                  <tr key={b.key} className="border-t border-ink-100">
-                    <td className="px-3 py-1 text-ink-900">{b.label}</td>
-                    {COST_CASES.map((c) => (
-                      <td key={c} className="text-right px-2 py-1">
-                        <input
-                          type="number"
-                          min={0}
-                          step={50}
-                          value={Math.round(rateFor(b.key, c))}
-                          onChange={(e) => setRate(b.key, c, e.target.valueAsNumber)}
-                          className="w-[110px] text-right border border-ink-200 px-2 py-1 text-[12px] tabular-nums focus:outline-none focus:border-qube-400"
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
-            Indicative UAE rates seeded as defaults — adjust to your cost plan. Saved with the
-            project, so each project can carry its own basis.
+            floor plate). Basements and services count as BUA but not GFA.
           </p>
         </DerivBlock>
       </div>
