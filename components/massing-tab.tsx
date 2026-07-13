@@ -5,7 +5,6 @@ import { useStore, useProject } from "@/lib/store";
 import { fmt2 } from "@/lib/format";
 import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
 import PlanTrace from "./plan-trace";
-import FloorPlanFit from "./floor-plan-fit";
 import {
   type Point,
   edgeLengths,
@@ -628,9 +627,6 @@ export default function MassingTab() {
           </div>
         </div>
       </div>
-
-      {/* Floor plan fit — core + typologies laid out on the tower plate */}
-      <FloorPlanFit project={project} towerPoly={towerPoly} />
 
       {/* First-person immersive walk */}
       {immersive && (
