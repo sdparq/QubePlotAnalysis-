@@ -4,10 +4,14 @@ import { useStore } from "@/lib/store";
 import {
   type CloudProjectSummary,
   type SaveStatus,
+  acquireLock,
   applyingCloudChange,
   deleteCloudProject,
+  getDeviceLabel,
   listCloudProjects,
   loadCloudProject,
+  releaseLock,
+  setDeviceLabel,
   signInWithPassword,
   signOut,
   upsertCloudProject,
@@ -19,6 +23,7 @@ function statusLabel(s: SaveStatus, savedAt: number | null, linked: boolean): st
   if (s === "saving") return "Saving…";
   if (s === "error") return "Save failed";
   if (s === "offline") return "Offline";
+  if (s === "locked") return "Read-only · locked";
   if (s === "saved" && savedAt) {
     const d = new Date(savedAt);
     return `Saved ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -52,6 +57,9 @@ export default function CloudStatus() {
   const [pwd, setPwd] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const [pwdErr, setPwdErr] = useState<string | null>(null);
+  const [deviceName, setDeviceName] = useState("");
+  const [lockedBy, setLockedBy] = useState<string | null>(null);
+  const lockedByRef = useRef<{ projectId: string; heldBy: string } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const project = useStore((s) => s.projects[s.activeProjectId]);
@@ -59,11 +67,94 @@ export default function CloudStatus() {
   const removeByCloudId = useStore((s) => s.removeByCloudId);
   const linkActiveToCloud = useStore((s) => s.linkActiveToCloud);
 
+  useEffect(() => setDeviceName(getDeviceLabel()), []);
+
   const onStatus = useCallback((s: SaveStatus) => {
     setStatus(s);
     if (s === "saved") setSavedAt(Date.now());
   }, []);
-  useCloudAutoSave({ user, onStatus });
+  const isBlocked = useCallback(
+    (p: { cloudId?: string }) =>
+      !!p.cloudId && lockedByRef.current?.projectId === p.cloudId,
+    [],
+  );
+  useCloudAutoSave({ user, onStatus, isBlocked });
+
+  // ── Edit lock on the ACTIVE project ──────────────────────────────────────
+  // Claim it when the project becomes active, heartbeat it while we hold it,
+  // release on switch/sign-out. If a teammate holds it, this device becomes
+  // read-only for that project (auto-save blocked + banner).
+  useEffect(() => {
+    if (!user || !project?.cloudId) {
+      lockedByRef.current = null;
+      setLockedBy(null);
+      return;
+    }
+    const projectId = project.cloudId;
+    let stopped = false;
+    const tick = async () => {
+      const r = await acquireLock(projectId);
+      if (stopped) return;
+      if (r.state === "other") {
+        lockedByRef.current = { projectId, heldBy: r.heldBy };
+        setLockedBy(r.heldBy);
+      } else {
+        lockedByRef.current = null;
+        setLockedBy(null);
+      }
+    };
+    void tick();
+    const iv = setInterval(tick, 30_000);
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+      lockedByRef.current = null;
+      setLockedBy(null);
+      void releaseLock(projectId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, project?.cloudId]);
+
+  // ── Continuous pull ──────────────────────────────────────────────────────
+  // The initial sync below runs once per sign-in; teammates' edits made while
+  // this tab stays open would otherwise never arrive. Poll every 30 s and on
+  // tab focus, pulling any cloud row newer than its local copy.
+  useEffect(() => {
+    if (!user) return;
+    let running = false;
+    const pull = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const list = await listCloudProjects();
+        setCloudList(list);
+        const state = useStore.getState();
+        for (const row of list) {
+          const local = state.projects[row.id];
+          if (!local || row.updatedAt > local.updatedAt) {
+            const full = await loadCloudProject(row.id);
+            applyingCloudChange(() => useStore.getState().upsertFromCloud(full));
+          }
+        }
+      } catch (e) {
+        console.error("cloud poll failed", e);
+      } finally {
+        running = false;
+      }
+    };
+    const iv = setInterval(pull, 30_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void pull();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Close dropdown on outside click / Escape.
   useEffect(() => {
@@ -257,14 +348,23 @@ export default function CloudStatus() {
 
   return (
     <div className="relative" ref={ref}>
+      {lockedBy && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 bg-amber-500 text-ink-900 text-[12.5px] font-medium shadow-lg rounded-sm flex items-center gap-2 max-w-[92vw]">
+          <span>🔒</span>
+          <span>
+            <strong>{lockedBy}</strong> is editing this project — you are in read-only mode.
+            Changes you make here stay on this computer and won&apos;t sync.
+          </span>
+        </div>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 px-2 py-1.5 text-[11px] uppercase tracking-[0.10em] text-bone-100 hover:bg-ink-800 transition-colors"
         title="Cloud workspace"
       >
-        <span className="w-2 h-2 rounded-full bg-qube-500" />
+        <span className={`w-2 h-2 rounded-full ${lockedBy ? "bg-amber-400" : "bg-qube-500"}`} />
         <span className="hidden md:inline text-bone-200/80 normal-case tracking-normal">
-          {statusLabel(status, savedAt, !!project?.cloudId)}
+          {lockedBy ? "Read-only · locked" : statusLabel(status, savedAt, !!project?.cloudId)}
         </span>
       </button>
 
@@ -274,6 +374,19 @@ export default function CloudStatus() {
             <div className="text-[11px] uppercase tracking-[0.10em] text-bone-200/60">Cloud workspace</div>
             <div className="text-sm">Connected</div>
             <div className="text-[10px] text-bone-200/50 mt-0.5">{statusLabel(status, savedAt, !!project?.cloudId)}</div>
+            <label className="block mt-2 text-[10px] uppercase tracking-[0.10em] text-bone-200/60">
+              Your name <span className="normal-case tracking-normal">(shown to teammates when you hold a project)</span>
+              <input
+                type="text"
+                value={deviceName}
+                placeholder="e.g. Santiago"
+                onChange={(e) => {
+                  setDeviceName(e.target.value);
+                  setDeviceLabel(e.target.value);
+                }}
+                className="mt-1 w-full px-2 py-1.5 text-[12px] normal-case tracking-normal bg-ink-800 border border-bone-100/25 text-bone-100 placeholder-bone-200/40 focus:border-bone-100/60 focus:outline-none"
+              />
+            </label>
           </div>
 
           <div className="px-4 py-3 border-b border-bone-100/10 flex items-center gap-2">

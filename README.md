@@ -79,7 +79,26 @@ The app can sync projects to a shared Supabase database so every team member see
    begin new.updated_at = now(); new.updated_by = auth.uid(); return new; end $$;
    create trigger projects_touch before update on public.projects
    for each row execute function public.touch_updated_at();
+
+   -- Edit locks: while someone has a project open, teammates see it read-only
+   -- so nobody overwrites anyone's work. Locks expire on their own after 90 s
+   -- without a heartbeat (crashed browser, closed laptop). If this table is
+   -- missing the app still works — locking is just inactive.
+   create table public.project_locks (
+     project_id uuid primary key references public.projects(id) on delete cascade,
+     device_id text not null,
+     label text,
+     locked_at timestamptz not null default now()
+   );
+   alter table public.project_locks enable row level security;
+   create policy "auth read"   on public.project_locks for select using (auth.role() = 'authenticated');
+   create policy "auth insert" on public.project_locks for insert with check (auth.role() = 'authenticated');
+   create policy "auth update" on public.project_locks for update using (auth.role() = 'authenticated');
+   create policy "auth delete" on public.project_locks for delete using (auth.role() = 'authenticated');
    ```
+
+   Already ran the original script before edit locks existed? Just run the
+   `project_locks` block above on its own.
 
 3. In **Authentication → Providers → Email**, enable email and turn **off** "Confirm email" (no inboxes are involved).
 4. In **Authentication → Users → Add user → Create new user**, create the single shared team account:
