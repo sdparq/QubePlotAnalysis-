@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { Typology, UnitCategory } from "@/lib/types";
 import { useZoneLibrary } from "@/lib/use-zone-library";
@@ -42,6 +42,48 @@ const CATEGORY_FOR_TYPOLOGY_KEY: Record<TypologyKey, UnitCategory | null> = {
   "7BR": null,
   penthouse: "Penthouse",
 };
+
+/** Numeric cell that tolerates in-progress typing. A plain controlled
+ *  number input re-renders on every keystroke, so intermediate states like
+ *  "62." or an emptied field snap back instantly and decimals become
+ *  untypeable. Keep the raw text locally while the user types, commit every
+ *  parseable value live, and resync with the store value on blur. */
+function NumCell({
+  value,
+  onCommit,
+  step = 0.5,
+  min,
+  max,
+  className = "cell-input text-right",
+  title,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  step?: number;
+  min?: number;
+  max?: number;
+  className?: string;
+  title?: string;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      max={max}
+      className={className}
+      title={title}
+      value={text ?? String(value)}
+      onChange={(e) => {
+        setText(e.target.value);
+        const n = parseFloat(e.target.value);
+        if (Number.isFinite(n)) onCommit(n);
+      }}
+      onBlur={() => setText(null)}
+    />
+  );
+}
 
 export default function TypologiesTab() {
   const project = useProject();
@@ -392,26 +434,21 @@ export default function TypologiesTab() {
                       </select>
                     </td>
                     <td className="cell-edit">
-                      <input
-                        type="number"
-                        step={0.5}
-                        min={0}
-                        className="cell-input text-right"
+                      <NumCell
                         value={Number(total.toFixed(2))}
-                        onChange={(e) => setTotal(t, parseFloat(e.target.value) || 0)}
+                        min={0}
+                        onCommit={(n) => setTotal(t, Math.max(0, n))}
                         title="Total sellable (interior + balcony). Editing this auto-deducts balcony from the class %."
                       />
                     </td>
                     <td className="cell-edit">
                       <div className="relative">
-                        <input
-                          type="number"
-                          step={0.5}
+                        <NumCell
+                          value={total > 0 ? Number(((t.balconyArea / total) * 100).toFixed(1)) : 0}
                           min={0}
                           max={100}
                           className="cell-input text-right pr-7"
-                          value={total > 0 ? Number(((t.balconyArea / total) * 100).toFixed(1)) : 0}
-                          onChange={(e) => setBalconyPct(t, parseFloat(e.target.value) || 0)}
+                          onCommit={(n) => setBalconyPct(t, n)}
                           title="Balcony as % of Total area. Editing this keeps Total constant."
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-ink-400 pointer-events-none">%</span>
@@ -421,12 +458,10 @@ export default function TypologiesTab() {
                       </div>
                     </td>
                     <td className="cell-edit">
-                      <input type="number" step={0.1} className="cell-input text-right"
-                        value={t.occupancy} onChange={(e) => update(t, { occupancy: parseFloat(e.target.value) || 0 })} />
+                      <NumCell step={0.1} min={0} value={t.occupancy} onCommit={(n) => update(t, { occupancy: Math.max(0, n) })} />
                     </td>
                     <td className="cell-edit">
-                      <input type="number" step={0.1} className="cell-input text-right"
-                        value={t.parkingPerUnit} onChange={(e) => update(t, { parkingPerUnit: parseFloat(e.target.value) || 0 })} />
+                      <NumCell step={0.1} min={0} value={t.parkingPerUnit} onCommit={(n) => update(t, { parkingPerUnit: Math.max(0, n) })} />
                     </td>
                     <td className="text-right">
                       <button className="btn btn-danger btn-xs" onClick={() => { if (confirm(`Delete ${t.name}?`)) remove(t.id); }}>Delete</button>
@@ -472,7 +507,10 @@ function UnitMixCard({
     );
     const effPct = effectiveMixPctForCategory(project, classMix, cat);
     const isOverride = override[cat] !== undefined;
-    return { cat, classPct, effPct, isOverride };
+    // The project's own typologies of this category — shown by THEIR names so
+    // renamed typologies stay recognisable in the mix.
+    const names = project.typologies.filter((t) => t.category === cat).map((t) => t.name);
+    return { cat, classPct, effPct, isOverride, names };
   });
   const effSum = rows.reduce((s, r) => s + r.effPct, 0);
   const offNorm = Math.abs(effSum - 100) > 0.5;
@@ -508,7 +546,7 @@ function UnitMixCard({
 
       <div className="border border-ink-200">
         <div className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
-          <div>Category</div>
+          <div>Category · your typologies</div>
           <div className="text-right">Class {detectedClass} default</div>
           <div className="text-right">This project %</div>
           <div></div>
@@ -518,20 +556,31 @@ function UnitMixCard({
             key={r.cat}
             className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
           >
-            <div className="text-ink-900">{r.cat}</div>
+            <div>
+              <div className="text-ink-900">{r.cat}</div>
+              {r.names.length > 0 ? (
+                <div className="text-[10.5px] text-qube-800 leading-snug">
+                  {r.names.join(" · ")}
+                </div>
+              ) : (
+                r.effPct > 0 && (
+                  <div className="text-[10.5px] text-amber-700 leading-snug">
+                    no typology of this category in the project — contributes 0 units
+                  </div>
+                )
+              )}
+            </div>
             <div className="text-right text-ink-500">{r.classPct.toFixed(1)}%</div>
             <div className="text-right">
               <div className="relative inline-block">
-                <input
-                  type="number"
-                  step={0.5}
+                <NumCell
+                  value={Number(r.effPct.toFixed(1))}
                   min={0}
                   max={100}
                   className={`cell-input text-right pr-6 !py-1 !px-1.5 w-[90px] ${
                     r.isOverride ? "text-ink-900 font-medium" : "text-ink-500 italic"
                   }`}
-                  value={Number(r.effPct.toFixed(1))}
-                  onChange={(e) => onSetCategory(r.cat, parseFloat(e.target.value) || 0)}
+                  onCommit={(n) => onSetCategory(r.cat, n)}
                 />
                 <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9.5px] text-ink-400 pointer-events-none">%</span>
               </div>
