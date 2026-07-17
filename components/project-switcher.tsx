@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
+import type { Project } from "@/lib/types";
+import { deleteCloudProject, useAuth } from "@/lib/cloud";
 
 function relativeTime(ts: number): string {
   if (!ts) return "—";
@@ -25,8 +27,31 @@ export default function ProjectSwitcher() {
   const loadSample = useStore((s) => s.loadSample);
   const duplicateProject = useStore((s) => s.duplicateProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const { user } = useAuth();
 
   const sorted = Object.values(projects).sort((a, b) => b.updatedAt - a.updatedAt);
+
+  /** Cloud-aware delete. A cloud-linked project deleted only locally comes
+   *  straight back on the next 30 s sync — so while signed in the cloud row
+   *  goes too (with an explicit team-wide warning), and while locked the
+   *  confirm says the project WILL return rather than pretending otherwise. */
+  async function handleDelete(p: Project) {
+    if (p.cloudId && user) {
+      if (!confirm(`Delete "${p.name}" for the WHOLE TEAM?\n\nIt is synced to the cloud — this removes it from every teammate's list too. This cannot be undone.`)) return;
+      try {
+        await deleteCloudProject(p.cloudId);
+      } catch (e) {
+        alert(`Could not delete it from the cloud (${e instanceof Error ? e.message : "network error"}) — nothing was removed. Try again.`);
+        return;
+      }
+      deleteProject(p.id);
+    } else if (p.cloudId) {
+      if (!confirm(`"${p.name}" is synced to the team cloud and you are not signed in.\n\nDeleting it here only hides it on this computer — it will come back on the next sync. To delete it for good, unlock the cloud first. Delete locally anyway?`)) return;
+      deleteProject(p.id);
+    } else {
+      if (confirm(`Delete project "${p.name}"? This cannot be undone.`)) deleteProject(p.id);
+    }
+  }
 
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -116,9 +141,7 @@ export default function ProjectSwitcher() {
                     <button
                       title="Delete"
                       className="p-1.5 text-ink-500 hover:text-red-700 hover:bg-red-50 transition-colors"
-                      onClick={() => {
-                        if (confirm(`Delete project "${p.name}"? This cannot be undone.`)) deleteProject(p.id);
-                      }}
+                      onClick={() => void handleDelete(p)}
                     >
                       <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                         <path d="M3 4h10M6 4V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V4M5 4l.5 9.5a1 1 0 001 1h3a1 1 0 001-1L11 4" strokeLinecap="round" />

@@ -208,6 +208,19 @@ export default function CloudStatus() {
     let cancelled = false;
     (async () => {
       try {
+        // Heal duplicates that inherited another project's cloud row (created
+        // before duplicateProject stripped cloudId). A properly linked project
+        // always has id === cloudId; anything else shares a row with the
+        // original and their contents ping-pong. Detach it — the push leg
+        // below then inserts it as its own row.
+        const healed = new Set<string>();
+        for (const p of Object.values(useStore.getState().projects)) {
+          if (p.cloudId && p.id !== p.cloudId) {
+            console.warn(`qube: detaching "${p.name}" from a shared cloud row (duplicate heal)`);
+            useStore.getState().unlinkProject(p.id);
+            healed.add(p.id);
+          }
+        }
         const list = await listCloudProjects();
         if (cancelled) return;
         setCloudList(list);
@@ -233,7 +246,9 @@ export default function CloudStatus() {
         for (const p of Object.values(useStore.getState().projects)) {
           if (cancelled) return;
           if (p.cloudId) continue;
-          if (p.updatedAt - p.createdAt < 2000) continue;
+          // Healed duplicates go up regardless of the untouched-sample guard —
+          // they carry real content that must land in its own row.
+          if (!healed.has(p.id) && p.updatedAt - p.createdAt < 2000) continue;
           try {
             const id = await upsertCloudProject(p);
             applyingCloudChange(() => useStore.getState().linkProjectToCloud(p.id, id));

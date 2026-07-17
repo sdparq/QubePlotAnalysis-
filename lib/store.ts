@@ -69,6 +69,10 @@ interface State {
    *  used by the auto-uploader, which may finish after the user has already
    *  switched to another project. */
   linkProjectToCloud: (localId: string, cloudId: string) => void;
+  /** Detach a project from its cloud row (it becomes local-only and will be
+   *  re-inserted as its OWN row by the auto-saver). Used to heal duplicates
+   *  that inherited the original's cloudId before duplicateProject stripped it. */
+  unlinkProject: (localId: string) => void;
 
   upsertTypology: (t: Typology) => void;
   removeTypology: (id: string) => void;
@@ -131,7 +135,18 @@ export const useStore = create<State>()(
         const src = get().projects[id];
         if (!src) return id;
         const now = Date.now();
-        const copy: Project = { ...src, id: newId(), name: newName ?? `${src.name} (copy)`, createdAt: now, updatedAt: now };
+        // cloudId MUST NOT be inherited: a copy that keeps the original's
+        // cloud row makes both projects write into (and pull from) the same
+        // row — their contents ping-pong into each other. The copy starts
+        // local-only and the auto-saver inserts it as its own row.
+        const copy: Project = {
+          ...src,
+          id: newId(),
+          cloudId: undefined,
+          name: newName ?? `${src.name} (copy)`,
+          createdAt: now,
+          updatedAt: now,
+        };
         set((s) => ({ projects: { ...s.projects, [copy.id]: copy }, activeProjectId: copy.id }));
         return copy.id;
       },
@@ -193,6 +208,14 @@ export const useStore = create<State>()(
 
       linkActiveToCloud: (cloudId) => {
         get().linkProjectToCloud(get().activeProjectId, cloudId);
+      },
+
+      unlinkProject: (localId) => {
+        set((s) => {
+          const p = s.projects[localId];
+          if (!p || !p.cloudId) return {};
+          return { projects: { ...s.projects, [localId]: { ...p, cloudId: undefined } } };
+        });
       },
 
       linkProjectToCloud: (localId, cloudId) => {
