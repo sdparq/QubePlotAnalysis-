@@ -124,6 +124,13 @@ export interface Project {
    *  has a value here it replaces the class default in the Apartments auto-fill.
    *  Categories without a value fall back to the class library. */
   typologyMix?: Partial<Record<UnitCategory, number>>;
+  /** Per-TYPOLOGY unit-mix override (% of total units, 0..100, keyed by
+   *  typology id). Takes precedence over the category mechanism: a typology
+   *  with a value here contributes exactly that share; typologies without one
+   *  fall back to their category's share split among same-category siblings.
+   *  This is what lets "Studio Premium" and "Studio Standard" carry different
+   *  percentages. */
+  typologyMixById?: Record<string, number>;
   program: ProgramCell[];
   commonAreas: CommonArea[];
   parking: ParkingLevel[];

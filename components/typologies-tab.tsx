@@ -14,6 +14,7 @@ import {
   computeProgramAutoFill,
   effectiveMixPctForCategory,
   resolveTypologyMix,
+  typologyUnitShare,
 } from "@/lib/calc/program-autofill";
 import { residentialSubGFA } from "@/lib/calc/gfa";
 
@@ -114,50 +115,54 @@ export default function TypologiesTab() {
     upsert({ ...t, ...partial });
   }
 
-  /** Persist a new project-level mix override and silently re-run the
-   *  Apartments auto-fill so the next tab reflects the change immediately. */
-  function patchAndRefill(nextMix: Partial<Record<UnitCategory, number>> | undefined) {
-    const projAfter = { ...project, typologyMix: nextMix };
+  /** Persist mix changes and silently re-run the Apartments auto-fill so the
+   *  next tab reflects the change immediately. */
+  function patchAndRefill(partial: {
+    typologyMix?: Partial<Record<UnitCategory, number>> | undefined;
+    typologyMixById?: Record<string, number> | undefined;
+  }) {
+    const projAfter = { ...project, ...partial };
     const classMix = detectedClass ? library[detectedClass].typologyMix : null;
     if (classMix) {
       const resolved = resolveTypologyMix(projAfter, classMix);
       const fill = computeProgramAutoFill(projAfter, resolved);
-      patch({ typologyMix: nextMix, program: fill?.cells ?? project.program });
+      patch({ ...partial, program: fill?.cells ?? project.program });
     } else {
-      patch({ typologyMix: nextMix });
+      patch(partial);
     }
   }
 
-  function setMixForCategory(cat: UnitCategory, pct: number) {
+  function setMixForTypology(id: string, pct: number) {
     const safe = Math.max(0, Math.min(100, pct));
-    patchAndRefill({ ...(project.typologyMix ?? {}), [cat]: safe });
+    patchAndRefill({ typologyMixById: { ...(project.typologyMixById ?? {}), [id]: safe } });
   }
 
-  function resetMixForCategory(cat: UnitCategory) {
-    const next = { ...(project.typologyMix ?? {}) };
-    delete next[cat];
-    patchAndRefill(Object.keys(next).length === 0 ? undefined : next);
+  function resetMixForTypology(id: string) {
+    const next = { ...(project.typologyMixById ?? {}) };
+    delete next[id];
+    patchAndRefill({ typologyMixById: Object.keys(next).length === 0 ? undefined : next });
   }
 
   function resetAllMix() {
-    patchAndRefill(undefined);
+    patchAndRefill({ typologyMix: undefined, typologyMixById: undefined });
   }
 
+  /** Scale every typology's effective share so the sum lands on 100% —
+   *  writes an explicit per-typology override for each one. */
   function normalizeMix() {
     const classMix = detectedClass ? library[detectedClass].typologyMix : null;
     if (!classMix) return;
-    const eff = CATEGORIES.map((c) => ({
-      cat: c,
-      pct: effectiveMixPctForCategory(project, classMix, c),
+    const resolved = resolveTypologyMix(project, classMix);
+    const eff = project.typologies.map((t) => ({
+      id: t.id,
+      pct: typologyUnitShare(project, resolved, t) * 100,
     }));
     const sum = eff.reduce((s, e) => s + e.pct, 0);
     if (sum <= 0) return;
     const factor = 100 / sum;
-    const next: Partial<Record<UnitCategory, number>> = {};
-    for (const e of eff) {
-      if (e.pct > 0) next[e.cat] = Number((e.pct * factor).toFixed(1));
-    }
-    patchAndRefill(next);
+    const next: Record<string, number> = {};
+    for (const e of eff) next[e.id] = Number((e.pct * factor).toFixed(1));
+    patchAndRefill({ typologyMixById: next });
   }
 
   /**
@@ -259,10 +264,11 @@ export default function TypologiesTab() {
     // otherwise Program (and everything downstream: Parking, Lifts, Areas
     // Summary) stays empty until the user separately visits Program and clicks
     // "Apply to N floors" there, which reads as "typologies aren't applying".
-    const projAfter = { ...project, typologies: created };
+    // The replaced typologies' per-typology overrides are orphaned — clear them.
+    const projAfter = { ...project, typologies: created, typologyMixById: undefined };
     const resolvedMix = resolveTypologyMix(projAfter, row.typologyMix);
     const fill = computeProgramAutoFill(projAfter, resolvedMix);
-    patch({ program: fill?.cells ?? [] });
+    patch({ program: fill?.cells ?? [], typologyMixById: undefined });
     if (!fill && !opts?.silent) {
       alert(
         "Typologies created — but the Apartments matrix stays EMPTY because this project has no Residential GFA target yet.\n\nSet Target GFA and the Residential row in Setup → GFA breakdown, then re-apply the mix here (or use Apartments → Apply to N floors).",
@@ -373,8 +379,8 @@ export default function TypologiesTab() {
           library={library}
           detectedClass={detectedClass}
           project={project}
-          onSetCategory={setMixForCategory}
-          onResetCategory={resetMixForCategory}
+          onSetTypology={setMixForTypology}
+          onResetTypology={resetMixForTypology}
           onResetAll={resetAllMix}
           onNormalize={normalizeMix}
         />
@@ -464,7 +470,19 @@ export default function TypologiesTab() {
                       <NumCell step={0.1} min={0} value={t.parkingPerUnit} onCommit={(n) => update(t, { parkingPerUnit: Math.max(0, n) })} />
                     </td>
                     <td className="text-right">
-                      <button className="btn btn-danger btn-xs" onClick={() => { if (confirm(`Delete ${t.name}?`)) remove(t.id); }}>Delete</button>
+                      <button
+                        className="btn btn-danger btn-xs"
+                        onClick={() => {
+                          if (!confirm(`Delete ${t.name}?`)) return;
+                          remove(t.id);
+                          // Drop its per-typology mix override too.
+                          if (project.typologyMixById?.[t.id] !== undefined) {
+                            const next = { ...project.typologyMixById };
+                            delete next[t.id];
+                            patch({ typologyMixById: Object.keys(next).length === 0 ? undefined : next });
+                          }
+                        }}
+                      >Delete</button>
                     </td>
                   </tr>
                   );
@@ -482,38 +500,50 @@ function UnitMixCard({
   library,
   detectedClass,
   project,
-  onSetCategory,
-  onResetCategory,
+  onSetTypology,
+  onResetTypology,
   onResetAll,
   onNormalize,
 }: {
   library: ReturnType<typeof useZoneLibrary>["library"];
   detectedClass: ZoneClass;
   project: ReturnType<typeof useProject>;
-  onSetCategory: (cat: UnitCategory, pct: number) => void;
-  onResetCategory: (cat: UnitCategory) => void;
+  onSetTypology: (id: string, pct: number) => void;
+  onResetTypology: (id: string) => void;
   onResetAll: () => void;
   onNormalize: () => void;
 }) {
   const classMix = library[detectedClass].typologyMix;
-  const override = project.typologyMix ?? {};
-  const hasAnyOverride = Object.keys(override).length > 0;
+  const byId = project.typologyMixById ?? {};
+  const resolved = resolveTypologyMix(project, classMix);
+  const hasAnyOverride =
+    Object.keys(project.typologyMix ?? {}).length > 0 ||
+    project.typologies.some((t) => byId[t.id] !== undefined);
 
-  const rows = CATEGORIES.map((cat) => {
-    const classPct = effectiveMixPctForCategory(
-      { ...project, typologyMix: undefined } as ReturnType<typeof useProject>,
-      classMix,
-      cat,
-    );
-    const effPct = effectiveMixPctForCategory(project, classMix, cat);
-    const isOverride = override[cat] !== undefined;
-    // The project's own typologies of this category — shown by THEIR names so
-    // renamed typologies stay recognisable in the mix.
-    const names = project.typologies.filter((t) => t.category === cat).map((t) => t.name);
-    return { cat, classPct, effPct, isOverride, names };
+  // ONE ROW PER TYPOLOGY — "Studio Premium" and "Studio Standard" each carry
+  // their own share of total units.
+  const rows = project.typologies.map((t) => {
+    const sameCat = project.typologies.filter((x) => x.category === t.category).length || 1;
+    const classPct =
+      effectiveMixPctForCategory(
+        { ...project, typologyMix: undefined } as ReturnType<typeof useProject>,
+        classMix,
+        t.category,
+      ) / sameCat;
+    const effPct = typologyUnitShare(project, resolved, t) * 100;
+    const isOverride = byId[t.id] !== undefined;
+    return { t, classPct, effPct, isOverride };
   });
   const effSum = rows.reduce((s, r) => s + r.effPct, 0);
-  const offNorm = Math.abs(effSum - 100) > 0.5;
+  const offNorm = rows.length > 0 && Math.abs(effSum - 100) > 0.5;
+
+  // Class categories with % > 0 but no typology in the project contribute
+  // zero units — surface them so the mix isn't silently short.
+  const missingCats = CATEGORIES.filter(
+    (cat) =>
+      effectiveMixPctForCategory(project, classMix, cat) > 0 &&
+      !project.typologies.some((t) => t.category === cat),
+  );
 
   return (
     <div className="card">
@@ -521,9 +551,11 @@ function UnitMixCard({
         <div>
           <h2 className="section-title">Unit mix · this project</h2>
           <p className="section-sub">
-            Override per-category {`% of total units`} just for this project. Editing any row
-            re-runs the Apartments auto-fill silently. Italic numbers are the class {detectedClass}{" "}
-            default; bold numbers are project overrides.
+            One row per typology — each carries its own {`% of total units`}, so two typologies of
+            the same category (a premium and a standard Studio, say) can hold different shares.
+            Editing any row re-runs the Apartments auto-fill silently. Italic numbers follow the
+            class {detectedClass} default (split among same-category typologies); bold numbers are
+            project overrides.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -546,29 +578,24 @@ function UnitMixCard({
 
       <div className="border border-ink-200">
         <div className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
-          <div>Category · your typologies</div>
+          <div>Typology</div>
           <div className="text-right">Class {detectedClass} default</div>
           <div className="text-right">This project %</div>
           <div></div>
         </div>
+        {rows.length === 0 && (
+          <div className="px-3 py-3 text-[12px] text-ink-500">
+            No typologies in the project yet — apply the class mix or add one below.
+          </div>
+        )}
         {rows.map((r) => (
           <div
-            key={r.cat}
+            key={r.t.id}
             className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 items-center text-[12px] tabular-nums border-b border-ink-100 last:border-b-0"
           >
             <div>
-              <div className="text-ink-900">{r.cat}</div>
-              {r.names.length > 0 ? (
-                <div className="text-[10.5px] text-qube-800 leading-snug">
-                  {r.names.join(" · ")}
-                </div>
-              ) : (
-                r.effPct > 0 && (
-                  <div className="text-[10.5px] text-amber-700 leading-snug">
-                    no typology of this category in the project — contributes 0 units
-                  </div>
-                )
-              )}
+              <div className="text-ink-900">{r.t.name}</div>
+              <div className="text-[10px] uppercase tracking-[0.08em] text-ink-400">{r.t.category}</div>
             </div>
             <div className="text-right text-ink-500">{r.classPct.toFixed(1)}%</div>
             <div className="text-right">
@@ -580,7 +607,7 @@ function UnitMixCard({
                   className={`cell-input text-right pr-6 !py-1 !px-1.5 w-[90px] ${
                     r.isOverride ? "text-ink-900 font-medium" : "text-ink-500 italic"
                   }`}
-                  onCommit={(n) => onSetCategory(r.cat, n)}
+                  onCommit={(n) => onSetTypology(r.t.id, n)}
                 />
                 <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9.5px] text-ink-400 pointer-events-none">%</span>
               </div>
@@ -588,9 +615,9 @@ function UnitMixCard({
             <div className="text-right">
               {r.isOverride ? (
                 <button
-                  onClick={() => onResetCategory(r.cat)}
+                  onClick={() => onResetTypology(r.t.id)}
                   className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-qube-700"
-                  title="Revert this category to the class default"
+                  title="Revert this typology to its class-derived share"
                 >Reset</button>
               ) : (
                 <span className="text-[10px] text-ink-300">default</span>
@@ -600,7 +627,7 @@ function UnitMixCard({
         ))}
         <div className="grid grid-cols-[1fr_110px_110px_70px] gap-1 px-3 py-1.5 items-center text-[11.5px] tabular-nums bg-bone-50/40 border-t border-ink-200">
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-ink-500">Sum</div>
-          <div className="text-right text-ink-500">100.0%</div>
+          <div className="text-right text-ink-500"></div>
           <div className={`text-right ${offNorm ? "text-amber-700 font-medium" : "text-ink-700"}`}>
             {effSum.toFixed(1)}%
           </div>
@@ -608,11 +635,17 @@ function UnitMixCard({
         </div>
       </div>
 
+      {missingCats.length > 0 && (
+        <p className="text-[11px] text-amber-700 mt-2 leading-snug">
+          Class {detectedClass} assigns a share to {missingCats.join(", ")} but the project has no
+          typology of {missingCats.length === 1 ? "that category" : "those categories"} — they
+          contribute 0 units. Add one below if you want them in the mix.
+        </p>
+      )}
+
       <p className="text-[11px] text-ink-500 mt-3 leading-snug">
-        The mix drives the Apartments auto-fill: total units N = Apartments GFA / average interior area
-        weighted by these %s, then units<sub>cat</sub> = round(N × %<sub>cat</sub> / 100). Categories
-        with no typology in this project contribute zero — add a typology of that category above if you
-        want it to count.
+        The mix drives the Apartments auto-fill: total units N = Apartments GFA / average interior
+        area weighted by these %s, then units<sub>typology</sub> = round(N × % / 100).
       </p>
     </div>
   );

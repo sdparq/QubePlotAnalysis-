@@ -49,6 +49,23 @@ export function effectiveMixPctForCategory(
   return Math.max(0, classMix[k]) * 100;
 }
 
+/** Effective unit share (fraction 0..1 of total units) for ONE typology:
+ *  its own per-typology override when set, else its category's resolved
+ *  share split evenly among same-category typologies. `mix` must already be
+ *  resolved (class default + category overrides — see resolveTypologyMix). */
+export function typologyUnitShare(
+  project: Project,
+  mix: Record<TypologyKey, number>,
+  t: Typology,
+): number {
+  const byId = project.typologyMixById?.[t.id];
+  if (byId !== undefined && Number.isFinite(byId)) return Math.max(0, byId) / 100;
+  const k = TYPOLOGY_KEYS.find((kk) => CATEGORY_FOR_TYPOLOGY_KEY[kk] === t.category);
+  const pct = k ? Math.max(0, mix[k]) : 0;
+  const sameCat = project.typologies.filter((x) => x.category === t.category).length || 1;
+  return pct / sameCat;
+}
+
 export interface AutoFillResult {
   cells: ProgramCell[];
   totalUnits: number;
@@ -74,10 +91,8 @@ export function computeProgramAutoFill(
   if (project.typologies.length === 0) return null;
 
   const rows = project.typologies.map((t) => {
-    const k = TYPOLOGY_KEYS.find((kk) => CATEGORY_FOR_TYPOLOGY_KEY[kk] === t.category);
-    const pct = k ? mix[k] : 0;
     const sameCat = project.typologies.filter((x) => x.category === t.category).length || 1;
-    const unitShare = pct / sameCat;
+    const unitShare = typologyUnitShare(project, mix, t);
     return { typology: t, unitShare, sameCat };
   });
 
