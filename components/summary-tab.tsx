@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import { useProject } from "@/lib/store";
 import {
+  hospitalityGFA,
   residentialSubPct,
   residentialSubQuota,
   residentialGFATarget,
@@ -23,10 +24,11 @@ function fmt0(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+// Hospitality is NOT listed here: it rolls into the Residential GFA target
+// (see residentialGFATarget) and would double-count as a separate use.
 const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
   { key: "retail", label: "Retail" },
   { key: "commercial", label: "Commercial / Office" },
-  { key: "hospitality", label: "Hospitality" },
 ];
 
 export default function SummaryTab() {
@@ -34,8 +36,9 @@ export default function SummaryTab() {
 
   const target = project.targetGFA ?? 0;
 
-  // ── Residential breakdown ───────────────────────────────────────────────
+  // ── Residential breakdown (hospitality rolls into it) ──────────────────
   const residentialGfaTotal = useMemo(() => residentialGFATarget(project), [project]);
+  const hospitalityM2 = useMemo(() => hospitalityGFA(project), [project]);
   const program = useMemo(() => computeProgram(project), [project]);
   const yield_ = useMemo(() => computeTowerYield(project), [project]);
 
@@ -165,13 +168,16 @@ export default function SummaryTab() {
         {/* GFA derivation */}
         <DerivBlock title="GFA total — how it's built">
           <DerivRow
-            label="Residential GFA"
+            label={hospitalityM2 > 0 ? "Residential GFA (incl. Hospitality)" : "Residential GFA"}
             formula={
-              project.gfaBreakdown?.residential
+              (project.gfaBreakdown?.residential
                 ? project.gfaBreakdown.residential.mode === "absolute"
                   ? "entered in Setup (absolute m²)"
                   : `${project.gfaBreakdown.residential.value}% × Target GFA ${fmt0(target)} m²`
-                : "not set in Setup"
+                : "not set in Setup") +
+              (hospitalityM2 > 0
+                ? ` + Hospitality ${fmt0(hospitalityM2)} m² (treated as residential)`
+                : "")
             }
             m2={residentialGfaTotal}
           />

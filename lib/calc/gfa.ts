@@ -18,17 +18,29 @@
  *   residentialBUA = apartments + amenities + circulation + services
  */
 
-import type { Project, ResidentialSubCategory } from "../types";
+import type { GfaBreakdownItem, Project, ResidentialSubCategory } from "../types";
 import { DEFAULT_RESIDENTIAL_BREAKDOWN } from "../types";
 import { computeProgram } from "./program";
 
 export const RESIDENTIAL_SUBS: ResidentialSubCategory[] = ["apartments", "amenities", "circulation", "services"];
 
-export function residentialGFATarget(project: Project): number {
-  const item = project.gfaBreakdown?.residential;
+function gfaItemM2(project: Project, item: GfaBreakdownItem | undefined): number {
   if (!item) return 0;
   const target = project.targetGFA ?? 0;
   return item.mode === "absolute" ? item.value : (item.value / 100) * target;
+}
+
+/** m² allocated to Hospitality in Setup's GFA breakdown. */
+export function hospitalityGFA(project: Project): number {
+  return gfaItemM2(project, project.gfaBreakdown?.hospitality);
+}
+
+/** Residential GFA target. Hospitality (hotel keys / branded residences) is
+ *  operated as residential stock in this tool, so its allocation rolls into
+ *  the residential target and feeds the same pipeline — Distribution quotas,
+ *  unit mix, Apartments auto-fill and the sellable GSA. */
+export function residentialGFATarget(project: Project): number {
+  return gfaItemM2(project, project.gfaBreakdown?.residential) + hospitalityGFA(project);
 }
 
 /** Effective % of residentialGFA for a sub.

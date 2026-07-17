@@ -46,7 +46,7 @@ const GFA_CATEGORIES: { key: GfaUseCategory; label: string; hint: string }[] = [
   { key: "residential", label: "Residential", hint: "Apartments, villas, serviced apartments." },
   { key: "retail", label: "Retail", hint: "Shops, supermarkets, F&B." },
   { key: "commercial", label: "Commercial / Office", hint: "Offices, co-working, clinics." },
-  { key: "hospitality", label: "Hospitality", hint: "Hotel keys, branded residence." },
+  { key: "hospitality", label: "Hospitality", hint: "Hotel keys, branded residence. Counted as Residential — feeds Distribution, unit mix and Apartments." },
 ];
 
 export default function SetupTab() {
