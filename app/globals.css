@@ -101,3 +101,50 @@ table.tbl tr.row-subtotal td { @apply bg-bone-100 font-medium; }
   @apply text-[10.5px] uppercase text-ink-500 font-medium;
   letter-spacing: 0.22em;
 }
+
+/* ---------- PDF report (print) ---------- */
+@page {
+  size: A4;
+  margin: 12mm 12mm 14mm;
+}
+@media print {
+  /* The report overlay is PORTALED to <body>, so hiding every other body
+     child removes the whole app (and its page-height) from the print flow —
+     the printed document is exactly the report, nothing more. */
+  body.report-open > *:not(.report-overlay) {
+    display: none !important;
+  }
+  body.report-open .report-overlay {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: none !important;
+    padding: 0 !important;
+  }
+  body.report-open .report-toolbar {
+    display: none !important;
+  }
+  #print-report {
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+  #print-report * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .rpt-page-break {
+    break-before: page;
+  }
+  .rpt-avoid-break {
+    break-inside: avoid;
+  }
+}
+@media print {
+  body.report-open {
+    background: #ffffff !important;
+  }
+}

@@ -1,8 +1,13 @@
 "use client";
+import { useState } from "react";
+import dynamic from "next/dynamic";
 import ProjectSwitcher from "./project-switcher";
 import CloudStatus from "./cloud-status";
 
+const ReportOverlay = dynamic(() => import("./report"), { ssr: false });
+
 export default function HeaderBar() {
+  const [report, setReport] = useState(false);
   return (
     <header className="bg-ink-900 text-bone-100 relative z-30">
       <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap min-w-0">
@@ -28,10 +33,18 @@ export default function HeaderBar() {
           <div className="hidden sm:block w-px h-10 bg-bone-100/20" />
           <ProjectSwitcher />
         </div>
-        <div className="flex items-center gap-1 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setReport(true)}
+            className="px-3 py-2 text-[11px] font-medium uppercase tracking-[0.10em] border border-bone-100/25 text-bone-100 hover:border-bone-100/60 hover:bg-ink-800 transition-colors"
+            title="Preview and export the full feasibility report as a PDF"
+          >
+            ⬇ Report PDF
+          </button>
           <CloudStatus />
         </div>
       </div>
+      {report && <ReportOverlay onClose={() => setReport(false)} />}
     </header>
   );
 }
