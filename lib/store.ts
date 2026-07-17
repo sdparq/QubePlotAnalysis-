@@ -65,6 +65,10 @@ interface State {
   removeByCloudId: (cloudId: string) => void;
   /** Mark the active local-only project as linked to a freshly created cloud row. */
   linkActiveToCloud: (cloudId: string) => void;
+  /** Link ANY local project (by its current local id) to a cloud row id —
+   *  used by the auto-uploader, which may finish after the user has already
+   *  switched to another project. */
+  linkProjectToCloud: (localId: string, cloudId: string) => void;
 
   upsertTypology: (t: Typology) => void;
   removeTypology: (id: string) => void;
@@ -188,15 +192,19 @@ export const useStore = create<State>()(
       },
 
       linkActiveToCloud: (cloudId) => {
+        get().linkProjectToCloud(get().activeProjectId, cloudId);
+      },
+
+      linkProjectToCloud: (localId, cloudId) => {
         set((s) => {
-          const oldId = s.activeProjectId;
-          const p = s.projects[oldId];
-          if (!p) return {};
+          const p = s.projects[localId];
+          if (!p || localId === cloudId) return {};
           const linked: Project = { ...p, id: cloudId, cloudId, updatedAt: Date.now() };
           const next = { ...s.projects };
-          delete next[oldId];
+          delete next[localId];
           next[cloudId] = linked;
-          return { projects: next, activeProjectId: cloudId };
+          const activeProjectId = s.activeProjectId === localId ? cloudId : s.activeProjectId;
+          return { projects: next, activeProjectId };
         });
       },
 

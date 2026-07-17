@@ -15,7 +15,7 @@ import {
   useCloudAutoSave,
 } from "@/lib/cloud";
 
-function statusLabel(s: SaveStatus, savedAt: number | null): string {
+function statusLabel(s: SaveStatus, savedAt: number | null, linked: boolean): string {
   if (s === "saving") return "Saving…";
   if (s === "error") return "Save failed";
   if (s === "offline") return "Offline";
@@ -23,7 +23,9 @@ function statusLabel(s: SaveStatus, savedAt: number | null): string {
     const d = new Date(savedAt);
     return `Saved ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   }
-  return "Synced";
+  // Never claim "Synced" for a project that has no cloud row yet — that
+  // exact lie sent people to a second computer expecting to find their work.
+  return linked ? "Synced" : "Not in cloud yet";
 }
 
 function relativeTime(ts: number): string {
@@ -101,7 +103,10 @@ export default function CloudStatus() {
     }
   }, [user, open, cloudList, refresh]);
 
-  // Initial sync once on sign-in: fetch list, pull anything newer in cloud.
+  // Initial sync once on sign-in: fetch list, pull anything newer in cloud,
+  // then PUSH UP any local project the user has actually worked on that never
+  // reached the cloud (created before unlocking, offline edits...). Without
+  // the push leg, work done before signing in silently stays on one machine.
   // Keyed on user.id so Supabase token refreshes (new user object, same id)
   // don't re-trigger a full sync.
   useEffect(() => {
@@ -129,6 +134,27 @@ export default function CloudStatus() {
               console.error("pull failed", e);
             }
           }
+        }
+        // Push leg. Skip untouched projects (updatedAt ≈ createdAt): every
+        // fresh browser seeds a pristine sample project, and auto-uploading
+        // those would litter the team workspace with duplicates.
+        let pushed = false;
+        for (const p of Object.values(useStore.getState().projects)) {
+          if (cancelled) return;
+          if (p.cloudId) continue;
+          if (p.updatedAt - p.createdAt < 2000) continue;
+          try {
+            const id = await upsertCloudProject(p);
+            applyingCloudChange(() => useStore.getState().linkProjectToCloud(p.id, id));
+            pushed = true;
+          } catch (e) {
+            console.error("push failed", e);
+          }
+        }
+        if (pushed && !cancelled) {
+          try {
+            setCloudList(await listCloudProjects());
+          } catch { /* list refresh is cosmetic */ }
         }
       } catch (e) {
         console.error("initial cloud sync failed", e);
@@ -238,7 +264,7 @@ export default function CloudStatus() {
       >
         <span className="w-2 h-2 rounded-full bg-qube-500" />
         <span className="hidden md:inline text-bone-200/80 normal-case tracking-normal">
-          {statusLabel(status, savedAt)}
+          {statusLabel(status, savedAt, !!project?.cloudId)}
         </span>
       </button>
 
@@ -247,7 +273,7 @@ export default function CloudStatus() {
           <div className="px-4 py-3 border-b border-bone-100/10">
             <div className="text-[11px] uppercase tracking-[0.10em] text-bone-200/60">Cloud workspace</div>
             <div className="text-sm">Connected</div>
-            <div className="text-[10px] text-bone-200/50 mt-0.5">{statusLabel(status, savedAt)}</div>
+            <div className="text-[10px] text-bone-200/50 mt-0.5">{statusLabel(status, savedAt, !!project?.cloudId)}</div>
           </div>
 
           <div className="px-4 py-3 border-b border-bone-100/10 flex items-center gap-2">

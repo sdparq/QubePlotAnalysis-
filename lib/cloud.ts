@@ -187,8 +187,11 @@ export function applyingCloudChange<T>(fn: () => T): T {
   }
 }
 
-/** Debounced auto-saver for the active project. Only saves projects that
- *  already have a cloudId (i.e. were created or pulled from the cloud). */
+/** Debounced auto-saver for the active project. Projects already linked to a
+ *  cloud row are updated in place; a project WITHOUT a cloudId (created
+ *  locally) is inserted on its first edit and linked automatically — nobody
+ *  should have to find a "save to cloud" button for their work to reach the
+ *  team workspace. */
 export function useCloudAutoSave(opts: {
   user: User | null;
   onStatus: (s: SaveStatus) => void;
@@ -201,6 +204,8 @@ export function useCloudAutoSave(opts: {
   // Serialisation of the last successfully uploaded state, keyed by cloudId so
   // baselines from different projects can't collide.
   const lastSentRef = useRef<Map<string, string>>(new Map());
+  // Local ids with an INSERT currently on the wire (see flush).
+  const insertingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user || !isCloudEnabled) return;
@@ -212,15 +217,32 @@ export function useCloudAutoSave(opts: {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      if (!p || !p.cloudId) return;
+      if (!p) return;
       const serialised = JSON.stringify(p);
-      if (serialised === lastSentRef.current.get(p.cloudId)) return;
+      if (p.cloudId && serialised === lastSentRef.current.get(p.cloudId)) return;
       onStatus("saving");
       try {
-        await upsertCloudProject(p);
-        // Only mark as sent AFTER success — a failed upload must retry on the
-        // next change (or next flush) instead of being silently swallowed.
-        lastSentRef.current.set(p.cloudId, serialised);
+        if (p.cloudId) {
+          await upsertCloudProject(p);
+          // Only mark as sent AFTER success — a failed upload must retry on
+          // the next change (or next flush) instead of being silently
+          // swallowed.
+          lastSentRef.current.set(p.cloudId, serialised);
+        } else if (!insertingRef.current.has(p.id)) {
+          // First edit of a local-only project: insert it and adopt the cloud
+          // id. The re-keying is a cloud-sourced change — don't echo it up.
+          // The in-flight set stops a concurrent flush from inserting the same
+          // project twice while the first insert is still on the wire.
+          insertingRef.current.add(p.id);
+          try {
+            const id = await upsertCloudProject(p);
+            applyingCloudChange(() => useStore.getState().linkProjectToCloud(p.id, id));
+            const linked = useStore.getState().projects[id];
+            if (linked) lastSentRef.current.set(id, JSON.stringify(linked));
+          } finally {
+            insertingRef.current.delete(p.id);
+          }
+        }
         onStatus("saved");
       } catch (err) {
         console.error("cloud save failed", err);
