@@ -82,7 +82,10 @@ export interface ParcelInfo {
   tierTracesPx?: {
     ground?: { x: number; y: number }[];
     podium?: { x: number; y: number }[];
+    /** Legacy single tower trace — superseded by `towers`. */
     tower?: { x: number; y: number }[];
+    /** One trace per tower, in drawing order (Tower 1, Tower 2…). */
+    towers?: { x: number; y: number }[][];
   };
   /** Calibration: two points in pixel coords plus their real-world distance (m). */
   calibration?: {
@@ -150,7 +153,12 @@ export interface Project {
    *  plots where the tower/podium shape differs from the plot outline. */
   groundPolygon?: { x: number; y: number }[];
   podiumPolygon?: { x: number; y: number }[];
+  /** Legacy single tower footprint — superseded by `towerPolygons`. Still
+   *  honoured (treated as one tower) when `towerPolygons` is unset. */
   towerPolygon?: { x: number; y: number }[];
+  /** MULTIPLE tower footprints in plot-local metres. Massing builds one tower
+   *  volume per polygon (same floor count/height for all). */
+  towerPolygons?: { x: number; y: number }[][];
   /** Uniform fallback setback (m) for the ground-floor footprint. Used when
    *  `groundSetbackPerEdge` is not set or has a different length than the plot
    *  polygon. Basements always use 0 (full plot polygon). */

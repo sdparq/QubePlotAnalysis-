@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { ParcelInfo } from "@/lib/types";
 import { processParcel, type PdfTextItem } from "@/lib/parcel-extract";
@@ -221,6 +221,17 @@ export default function PlotTab() {
     return px.map((p) => ({ x: s * p.x + tx, y: -s * p.y + ty }));
   }
 
+  // Effective tower lists — the legacy singular fields count as tower #1
+  // until the first multi-tower write migrates them.
+  const towerPolys = useMemo(
+    () => project.towerPolygons ?? (project.towerPolygon ? [project.towerPolygon] : []),
+    [project.towerPolygons, project.towerPolygon],
+  );
+  const towerTracesPx = useMemo(
+    () => parcel?.tierTracesPx?.towers ?? (parcel?.tierTracesPx?.tower ? [parcel.tierTracesPx.tower] : []),
+    [parcel?.tierTracesPx],
+  );
+
   function startTierTrace(tier: (typeof TIER_TARGETS)[number]) {
     setTraceTarget(tier);
     setTraceMode("tracing");
@@ -236,16 +247,48 @@ export default function PlotTab() {
       return;
     }
     if (!parcel) return;
+    if (tier === "tower") {
+      // Towers accumulate: each trace ADDS one. Legacy singular fields fold
+      // into the arrays and are cleared.
+      patch({
+        towerPolygons: [...towerPolys, local],
+        towerPolygon: undefined,
+        parcel: {
+          ...parcel,
+          tierTracesPx: { ...parcel.tierTracesPx, towers: [...towerTracesPx, px], tower: undefined },
+        },
+      });
+      return;
+    }
     patch({
       [TIER_POLY_FIELD[tier]]: local,
       parcel: { ...parcel, tierTracesPx: { ...parcel.tierTracesPx, [tier]: px } },
     });
   }
 
-  function clearTierTrace(tier: (typeof TIER_TARGETS)[number]) {
+  function clearTierTrace(tier: "ground" | "podium") {
     patch({
       [TIER_POLY_FIELD[tier]]: undefined,
       parcel: parcel ? { ...parcel, tierTracesPx: { ...parcel.tierTracesPx, [tier]: undefined } } : parcel,
+    });
+  }
+
+  function removeTower(index: number) {
+    const nextPolys = towerPolys.filter((_, i) => i !== index);
+    const nextTraces = towerTracesPx.filter((_, i) => i !== index);
+    patch({
+      towerPolygons: nextPolys.length > 0 ? nextPolys : undefined,
+      towerPolygon: undefined,
+      parcel: parcel
+        ? {
+            ...parcel,
+            tierTracesPx: {
+              ...parcel.tierTracesPx,
+              towers: nextTraces.length > 0 ? nextTraces : undefined,
+              tower: undefined,
+            },
+          }
+        : parcel,
     });
   }
 
@@ -462,12 +505,21 @@ export default function PlotTab() {
                   hoverPoint={hoverPoint}
                   candidates={traceMode === "selecting" ? candidates : undefined}
                   onSelectCandidate={selectCandidate}
-                  extraPolygons={TIER_TARGETS.flatMap((t) => {
-                    const pts = parcel.tierTracesPx?.[t];
-                    return pts && pts.length >= 3
-                      ? [{ points: pts, color: TIER_COLORS[t], label: TIER_LABELS[t] }]
-                      : [];
-                  })}
+                  extraPolygons={[
+                    ...(["ground", "podium"] as const).flatMap((t) => {
+                      const pts = parcel.tierTracesPx?.[t];
+                      return pts && pts.length >= 3
+                        ? [{ points: pts, color: TIER_COLORS[t], label: TIER_LABELS[t] }]
+                        : [];
+                    }),
+                    ...towerTracesPx
+                      .filter((pts) => pts.length >= 3)
+                      .map((pts, i) => ({
+                        points: pts,
+                        color: TIER_COLORS.tower,
+                        label: towerTracesPx.length > 1 ? `Tower ${i + 1}` : "Tower",
+                      })),
+                  ]}
                   onPick={(p) => {
                     if (traceMode === "tracing") onTraceClick(p);
                     else if (traceMode === "calibrating") onCalibClick(p);
@@ -669,11 +721,15 @@ export default function PlotTab() {
                 <StepBlock
                   step="3"
                   title="Building footprints (optional)"
-                  done={TIER_TARGETS.some((t) => (project[TIER_POLY_FIELD[t]]?.length ?? 0) >= 3)}
-                  description="For plots where the tower / podium shape differs from a setback offset of the plot line: trace each tier's footprint on the drawing. Massing uses a traced footprint verbatim instead of that tier's setbacks."
+                  done={
+                    (project.groundPolygon?.length ?? 0) >= 3 ||
+                    (project.podiumPolygon?.length ?? 0) >= 3 ||
+                    towerPolys.length > 0
+                  }
+                  description="For plots where the tower / podium shape differs from a setback offset of the plot line: trace each tier's footprint on the drawing. Massing uses a traced footprint verbatim instead of that tier's setbacks. You can trace SEVERAL towers — each becomes its own volume."
                 >
                   <div className="grid gap-1.5">
-                    {TIER_TARGETS.map((tier) => {
+                    {(["ground", "podium"] as const).map((tier) => {
                       const poly = project[TIER_POLY_FIELD[tier]];
                       const has = (poly?.length ?? 0) >= 3;
                       const tracingThis = traceMode === "tracing" && traceTarget === tier;
@@ -683,7 +739,7 @@ export default function PlotTab() {
                             className="inline-block w-3 h-3 shrink-0 rounded-sm"
                             style={{ backgroundColor: TIER_COLORS[tier] }}
                           />
-                          <span className="w-14 text-ink-900">{TIER_LABELS[tier]}</span>
+                          <span className="w-16 text-ink-900">{TIER_LABELS[tier]}</span>
                           <span className="flex-1 text-ink-500 tabular-nums">
                             {tracingThis
                               ? `${livePoints.length} point${livePoints.length === 1 ? "" : "s"}…`
@@ -715,11 +771,60 @@ export default function PlotTab() {
                         </div>
                       );
                     })}
+
+                    {/* Towers — one row per traced tower + an add button */}
+                    {towerPolys.map((poly, i) => (
+                      <div key={`tower-${i}`} className="flex items-center gap-2 text-[11.5px]">
+                        <span
+                          className="inline-block w-3 h-3 shrink-0 rounded-sm"
+                          style={{ backgroundColor: TIER_COLORS.tower }}
+                        />
+                        <span className="w-16 text-ink-900">
+                          {towerPolys.length > 1 ? `Tower ${i + 1}` : "Tower"}
+                        </span>
+                        <span className="flex-1 text-ink-500 tabular-nums">{fmt2(polygonArea(poly))} m²</span>
+                        <button
+                          className="btn btn-danger btn-xs"
+                          onClick={() => removeTower(i)}
+                          disabled={traceMode !== "idle"}
+                        >✕</button>
+                      </div>
+                    ))}
+                    {traceMode === "tracing" && traceTarget === "tower" ? (
+                      <div className="flex items-center gap-2 text-[11.5px]">
+                        <span
+                          className="inline-block w-3 h-3 shrink-0 rounded-sm"
+                          style={{ backgroundColor: TIER_COLORS.tower }}
+                        />
+                        <span className="w-16 text-ink-900">Tower {towerPolys.length + 1}</span>
+                        <span className="flex-1 text-ink-500 tabular-nums">
+                          {livePoints.length} point{livePoints.length === 1 ? "" : "s"}…
+                        </span>
+                        <button className="btn btn-primary btn-xs" onClick={finishTrace}>Done</button>
+                        <button className="btn btn-secondary btn-xs" onClick={cancelTrace}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-[11.5px]">
+                        <span
+                          className="inline-block w-3 h-3 shrink-0 rounded-sm opacity-40"
+                          style={{ backgroundColor: TIER_COLORS.tower }}
+                        />
+                        <span className="flex-1 text-ink-500">
+                          {towerPolys.length === 0 ? "Tower — from setbacks" : `${towerPolys.length} tower${towerPolys.length === 1 ? "" : "s"} traced`}
+                        </span>
+                        <button
+                          className="btn btn-secondary btn-xs"
+                          onClick={() => startTierTrace("tower")}
+                          disabled={traceMode !== "idle"}
+                        >{towerPolys.length === 0 ? "Trace tower" : "+ Add tower"}</button>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
                     Click each corner on the drawing; click the first point (or Done) to close.
-                    The footprint must sit inside the plot for setbacks compliance — the app
-                    doesn&apos;t enforce it.
+                    Every traced tower gets its own volume in Massing, all sharing the tower floor
+                    count and height. The footprint must sit inside the plot for setbacks
+                    compliance — the app doesn&apos;t enforce it.
                   </p>
                 </StepBlock>
               )}
