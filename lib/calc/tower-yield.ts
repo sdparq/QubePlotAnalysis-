@@ -1,5 +1,5 @@
 import type { Project } from "../types";
-import { residentialGFATarget } from "./gfa";
+import { residentialSubQuota } from "./gfa";
 
 export interface TowerYieldResult {
   groundFootprintM2: number;
@@ -9,8 +9,11 @@ export interface TowerYieldResult {
   podiumCount: number;
   groundGFA: number;
   podiumGFA: number;
-  residentialGFA: number;
-  /** Floors the residential GFA needs on this tower footprint, unclamped. */
+  /** Apartments quota (residential GFA × apartments %) — the tower floors
+   *  hold the apartments, so THIS is what sizes the tower, not the full
+   *  residential GFA (amenities/services live in the podium/base). */
+  apartmentsGFA: number;
+  /** Floors the apartments GFA needs on this tower footprint, unclamped. */
   requiredTowerFloors: number;
   /** Optional zoning cap on tower floor count. */
   maxTowerFloors: number | null;
@@ -39,9 +42,9 @@ export function computeTowerYield(project: Project): TowerYieldResult {
 
   const groundGFA = groundFootprintM2 * groundCount;
   const podiumGFA = podiumFootprintM2 * podiumCount;
-  const residentialGFA = residentialGFATarget(project);
+  const apartmentsGFA = residentialSubQuota(project, "apartments");
 
-  const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(residentialGFA / towerFootprintM2) : 0;
+  const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(apartmentsGFA / towerFootprintM2) : 0;
   const maxTowerFloors = project.maxTowerFloors && project.maxTowerFloors > 0 ? project.maxTowerFloors : null;
   const towerFloors = maxTowerFloors !== null ? Math.min(requiredTowerFloors, maxTowerFloors) : requiredTowerFloors;
   const towerGFA = towerFootprintM2 * towerFloors;
@@ -55,13 +58,13 @@ export function computeTowerYield(project: Project): TowerYieldResult {
     podiumCount,
     groundGFA,
     podiumGFA,
-    residentialGFA,
+    apartmentsGFA,
     requiredTowerFloors,
     maxTowerFloors,
     towerFloors,
     towerGFA,
     exceedsMax,
     floorsShort: exceedsMax ? requiredTowerFloors - towerFloors : 0,
-    gfaShort: exceedsMax ? residentialGFA - towerGFA : 0,
+    gfaShort: exceedsMax ? apartmentsGFA - towerGFA : 0,
   };
 }

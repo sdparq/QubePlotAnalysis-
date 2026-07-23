@@ -75,7 +75,7 @@ export default function CommonAreasTab() {
   // / Massing — which all read project.typeFloors.count / project.numFloors
   // directly — pick up the derived value without their own copy of this calc.
   useEffect(() => {
-    if (yield_.towerFootprintM2 <= 0 || yield_.residentialGFA <= 0) return;
+    if (yield_.towerFootprintM2 <= 0 || yield_.apartmentsGFA <= 0) return;
     const nextCount = Math.max(1, yield_.towerFloors);
     const curHeight = project.typeFloors?.heightM ?? project.floorHeight;
     if ((project.typeFloors?.count ?? project.numFloors) === nextCount) return;
@@ -85,7 +85,7 @@ export default function CommonAreasTab() {
       floorHeight: curHeight > 0 ? curHeight : project.floorHeight,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yield_.towerFloors, yield_.towerFootprintM2, yield_.residentialGFA]);
+  }, [yield_.towerFloors, yield_.towerFootprintM2, yield_.apartmentsGFA]);
 
   function setFootprint(field: "groundFootprintM2" | "podiumFootprintM2" | "towerFootprintM2", v: number) {
     patch({ [field]: v > 0 ? v : undefined });
@@ -178,12 +178,13 @@ function TowerYieldCard({
   return (
     <div className="card">
       <div className="mb-4">
-        <h2 className="section-title">Tower floors · from residential GFA</h2>
+        <h2 className="section-title">Tower floors · from apartments GFA</h2>
         <p className="section-sub">
           Enter each tier's footprint as you know it from your own zoning study —
           it is not derived from the Massing plot (to avoid dragging tracing errors along). The
-          tower floor count comes from dividing the <strong>residential GFA</strong> by the{" "}
-          <strong>tower footprint</strong>; Ground and Podium are informative, to cross-check
+          tower floor count comes from dividing the <strong>apartments GFA</strong> (residential ×
+          apartments %) by the <strong>tower footprint</strong> — the tower holds the apartments;
+          amenities and services sit in the base; Ground and Podium are informative, to cross-check
           against Setup's retail/commercial.
         </p>
       </div>
@@ -224,7 +225,7 @@ function TowerYieldCard({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-        <Stat label="Residential GFA" value={y.residentialGFA > 0 ? `${fmt0(y.residentialGFA)} m²` : "—"} />
+        <Stat label="Apartments GFA" value={y.apartmentsGFA > 0 ? `${fmt0(y.apartmentsGFA)} m²` : "—"} sub="residential × apartments %" />
         <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
         <div className="border border-ink-200 bg-white p-3">
           <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>
@@ -258,9 +259,9 @@ function TowerYieldCard({
       {y.exceedsMax && (
         <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug">
           With the <strong>{y.maxTowerFloors}</strong>-floor cap only{" "}
-          <strong>{fmt0(y.towerGFA)} m²</strong> of the <strong>{fmt0(y.residentialGFA)} m²</strong> of
-          residential GFA fits — <strong>{fmt0(y.gfaShort)} m²</strong> short ({y.floorsShort} floor
-          {y.floorsShort === 1 ? "" : "s"}). Reduce the residential GFA in Setup, enlarge the tower
+          <strong>{fmt0(y.towerGFA)} m²</strong> of the <strong>{fmt0(y.apartmentsGFA)} m²</strong> of
+          apartments GFA fits — <strong>{fmt0(y.gfaShort)} m²</strong> short ({y.floorsShort} floor
+          {y.floorsShort === 1 ? "" : "s"}). Reduce the residential GFA in Setup, trim the apartments share, enlarge the tower
           footprint, or raise the floor cap if the plot genuinely allows it.
         </div>
       )}
