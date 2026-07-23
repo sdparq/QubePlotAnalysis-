@@ -176,6 +176,19 @@ export default function PlanTrace({
     }
   }, [parcel.imageDataUrl]);
 
+  // Layout width of the (untransformed) img — clientWidth ignores the CSS
+  // transform, so pxScale stays correct through zoom and window resizes.
+  const [layoutW, setLayoutW] = useState(0);
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
+    const measure = () => setLayoutW(img.clientWidth || 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(img);
+    return () => ro.disconnect();
+  }, [parcel.imageDataUrl]);
+
   function svgToImagePx(clientX: number, clientY: number): { x: number; y: number } | null {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -192,9 +205,12 @@ export default function PlanTrace({
   const cursor = spaceUI || dragging ? panCursor : mode === "idle" ? (zoom > 1 ? panCursor : "default") : "crosshair";
   const W = dims?.w ?? 0;
   const H = dims?.h ?? 0;
-  // Marker/stroke sizes divide by the zoom so they keep a constant SCREEN
-  // size — a zoomed-in corner stays clickable with a small, precise dot.
-  const Z = Math.max(1, zoom);
+  // All marker/stroke sizes are specified in SCREEN pixels and converted to
+  // viewBox units through the measured layout scale × zoom — dots and lines
+  // stay crisp and constant-size no matter how large the source PDF is or
+  // how far the user zooms.
+  const pxScale = layoutW > 0 && W > 0 ? (layoutW / W) * Math.max(1, zoom) : 1;
+  const px = (n: number) => n / pxScale;
 
   const tracePoints = tracePolygonPx ?? [];
   const liveVertexPath =
@@ -262,7 +278,7 @@ export default function PlanTrace({
                 points={tracePoints.map((p) => `${p.x},${p.y}`).join(" ")}
                 fill="rgba(100,125,87,0.15)"
                 stroke={edgeColors ? "none" : "#3f5135"}
-                strokeWidth={Math.max(1.2, W * 0.0015) / Z}
+                strokeWidth={px(1.6)}
               />
             )}
             {tracePoints.length >= 2 && tracePoints.map((p, i) => {
@@ -276,7 +292,7 @@ export default function PlanTrace({
                   x2={next.x}
                   y2={next.y}
                   stroke={color}
-                  strokeWidth={Math.max(1.6, W * 0.0022) / Z}
+                  strokeWidth={px(2.2)}
                   strokeLinecap="round"
                 />
               );
@@ -286,10 +302,10 @@ export default function PlanTrace({
                 key={`v-${i}`}
                 cx={p.x}
                 cy={p.y}
-                r={Math.max(3, W * 0.004) / Z}
+                r={px(4.5)}
                 fill={edgeColors?.[i] ?? "#3f5135"}
                 stroke="white"
-                strokeWidth={Math.max(0.8, W * 0.0008) / Z}
+                strokeWidth={px(1.2)}
               />
             ))}
 
@@ -301,19 +317,19 @@ export default function PlanTrace({
                     points={ep.points.map((p) => `${p.x},${p.y}`).join(" ")}
                     fill="none"
                     stroke={ep.color}
-                    strokeWidth={Math.max(1.6, W * 0.0022) / Z}
-                    strokeDasharray={`${(W * 0.008) / Z},${(W * 0.005) / Z}`}
+                    strokeWidth={px(2.2)}
+                    strokeDasharray={`${px(8)},${px(5)}`}
                   />
                   {ep.label && (
                     <text
                       x={ep.points.reduce((s, p) => s + p.x, 0) / ep.points.length}
                       y={ep.points.reduce((s, p) => s + p.y, 0) / ep.points.length}
                       textAnchor="middle"
-                      fontSize={(W * 0.016) / Z}
+                      fontSize={px(14)}
                       fontWeight="700"
                       fill={ep.color}
                       stroke="white"
-                      strokeWidth={(W * 0.002) / Z}
+                      strokeWidth={px(2.5)}
                       paintOrder="stroke"
                     >{ep.label}</text>
                   )}
@@ -327,8 +343,8 @@ export default function PlanTrace({
                 points={liveVertexPath.map((p) => `${p.x},${p.y}`).join(" ")}
                 fill="none"
                 stroke="#647d57"
-                strokeWidth={Math.max(1.2, W * 0.0015) / Z}
-                strokeDasharray={`${(W * 0.006) / Z},${(W * 0.004) / Z}`}
+                strokeWidth={px(2.4)}
+                strokeDasharray={`${px(7)},${px(4)}`}
               />
             )}
             {mode === "tracing" && livePoints?.map((p, i) => (
@@ -336,19 +352,19 @@ export default function PlanTrace({
                 key={`l-${i}`}
                 cx={p.x}
                 cy={p.y}
-                r={Math.max(4, W * 0.005) / Z}
+                r={i === 0 ? px(6.5) : px(5.5)}
                 fill={i === 0 ? "#a17e4c" : "#647d57"}
                 stroke="white"
-                strokeWidth={Math.max(0.8, W * 0.0008) / Z}
+                strokeWidth={px(1.5)}
               />
             ))}
 
             {/* Calibration markers */}
             {calibration && (
-              <CalibrationDisplay calibration={calibration} W={W} Z={Z} />
+              <CalibrationDisplay calibration={calibration} px={px} />
             )}
             {mode === "calibrating" && livePoints && livePoints.length > 0 && (
-              <CalibrationLive points={livePoints} hover={hoverPoint ?? null} W={W} Z={Z} />
+              <CalibrationLive points={livePoints} hover={hoverPoint ?? null} px={px} />
             )}
 
             {/* Candidates from auto-detect — clickable */}
@@ -360,7 +376,7 @@ export default function PlanTrace({
                   points={c.map((p) => `${p.x},${p.y}`).join(" ")}
                   fill={hovered ? "rgba(100,125,87,0.35)" : "rgba(100,125,87,0.10)"}
                   stroke={hovered ? "#3f5135" : "#647d57"}
-                  strokeWidth={Math.max(1.2, W * 0.0018) / Z}
+                  strokeWidth={px(2)}
                   style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -415,33 +431,32 @@ export default function PlanTrace({
 
 function CalibrationDisplay({
   calibration,
-  W,
-  Z = 1,
-}: { calibration: NonNullable<ParcelInfo["calibration"]>; W: number; Z?: number }) {
+  px,
+}: { calibration: NonNullable<ParcelInfo["calibration"]>; px: (n: number) => number }) {
   const { p1, p2, metres } = calibration;
   const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-  const r = Math.max(4, W * 0.005) / Z;
-  const sw = Math.max(1.2, W * 0.0015) / Z;
+  const r = px(5.5);
+  const sw = px(2);
   return (
     <g>
-      <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#a17e4c" strokeWidth={sw} strokeDasharray={`${(W * 0.005) / Z},${(W * 0.003) / Z}`} />
+      <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#a17e4c" strokeWidth={sw} strokeDasharray={`${px(6)},${px(4)}`} />
       <circle cx={p1.x} cy={p1.y} r={r} fill="#a17e4c" stroke="white" strokeWidth={sw * 0.7} />
       <circle cx={p2.x} cy={p2.y} r={r} fill="#a17e4c" stroke="white" strokeWidth={sw * 0.7} />
       <rect
-        x={mid.x - (W * 0.04) / Z}
-        y={mid.y - (W * 0.012) / Z}
-        width={(W * 0.08) / Z}
-        height={(W * 0.024) / Z}
+        x={mid.x - px(38)}
+        y={mid.y - px(12)}
+        width={px(76)}
+        height={px(24)}
         fill="#fff8e7"
         stroke="#a17e4c"
-        strokeWidth={(sw * 0.6)}
-        rx={2 / Z}
+        strokeWidth={sw * 0.6}
+        rx={px(2)}
       />
       <text
         x={mid.x}
-        y={mid.y + (W * 0.005) / Z}
+        y={mid.y + px(5)}
         textAnchor="middle"
-        fontSize={(W * 0.018) / Z}
+        fontSize={px(13)}
         fontWeight="600"
         fill="#574128"
       >{metres.toFixed(2)} m</text>
@@ -452,11 +467,10 @@ function CalibrationDisplay({
 function CalibrationLive({
   points,
   hover,
-  W,
-  Z = 1,
-}: { points: { x: number; y: number }[]; hover: { x: number; y: number } | null; W: number; Z?: number }) {
-  const r = Math.max(4, W * 0.005) / Z;
-  const sw = Math.max(1.2, W * 0.0015) / Z;
+  px,
+}: { points: { x: number; y: number }[]; hover: { x: number; y: number } | null; px: (n: number) => number }) {
+  const r = px(5.5);
+  const sw = px(2);
   const second = points.length === 1 ? hover : points[1];
   return (
     <g>
@@ -468,7 +482,7 @@ function CalibrationLive({
           y2={second.y}
           stroke="#a17e4c"
           strokeWidth={sw}
-          strokeDasharray={`${(W * 0.005) / Z},${(W * 0.003) / Z}`}
+          strokeDasharray={`${px(6)},${px(4)}`}
         />
       )}
       {points.map((p, i) => (
