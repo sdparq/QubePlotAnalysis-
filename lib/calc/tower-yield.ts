@@ -1,5 +1,5 @@
 import type { Project } from "../types";
-import { residentialSubQuota } from "./gfa";
+import { residentialGFATarget } from "./gfa";
 
 export interface TowerYieldResult {
   groundFootprintM2: number;
@@ -9,11 +9,11 @@ export interface TowerYieldResult {
   podiumCount: number;
   groundGFA: number;
   podiumGFA: number;
-  /** Apartments quota (residential GFA × apartments %) — the tower floors
-   *  hold the apartments, so THIS is what sizes the tower, not the full
-   *  residential GFA (amenities/services live in the podium/base). */
-  apartmentsGFA: number;
-  /** Floors the apartments GFA needs on this tower footprint, unclamped. */
+  /** Residential GFA that must land on the tower = residential target minus
+   *  the ground-floor surface (whatever the ground floor absorbs doesn't need
+   *  tower floors). */
+  towerTargetGFA: number;
+  /** Floors that towerTargetGFA needs on this tower footprint, unclamped. */
   requiredTowerFloors: number;
   /** Optional zoning cap on tower floor count. */
   maxTowerFloors: number | null;
@@ -42,9 +42,9 @@ export function computeTowerYield(project: Project): TowerYieldResult {
 
   const groundGFA = groundFootprintM2 * groundCount;
   const podiumGFA = podiumFootprintM2 * podiumCount;
-  const apartmentsGFA = residentialSubQuota(project, "apartments");
+  const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA);
 
-  const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(apartmentsGFA / towerFootprintM2) : 0;
+  const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(towerTargetGFA / towerFootprintM2) : 0;
   const maxTowerFloors = project.maxTowerFloors && project.maxTowerFloors > 0 ? project.maxTowerFloors : null;
   const towerFloors = maxTowerFloors !== null ? Math.min(requiredTowerFloors, maxTowerFloors) : requiredTowerFloors;
   const towerGFA = towerFootprintM2 * towerFloors;
@@ -58,13 +58,13 @@ export function computeTowerYield(project: Project): TowerYieldResult {
     podiumCount,
     groundGFA,
     podiumGFA,
-    apartmentsGFA,
+    towerTargetGFA,
     requiredTowerFloors,
     maxTowerFloors,
     towerFloors,
     towerGFA,
     exceedsMax,
     floorsShort: exceedsMax ? requiredTowerFloors - towerFloors : 0,
-    gfaShort: exceedsMax ? apartmentsGFA - towerGFA : 0,
+    gfaShort: exceedsMax ? towerTargetGFA - towerGFA : 0,
   };
 }

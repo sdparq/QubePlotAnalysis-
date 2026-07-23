@@ -6,14 +6,6 @@ function baseProject() {
   const p = emptyProject("Test");
   p.targetGFA = 10000;
   p.gfaBreakdown = { residential: { mode: "absolute", value: 8000 } };
-  // Apartments at 100% so apartmentsGFA === residentialGFA and the round
-  // numbers below stay round. The apartments-share semantic has its own test.
-  p.residentialBreakdown = {
-    apartments: { pct: 100, countsAsGFA: true },
-    amenities: { pct: 0, countsAsGFA: true },
-    circulation: { pct: 0, countsAsGFA: true },
-    services: { pct: 0, countsAsGFA: true },
-  };
   return p;
 }
 
@@ -25,30 +17,35 @@ describe("computeTowerYield", () => {
     expect(r.exceedsMax).toBe(false);
   });
 
-  it("derives tower floors from apartments GFA ÷ tower footprint", () => {
+  it("derives tower floors from (residential − ground) ÷ tower footprint", () => {
     const p = baseProject();
     p.towerFootprintM2 = 500;
     const r = computeTowerYield(p);
-    expect(r.apartmentsGFA).toBe(8000);
+    expect(r.towerTargetGFA).toBe(8000); // no ground plate set
     expect(r.requiredTowerFloors).toBe(16); // 8000 / 500
     expect(r.towerFloors).toBe(16);
     expect(r.towerGFA).toBe(8000);
     expect(r.exceedsMax).toBe(false);
   });
 
-  it("sizes the tower from the APARTMENTS quota, not the full residential GFA", () => {
+  it("subtracts the ground-floor surface from the residential GFA", () => {
     const p = baseProject();
     p.towerFootprintM2 = 500;
-    // Apartments = 100 − 10 − 10 = 80% → 6,400 m² of the 8,000 residential.
-    p.residentialBreakdown = {
-      apartments: { pct: 80, countsAsGFA: true },
-      amenities: { pct: 10, countsAsGFA: true },
-      circulation: { pct: 10, countsAsGFA: true },
-      services: { pct: 10, countsAsGFA: true },
-    };
+    p.groundFootprintM2 = 1000;
+    p.ground = { count: 1, heightM: 4.5 };
     const r = computeTowerYield(p);
-    expect(r.apartmentsGFA).toBeCloseTo(6400, 5);
-    expect(r.requiredTowerFloors).toBe(12); // floor(6400 / 500) = 12
+    expect(r.towerTargetGFA).toBe(7000); // 8000 − 1×1000
+    expect(r.requiredTowerFloors).toBe(14); // floor(7000 / 500)
+  });
+
+  it("never goes negative when the ground floor exceeds the residential GFA", () => {
+    const p = baseProject();
+    p.towerFootprintM2 = 500;
+    p.groundFootprintM2 = 9000;
+    p.ground = { count: 1, heightM: 4.5 };
+    const r = computeTowerYield(p);
+    expect(r.towerTargetGFA).toBe(0);
+    expect(r.requiredTowerFloors).toBe(0);
   });
 
   it("floors (doesn't round up) partial floors", () => {
