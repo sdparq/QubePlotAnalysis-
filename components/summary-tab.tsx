@@ -1,14 +1,8 @@
 "use client";
 import { useMemo } from "react";
 import { useProject } from "@/lib/store";
-import {
-  hospitalityGFA,
-  residentialSubPct,
-  residentialSubQuota,
-  residentialGFATarget,
-} from "@/lib/calc/gfa";
+import { computeAreas } from "@/lib/calc/areas";
 import { computeProgram } from "@/lib/calc/program";
-import { computeTowerYield } from "@/lib/calc/tower-yield";
 import { type GfaUseCategory } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
@@ -34,20 +28,21 @@ const OTHER_USES: { key: GfaUseCategory; label: string }[] = [
 export default function SummaryTab() {
   const project = useProject();
 
-  const target = project.targetGFA ?? 0;
-
-  // ── Residential breakdown (hospitality rolls into it) ──────────────────
-  const residentialGfaTotal = useMemo(() => residentialGFATarget(project), [project]);
-  const hospitalityM2 = useMemo(() => hospitalityGFA(project), [project]);
+  const a = useMemo(() => computeAreas(project), [project]);
   const program = useMemo(() => computeProgram(project), [project]);
-  const yield_ = useMemo(() => computeTowerYield(project), [project]);
 
-  // ── Other uses (no sub-breakdown today → BUA = GFA) ─────────────────────
-  function useM2(key: GfaUseCategory): number {
-    const item = project.gfaBreakdown?.[key];
-    if (!item) return 0;
-    return item.mode === "absolute" ? item.value : (item.value / 100) * target;
-  }
+  const target = a.targetGFA;
+  const residentialGfaTotal = a.residentialGFA;
+  const hospitalityM2 = a.hospitalityGFA;
+  const retailM2 = a.retailGFA;
+  const totalGFA = a.totalGFA;
+  const aptPct = a.apartmentsPct;
+  const aptInteriorBUA = a.apartmentsInterior;
+  const balconyShare = a.balconyShare;
+  const balconiesBUA = a.balconies;
+  const gsaTotal = a.gsaTotal;
+  const constructionBUA = a.constructionBUA;
+
   function useFormula(key: GfaUseCategory): string {
     const item = project.gfaBreakdown?.[key];
     if (!item) return "";
@@ -55,44 +50,11 @@ export default function SummaryTab() {
       ? "entered in Setup (absolute m²)"
       : `${item.value}% × Target GFA ${fmt0(target)} m²`;
   }
-  const otherUses = OTHER_USES.map((u) => ({ ...u, gfa: useM2(u.key), formula: useFormula(u.key) }))
-    .filter((u) => u.gfa > 0);
-  const otherUsesGFA = otherUses.reduce((s, u) => s + u.gfa, 0);
-
-  const totalGFA = residentialGfaTotal + otherUsesGFA;
-
-  // ── Construction BUA (headline total; composition stays internal) ───────
-  // Residential quotas, each a % of the residential GFA (Distribution tab).
-  const aptPct = residentialSubPct(project, "apartments");
-  const aptInteriorBUA = residentialSubQuota(project, "apartments");
-  const amenitiesBUA = residentialSubQuota(project, "amenities");
-  const circulationBUA = residentialSubQuota(project, "circulation");
-  const servicesBUA = residentialSubQuota(project, "services");
-
-  // Balconies ride on the apartments quota at the balcony share measured in
-  // the Apartments matrix (Σ balconies / Σ interiors of the placed units).
-  const balconyShare = program.totalInteriorGFA > 0 ? program.totalBalcony / program.totalInteriorGFA : 0;
-  const balconiesBUA = aptInteriorBUA * balconyShare;
-
-  // Ground + podium shell: floor counts from Setup × the floor-plate areas
-  // entered in Distribution. Falls back to the non-residential use GFA when
-  // no footprints are set (those uses live in the ground/podium levels).
-  const groundPodiumShell = yield_.groundGFA + yield_.podiumGFA;
-  const groundPodiumBUA = groundPodiumShell > 0 ? groundPodiumShell : otherUsesGFA;
-
-  // Basements: levels from Setup × footprint (Parking override, else plot area).
-  const basementCount = project.basements?.count ?? 0;
-  const basementFootprint = project.basementFootprintM2 ?? project.plotArea ?? 0;
-  const basementsBUA = basementCount * basementFootprint;
-
-  const constructionBUA =
-    aptInteriorBUA + balconiesBUA + amenitiesBUA + circulationBUA + servicesBUA + groundPodiumBUA + basementsBUA;
-
-  // ── GSA (sellable) ──────────────────────────────────────────────────────
-  // Retail is sellable/leasable stock too — it joins the residential
-  // apartments + balconies in the GSA.
-  const retailM2 = useM2("retail");
-  const gsaTotal = aptInteriorBUA + balconiesBUA + retailM2;
+  const otherUses = OTHER_USES.map((u) => ({
+    ...u,
+    gfa: u.key === "retail" ? a.retailGFA : a.commercialGFA,
+    formula: useFormula(u.key),
+  })).filter((u) => u.gfa > 0);
 
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
 
@@ -241,7 +203,21 @@ export default function SummaryTab() {
         <DerivBlock title="BUA total (construction)">
           <DerivRow
             label="Σ BUA total (construction)"
-            formula="apartments interior + balconies + amenities + circulation + services + ground floor/podium + basements"
+            formula={
+              "residential sellable " +
+              fmt0(a.gsaResidential) +
+              (a.retailGFA > 0 ? " + retail " + fmt0(a.retailGFA) : "") +
+              (a.commercialGFA > 0 ? " + commercial " + fmt0(a.commercialGFA) : "") +
+              " + amenities " + fmt0(a.amenities) +
+              " + circulation " + fmt0(a.circulation) +
+              " + services " + fmt0(a.services) +
+              " + ground/podium parking " + fmt0(a.groundPodiumParking) +
+              " + basements " + fmt0(a.basementsNet) +
+              (a.parkingSurplus > 0
+                ? " (" + fmt0(a.basementSurface) + " built − " + fmt0(a.parkingSurplus) + " surplus parking)"
+                : "") +
+              " m²"
+            }
             m2={constructionBUA}
             total
           />

@@ -10,15 +10,8 @@ import { createPortal } from "react-dom";
 import { useProject } from "@/lib/store";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone } from "@/lib/zone-classes";
+import { computeAreas } from "@/lib/calc/areas";
 import { computeProgram } from "@/lib/calc/program";
-import { computeTowerYield } from "@/lib/calc/tower-yield";
-import {
-  hospitalityGFA,
-  residentialSubPct,
-  residentialSubQuota,
-  residentialGFATarget,
-} from "@/lib/calc/gfa";
-import type { GfaUseCategory } from "@/lib/types";
 
 const M2_TO_SQFT = 10.7639;
 const fmt0 = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—");
@@ -70,38 +63,22 @@ function ReportDocument() {
 
   const detectedClass = useMemo(() => classForZone(project.zone, library), [project.zone, library]);
   const program = useMemo(() => computeProgram(project), [project]);
-  const yield_ = useMemo(() => computeTowerYield(project), [project]);
 
-  const target = project.targetGFA ?? 0;
-  const resGFA = residentialGFATarget(project);
-  const hospM2 = hospitalityGFA(project);
-
-  function useM2(key: GfaUseCategory): number {
-    const item = project.gfaBreakdown?.[key];
-    if (!item) return 0;
-    return item.mode === "absolute" ? item.value : (item.value / 100) * target;
-  }
-  const retailM2 = useM2("retail");
-  const commercialM2 = useM2("commercial");
-  const totalGFA = resGFA + retailM2 + commercialM2;
-
-  // Same arithmetic as the Areas Summary tab.
-  const aptPct = residentialSubPct(project, "apartments");
-  const aptInterior = residentialSubQuota(project, "apartments");
-  const amenitiesBUA = residentialSubQuota(project, "amenities");
-  const circulationBUA = residentialSubQuota(project, "circulation");
-  const servicesBUA = residentialSubQuota(project, "services");
-  const balconyShare = program.totalInteriorGFA > 0 ? program.totalBalcony / program.totalInteriorGFA : 0;
-  const balconiesBUA = aptInterior * balconyShare;
-  const groundPodiumShell = yield_.groundGFA + yield_.podiumGFA;
-  const groundPodiumBUA = groundPodiumShell > 0 ? groundPodiumShell : retailM2 + commercialM2;
+  const a = useMemo(() => computeAreas(project), [project]);
+  const target = a.targetGFA;
+  const resGFA = a.residentialGFA;
+  const hospM2 = a.hospitalityGFA;
+  const retailM2 = a.retailGFA;
+  const commercialM2 = a.commercialGFA;
+  const totalGFA = a.totalGFA;
+  const aptPct = a.apartmentsPct;
+  const aptInterior = a.apartmentsInterior;
+  const balconyShare = a.balconyShare;
+  const balconiesBUA = a.balconies;
+  const constructionBUA = a.constructionBUA;
+  const gsa = a.gsaTotal;
   const basementCount = project.basements?.count ?? 0;
   const basementFootprint = project.basementFootprintM2 ?? project.plotArea ?? 0;
-  const basementsBUA = basementCount * basementFootprint;
-  const constructionBUA =
-    aptInterior + balconiesBUA + amenitiesBUA + circulationBUA + servicesBUA + groundPodiumBUA + basementsBUA;
-  // Retail is sellable stock too — same convention as the Areas Summary tab.
-  const gsa = aptInterior + balconiesBUA + retailM2;
 
   const groundCount = project.ground?.count ?? 1;
   const podiumCount = project.podium?.count ?? 0;
@@ -207,7 +184,10 @@ function ReportDocument() {
           head={["Construction BUA", "m²", "sqft"]}
           right={[1, 2]}
           rows={[[
-            "Apartments + balconies + amenities + circulation + services + ground/podium shell + basements",
+            "Residential sellable + retail" +
+              (a.commercialGFA > 0 ? " + commercial" : "") +
+              " + amenities + circulation + services + ground/podium parking + basements" +
+              (a.parkingSurplus > 0 ? " (less surplus parking)" : ""),
             fmt0(constructionBUA),
             fmt0(constructionBUA * M2_TO_SQFT),
           ]]}
