@@ -17,7 +17,7 @@ describe("computeTowerYield", () => {
     expect(r.exceedsMax).toBe(false);
   });
 
-  it("derives tower floors from (residential − ground) ÷ tower footprint", () => {
+  it("derives tower floors from (residential − ground − podium) ÷ tower footprint", () => {
     const p = baseProject();
     p.towerFootprintM2 = 500;
     const r = computeTowerYield(p);
@@ -36,6 +36,18 @@ describe("computeTowerYield", () => {
     const r = computeTowerYield(p);
     expect(r.towerTargetGFA).toBe(7000); // 8000 − 1×1000
     expect(r.requiredTowerFloors).toBe(14); // floor(7000 / 500)
+  });
+
+  it("subtracts the podium surface too, when there is one", () => {
+    const p = baseProject();
+    p.towerFootprintM2 = 500;
+    p.groundFootprintM2 = 1000;
+    p.podiumFootprintM2 = 900;
+    p.ground = { count: 1, heightM: 4.5 };
+    p.podium = { count: 2, heightM: 4.0 };
+    const r = computeTowerYield(p);
+    expect(r.towerTargetGFA).toBe(5200); // 8000 − 1,000 − 2×900
+    expect(r.requiredTowerFloors).toBe(10); // floor(5200 / 500)
   });
 
   it("never goes negative when the ground floor exceeds the residential GFA", () => {

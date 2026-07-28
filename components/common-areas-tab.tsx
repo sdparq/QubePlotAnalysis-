@@ -178,13 +178,13 @@ function TowerYieldCard({
   return (
     <div className="card">
       <div className="mb-4">
-        <h2 className="section-title">Tower floors · residential GFA − ground floor</h2>
+        <h2 className="section-title">Tower floors · residential GFA − ground − podium</h2>
         <p className="section-sub">
           Enter each tier's footprint as you know it from your own zoning study —
           it is not derived from the Massing plot (to avoid dragging tracing errors along). The
           tower floor count comes from dividing the residential GFA <strong>minus the ground-floor
-          surface</strong> by the <strong>tower footprint</strong> — what the ground floor absorbs
-          doesn&apos;t need tower floors; Ground and Podium are informative, to cross-check
+          and podium surfaces</strong> by the <strong>tower footprint</strong> — what the base
+          absorbs doesn&apos;t need tower floors; Ground and Podium are informative, to cross-check
           against Setup's retail/commercial.
         </p>
       </div>
@@ -225,7 +225,7 @@ function TowerYieldCard({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-        <Stat label="GFA to tower" value={y.towerTargetGFA > 0 ? `${fmt0(y.towerTargetGFA)} m²` : "—"} sub={y.groundGFA > 0 ? `residential − ground ${fmt0(y.groundGFA)} m²` : "residential (no ground plate set)"} />
+        <Stat label="GFA to tower" value={y.towerTargetGFA > 0 ? `${fmt0(y.towerTargetGFA)} m²` : "—"} sub={y.groundGFA + y.podiumGFA > 0 ? `residential − ground ${fmt0(y.groundGFA)} − podium ${fmt0(y.podiumGFA)} m²` : "residential (no ground/podium plates set)"} />
         <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
         <div className="border border-ink-200 bg-white p-3">
           <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>

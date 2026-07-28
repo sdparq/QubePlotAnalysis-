@@ -10,8 +10,8 @@ export interface TowerYieldResult {
   groundGFA: number;
   podiumGFA: number;
   /** Residential GFA that must land on the tower = residential target minus
-   *  the ground-floor surface (whatever the ground floor absorbs doesn't need
-   *  tower floors). */
+   *  the ground-floor AND podium surfaces (whatever the base absorbs doesn't
+   *  need tower floors). */
   towerTargetGFA: number;
   /** Floors that towerTargetGFA needs on this tower footprint, unclamped. */
   requiredTowerFloors: number;
@@ -42,7 +42,7 @@ export function computeTowerYield(project: Project): TowerYieldResult {
 
   const groundGFA = groundFootprintM2 * groundCount;
   const podiumGFA = podiumFootprintM2 * podiumCount;
-  const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA);
+  const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA - podiumGFA);
 
   const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(towerTargetGFA / towerFootprintM2) : 0;
   const maxTowerFloors = project.maxTowerFloors && project.maxTowerFloors > 0 ? project.maxTowerFloors : null;
