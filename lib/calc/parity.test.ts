@@ -33,7 +33,9 @@ describe("Production City — parity vs Excel", () => {
 
   it("lifts (Dubai Building Code D.8.8) compute population", () => {
     expect(r.lifts.totalPopulation).toBeCloseTo(682.5, 1);
-    expect(r.lifts.occupiedFloors).toBe(8);
+    // 8 tower type floors + 1 ground (default) + 0 podium — D.8.8 counts every
+    // floor the lifts serve above ground, not just the tower stack.
+    expect(r.lifts.occupiedFloors).toBe(9);
     expect(r.lifts.liftsRecommended).toBeGreaterThanOrEqual(0);
     expect(r.lifts.governing).toMatch(/D\.8\.8|VT Consultant/);
   });

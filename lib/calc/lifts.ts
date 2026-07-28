@@ -256,10 +256,13 @@ export function computeLifts(project: Project): LiftsResult {
   const totalUnits = byFloor.reduce((s, f) => s + f.units, 0);
   const totalPopulation = byFloor.reduce((s, f) => s + f.population, 0);
 
-  const occupiedFloors = project.numFloors; // residential type floors
   const basementCount = project.basements?.count ?? 0;
   const groundCount = project.ground?.count ?? 1;
   const podiumCount = project.podium?.count ?? 0;
+  // D.8.8 "occupied floors" = every floor the lifts serve ABOVE ground level:
+  // ground + podium + tower type floors. Counting only the tower under-read
+  // the D.13 row on podium buildings and returned too few lifts.
+  const occupiedFloors = Math.max(1, project.numFloors + groundCount + podiumCount);
   const defaultBoardingFloors = basementCount + groundCount + podiumCount;
   const boardingFloors = project.dbcBoardingFloors ?? Math.max(1, defaultBoardingFloors);
 

@@ -110,7 +110,10 @@ export function computeParking(project: Project): ParkingResult {
     name: u.name,
     netArea: u.netArea,
     ratio: u.spacesPer100sqm,
-    required: (u.netArea * u.spacesPer100sqm) / 100,
+    required:
+      u.exactSpaces !== undefined && u.exactSpaces > 0
+        ? Math.round(u.exactSpaces)
+        : (u.netArea * u.spacesPer100sqm) / 100,
   }));
   const otherUsesTotal = otherUsesRequired.reduce((s, r) => s + r.required, 0);
 

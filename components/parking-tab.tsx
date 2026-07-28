@@ -72,7 +72,10 @@ export default function ParkingTab() {
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
             <h2 className="section-title">Other uses (optional)</h2>
-            <p className="section-sub">F&amp;B, clinics, offices, etc. with their own parking ratio per 100 m².</p>
+            <p className="section-sub">
+              F&amp;B, clinics, offices, etc. — either area × ratio per 100 m², or type an{" "}
+              <strong>exact number of spaces</strong> (it overrides the ratio for that row).
+            </p>
           </div>
           <button className="btn btn-secondary btn-xs" onClick={() => upsertU({ id: `ou-${Date.now()}`, name: "New use", netArea: 0, spacesPer100sqm: 0 })}>+ Add other use</button>
         </div>
@@ -80,9 +83,10 @@ export default function ParkingTab() {
           <table className="tbl w-full table-fixed">
             <colgroup>
               <col />
+              <col style={{ width: 120 }} />
               <col style={{ width: 130 }} />
-              <col style={{ width: 150 }} />
-              <col style={{ width: 110 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 100 }} />
               <col style={{ width: 80 }} />
             </colgroup>
             <thead>
@@ -90,23 +94,57 @@ export default function ParkingTab() {
                 <th>Use</th>
                 <th className="text-right">Net area (m²)</th>
                 <th className="text-right">Spaces / 100 m²</th>
+                <th className="text-right">Exact spaces</th>
                 <th className="text-right">Required</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {project.otherUses.length === 0 && (
-                <tr><td colSpan={5} className="italic text-ink-500 text-center py-4">No other uses defined.</td></tr>
+                <tr><td colSpan={6} className="italic text-ink-500 text-center py-4">No other uses defined.</td></tr>
               )}
-              {project.otherUses.map((u: OtherUse) => (
-                <tr key={u.id}>
-                  <td className="cell-edit"><input className="cell-input" value={u.name} onChange={(e) => upsertU({ ...u, name: e.target.value })} /></td>
-                  <td className="cell-edit"><input type="number" step={0.01} className="cell-input text-right" value={u.netArea} onChange={(e) => upsertU({ ...u, netArea: parseFloat(e.target.value) || 0 })} /></td>
-                  <td className="cell-edit"><input type="number" step={0.1} className="cell-input text-right" value={u.spacesPer100sqm} onChange={(e) => upsertU({ ...u, spacesPer100sqm: parseFloat(e.target.value) || 0 })} /></td>
-                  <td className="text-right">{(u.netArea * u.spacesPer100sqm / 100).toFixed(1)}</td>
-                  <td className="text-right"><button className="btn btn-danger btn-xs" onClick={() => removeU(u.id)}>Delete</button></td>
-                </tr>
-              ))}
+              {project.otherUses.map((u: OtherUse) => {
+                const exact = u.exactSpaces !== undefined && u.exactSpaces > 0;
+                const required = exact ? Math.round(u.exactSpaces!) : (u.netArea * u.spacesPer100sqm) / 100;
+                return (
+                  <tr key={u.id}>
+                    <td className="cell-edit"><input className="cell-input" value={u.name} onChange={(e) => upsertU({ ...u, name: e.target.value })} /></td>
+                    <td className="cell-edit">
+                      <input
+                        type="number" step={0.01} min={0}
+                        className={`cell-input text-right ${exact ? "opacity-40" : ""}`}
+                        value={u.netArea}
+                        onChange={(e) => upsertU({ ...u, netArea: parseFloat(e.target.value) || 0 })}
+                        title={exact ? "Ignored — this row uses the exact space count" : undefined}
+                      />
+                    </td>
+                    <td className="cell-edit">
+                      <input
+                        type="number" step={0.1} min={0}
+                        className={`cell-input text-right ${exact ? "opacity-40" : ""}`}
+                        value={u.spacesPer100sqm}
+                        onChange={(e) => upsertU({ ...u, spacesPer100sqm: parseFloat(e.target.value) || 0 })}
+                        title={exact ? "Ignored — this row uses the exact space count" : undefined}
+                      />
+                    </td>
+                    <td className="cell-edit">
+                      <input
+                        type="number" step={1} min={0}
+                        className="cell-input text-right"
+                        value={u.exactSpaces ?? ""}
+                        placeholder="—"
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value);
+                          upsertU({ ...u, exactSpaces: Number.isFinite(n) && n > 0 ? Math.round(n) : undefined });
+                        }}
+                        title="Type an exact number of spaces for this use — overrides area × ratio"
+                      />
+                    </td>
+                    <td className={`text-right ${exact ? "font-medium text-qube-800" : ""}`}>{exact ? required : required.toFixed(1)}</td>
+                    <td className="text-right"><button className="btn btn-danger btn-xs" onClick={() => removeU(u.id)}>Delete</button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

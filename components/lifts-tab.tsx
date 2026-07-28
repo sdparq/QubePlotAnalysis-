@@ -34,7 +34,7 @@ export default function LiftsTab() {
           <Kpi
             label="Occupied floors"
             value={`${r.occupiedFloors}`}
-            sub="Type / residential floors"
+            sub={`${groundCount}G + ${podiumCount}P + tower — all floors served above ground`}
           />
           <Kpi
             label="Boarding floors"

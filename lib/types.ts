@@ -54,6 +54,9 @@ export interface OtherUse {
   name: string;
   netArea: number;
   spacesPer100sqm: number;
+  /** When set (> 0), this EXACT space count is the requirement for the row —
+   *  netArea × ratio is ignored. */
+  exactSpaces?: number;
 }
 
 export interface LiftsConfig {
