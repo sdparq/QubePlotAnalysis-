@@ -89,7 +89,10 @@ export default function SummaryTab() {
     aptInteriorBUA + balconiesBUA + amenitiesBUA + circulationBUA + servicesBUA + groundPodiumBUA + basementsBUA;
 
   // ── GSA (sellable) ──────────────────────────────────────────────────────
-  const gsaTotal = aptInteriorBUA + balconiesBUA;
+  // Retail is sellable/leasable stock too — it joins the residential
+  // apartments + balconies in the GSA.
+  const retailM2 = useM2("retail");
+  const gsaTotal = aptInteriorBUA + balconiesBUA + retailM2;
 
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
 
@@ -212,7 +215,19 @@ export default function SummaryTab() {
             }
             m2={balconiesBUA}
           />
-          <DerivRow label="GSA total" formula="apartments interior + balconies" m2={gsaTotal} total />
+          {retailM2 > 0 && (
+            <DerivRow
+              label="Retail (sellable)"
+              formula="Retail GFA from Setup — leasable/sellable stock"
+              m2={retailM2}
+            />
+          )}
+          <DerivRow
+            label="GSA total"
+            formula={retailM2 > 0 ? "apartments interior + balconies + retail" : "apartments interior + balconies"}
+            m2={gsaTotal}
+            total
+          />
           {program.totalSellable > 0 && (
             <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
               Cross-check: the Apartments matrix currently places {program.totalUnits} units ={" "}
