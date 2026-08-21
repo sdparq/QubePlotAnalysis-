@@ -69,7 +69,17 @@ export function typologyUnitShare(
 export interface AutoFillResult {
   cells: ProgramCell[];
   totalUnits: number;
-  perTypology: Array<{ typology: Typology; units: number; allocatedGFA: number; sameCat: number }>;
+  perTypology: Array<{
+    typology: Typology;
+    units: number;
+    allocatedGFA: number;
+    sameCat: number;
+    /** EFFECTIVE share of total units for this typology (0..100) — the
+     *  per-typology override when set, else its slice of the category's
+     *  class share. This is what the UI must display; reading the category
+     *  mix directly shows the class default and hides the override. */
+    unitSharePct: number;
+  }>;
 }
 
 /** Pure computation of the Apartments matrix from a project + a resolved
@@ -105,6 +115,7 @@ export function computeProgramAutoFill(
       units,
       allocatedGFA: units * r.typology.internalArea,
       sameCat: r.sameCat,
+      unitSharePct: r.unitShare * 100,
     };
   });
 

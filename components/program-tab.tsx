@@ -248,7 +248,8 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
         <div className="flex-1 min-w-[260px]">
           <div className="eyebrow text-qube-800 text-[10px]">Auto-fill from class mix</div>
           <p className="text-[12px] text-ink-700 mt-1 leading-snug">
-            Distributes units across the matrix using class {letter}&apos;s typology mix and
+            Distributes units across the matrix using the project&apos;s unit mix (class {letter}&apos;s
+            defaults plus any per-typology override from Typologies) and
             the <strong>Apartments GFA</strong> from Setup as the target. After applying,
             <em> Σ count × Interior</em> in Program should equal the Apartments GFA target.
           </p>
@@ -324,9 +325,9 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
                 </thead>
                 <tbody>
                   {targets.map((x) => {
-                    const k = TYPOLOGY_KEYS.find((kk) => CATEGORY_FOR_TYPOLOGY_KEY[kk] === x.typology.category);
-                    const pct = k ? mix[k] : 0;
-                    const sharePct = pct / x.sameCat;
+                    // Effective share straight from the auto-fill — includes any
+                    // per-typology override set in Typologies → Unit mix.
+                    const sharePct = x.unitSharePct / 100;
                     return (
                       <tr key={x.typology.id} className="border-t border-qube-200/60">
                         <td className="py-1 text-ink-900">{x.typology.name}</td>
