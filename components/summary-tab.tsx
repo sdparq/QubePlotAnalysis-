@@ -165,15 +165,19 @@ export default function SummaryTab() {
         <DerivBlock title="GSA total (sellable) — how it's built">
           <DerivRow
             label="Apartments interior"
-            formula={`Residential GFA ${fmt0(residentialGfaTotal)} m² × ${aptPct.toFixed(1)}% apartments`}
+            formula={
+              a.usesMatrix
+                ? `Σ of the ${fmt0(a.matrixUnits)} units placed in the Apartments matrix`
+                : `Residential GFA ${fmt0(residentialGfaTotal)} m² × ${aptPct.toFixed(1)}% apartments (matrix empty)`
+            }
             m2={aptInteriorBUA}
           />
           <DerivRow
             label="Balconies"
             formula={
-              balconyShare > 0
-                ? `× ${(balconyShare * 100).toFixed(1)}% balcony share from the Apartments matrix`
-                : "0 — fill the Apartments matrix to measure the balcony share"
+              a.usesMatrix
+                ? `Σ of the placed units' balconies — ${(balconyShare * 100).toFixed(1)}% of interior`
+                : "0 — fill the Apartments matrix to measure the balconies"
             }
             m2={balconiesBUA}
           />
@@ -190,11 +194,23 @@ export default function SummaryTab() {
             m2={gsaTotal}
             total
           />
-          {program.totalSellable > 0 && (
+          {a.usesMatrix && Math.abs(a.apartmentsDrift) > Math.max(1, a.apartmentsQuota * 0.01) && (
+            <p className="text-[10.5px] text-amber-800 px-3 py-1.5 leading-snug border-t border-ink-100">
+              ⚠ The matrix holds {fmt0(a.apartmentsInterior)} m² of interior against the{" "}
+              {fmt0(a.apartmentsQuota)} m² Apartments GFA target from Distribution —{" "}
+              <strong>
+                {a.apartmentsDrift > 0 ? "+" : ""}{fmt0(a.apartmentsDrift)} m² (
+                {((a.apartmentsDrift / a.apartmentsQuota) * 100).toFixed(1)}%)
+              </strong>
+              . These figures follow the matrix (what you actually have). Run{" "}
+              <em>Apartments → Apply to N floors</em> to realign it with the target.
+            </p>
+          )}
+          {a.usesMatrix && Math.abs(a.apartmentsDrift) <= Math.max(1, a.apartmentsQuota * 0.01) && (
             <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
-              Cross-check: the Apartments matrix currently places {program.totalUnits} units ={" "}
-              {fmt0(program.totalSellable)} m² sellable ({fmt0(program.totalInteriorGFA)} m² interior +{" "}
-              {fmt0(program.totalBalcony)} m² balconies).
+              Matches the Apartments tab: {fmt0(a.matrixUnits)} units ={" "}
+              {fmt0(program.totalSellable)} m² sellable. Apartments GFA target from Distribution:{" "}
+              {fmt0(a.apartmentsQuota)} m².
             </p>
           )}
         </DerivBlock>

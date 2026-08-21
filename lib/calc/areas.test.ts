@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeAreas } from "./areas";
 import { computeParking } from "./parking";
+import { computeProgram } from "./program";
 import { emptyProject } from "../sample";
 import type { Project } from "../types";
 
@@ -89,7 +90,7 @@ describe("computeAreas", () => {
     expect(r.constructionBUA).toBeGreaterThan(0);
   });
 
-  it("adds balconies from the Apartments matrix to the residential sellable", () => {
+  it("reports the ACTUAL matrix once units are placed, so it matches Apartments", () => {
     const p = baseProject();
     p.typologies = [
       { id: "t1", name: "2BR", category: "2BR", internalArea: 100, balconyArea: 20, occupancy: 3, parkingPerUnit: 1 },
@@ -100,8 +101,25 @@ describe("computeAreas", () => {
       { floor: 2, typologyId: "t1", count: 5 },
     ];
     const r = computeAreas(p);
-    expect(r.balconyShare).toBeCloseTo(0.2, 5); // 200 balcony ÷ 1,000 interior
-    expect(r.balconies).toBeCloseTo(13350 * 0.2, 5);
-    expect(r.gsaResidential).toBeCloseTo(13350 * 1.2, 5);
+    const matrix = computeProgram(p);
+
+    expect(r.usesMatrix).toBe(true);
+    expect(r.apartmentsInterior).toBeCloseTo(matrix.totalInteriorGFA, 5); // 1,000 m²
+    expect(r.balconies).toBeCloseTo(matrix.totalBalcony, 5); // 200 m²
+    // The headline sellable must equal what the Apartments tab shows (+ retail).
+    expect(r.gsaResidential).toBeCloseTo(matrix.totalSellable, 5);
+    expect(r.gsaTotal).toBeCloseTo(matrix.totalSellable + 2000, 5);
+    // …and the drift against the Distribution quota is reported, not hidden.
+    expect(r.apartmentsQuota).toBeCloseTo(13350, 5);
+    expect(r.apartmentsDrift).toBeCloseTo(1000 - 13350, 5);
+    expect(r.matrixUnits).toBe(10);
+  });
+
+  it("falls back to the Distribution quota while the matrix is empty", () => {
+    const r = computeAreas(baseProject()); // no typologies, no program
+    expect(r.usesMatrix).toBe(false);
+    expect(r.apartmentsInterior).toBeCloseTo(13350, 5);
+    expect(r.balconies).toBe(0);
+    expect(r.apartmentsDrift).toBe(0);
   });
 });
