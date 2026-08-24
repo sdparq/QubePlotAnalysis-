@@ -83,8 +83,12 @@ export interface ParcelInfo {
    *  image-pixel coords — for plots where the tower/podium shape differs from
    *  a simple setback offset of the plot line. */
   tierTracesPx?: {
+    /** Legacy single ground/podium traces — superseded by the plural keys. */
     ground?: { x: number; y: number }[];
     podium?: { x: number; y: number }[];
+    /** One trace per ground block / podium block, in drawing order. */
+    grounds?: { x: number; y: number }[][];
+    podiums?: { x: number; y: number }[][];
     /** Legacy single tower trace — superseded by `towers`. */
     tower?: { x: number; y: number }[];
     /** One trace per tower, in drawing order (Tower 1, Tower 2…). */
@@ -154,8 +158,15 @@ export interface Project {
    *  traced on the Plot drawing. When set for a tier, Massing uses it verbatim
    *  instead of deriving that tier's footprint from per-edge setbacks — for
    *  plots where the tower/podium shape differs from the plot outline. */
+  /** Legacy SINGLE ground/podium footprints — superseded by the plural
+   *  arrays below, which still treat these as element #1 when set. */
   groundPolygon?: { x: number; y: number }[];
   podiumPolygon?: { x: number; y: number }[];
+  /** MULTIPLE ground-floor footprints (plot-local metres). Massing builds one
+   *  ground volume per polygon — for schemes with detached ground blocks. */
+  groundPolygons?: { x: number; y: number }[][];
+  /** MULTIPLE podium footprints (plot-local metres), one volume each. */
+  podiumPolygons?: { x: number; y: number }[][];
   /** Legacy single tower footprint — superseded by `towerPolygons`. Still
    *  honoured (treated as one tower) when `towerPolygons` is unset. */
   towerPolygon?: { x: number; y: number }[];

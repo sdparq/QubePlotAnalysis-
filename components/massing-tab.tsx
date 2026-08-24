@@ -92,8 +92,18 @@ export default function MassingTab() {
 
   // Custom tier footprints traced in the Plot tab win over setback-derived
   // outlines — for plots where the tower/podium shape differs from the plot line.
-  const customGround = (project.groundPolygon?.length ?? 0) >= 3 ? project.groundPolygon! : null;
-  const customPodium = (project.podiumPolygon?.length ?? 0) >= 3 ? project.podiumPolygon! : null;
+  // Every tier is a LIST of traced blocks; the legacy singular fields count
+  // as block #1 so existing projects keep rendering unchanged.
+  const customGrounds = useMemo(() => {
+    const list = project.groundPolygons ?? (project.groundPolygon ? [project.groundPolygon] : []);
+    const valid = list.filter((poly) => (poly?.length ?? 0) >= 3);
+    return valid.length > 0 ? valid : null;
+  }, [project.groundPolygons, project.groundPolygon]);
+  const customPodiums = useMemo(() => {
+    const list = project.podiumPolygons ?? (project.podiumPolygon ? [project.podiumPolygon] : []);
+    const valid = list.filter((poly) => (poly?.length ?? 0) >= 3);
+    return valid.length > 0 ? valid : null;
+  }, [project.podiumPolygons, project.podiumPolygon]);
   // Multiple towers: towerPolygons wins; the legacy singular field counts as
   // one tower. Empty/short polygons are dropped.
   const customTowers = useMemo(() => {
@@ -102,14 +112,17 @@ export default function MassingTab() {
     return valid.length > 0 ? valid : null;
   }, [project.towerPolygons, project.towerPolygon]);
 
-  const groundPoly = useMemo(
-    () => customGround ?? tierPolygon(plotPoly, groundEdges),
-    [customGround, plotPoly, groundEdges],
+  const groundPolys = useMemo(
+    () => customGrounds ?? [tierPolygon(plotPoly, groundEdges)],
+    [customGrounds, plotPoly, groundEdges],
   );
-  const podiumPoly = useMemo(
-    () => customPodium ?? tierPolygon(plotPoly, podiumEdges),
-    [customPodium, plotPoly, podiumEdges],
+  const podiumPolys = useMemo(
+    () => customPodiums ?? [tierPolygon(plotPoly, podiumEdges)],
+    [customPodiums, plotPoly, podiumEdges],
   );
+  /** First block of each tier — anchor for amenity clearances and legacy props. */
+  const groundPoly = groundPolys[0] ?? [];
+  const podiumPoly = podiumPolys[0] ?? [];
   const towerPolysCentered = useMemo(
     () => customTowers ?? [tierPolygon(plotPoly, towerEdges)],
     [customTowers, plotPoly, towerEdges],
@@ -133,8 +146,8 @@ export default function MassingTab() {
   );
 
   const plotPolyArea = polygonArea(plotPoly);
-  const groundArea = polygonArea(groundPoly);
-  const podiumArea = polygonArea(podiumPoly);
+  const groundArea = groundPolys.reduce((sum, poly) => sum + polygonArea(poly), 0);
+  const podiumArea = podiumPolys.reduce((sum, poly) => sum + polygonArea(poly), 0);
   const towerArea = towerPolys.reduce((sum, poly) => sum + polygonArea(poly), 0);
 
   // Tier heights — mirror the same fallbacks the Setup floor-breakdown card uses
@@ -166,14 +179,23 @@ export default function MassingTab() {
       labels.push(basementCount > 1 ? `Basement · ${basementCount}F` : "Basement");
     }
     let y = 0;
-    if (groundH > 0 && groundPoly.length >= 3) {
-      out.push({ polygon: groundPoly, fromY: y, toY: y + groundH, kind: "ground" });
-      labels.push(groundCount > 1 ? `Ground · ${groundCount}F` : "Ground");
+    if (groundH > 0) {
+      // One label per volume, pushed in the same order as the volumes.
+      const gSuffix = groundCount > 1 ? ` · ${groundCount}F` : "";
+      groundPolys.forEach((poly, i) => {
+        if (poly.length < 3) return;
+        out.push({ polygon: poly, fromY: y, toY: y + groundH, kind: "ground" });
+        labels.push(groundPolys.length > 1 ? `Ground ${i + 1}${gSuffix}` : `Ground${gSuffix}`);
+      });
       y += groundH;
     }
-    if (podiumH > 0 && podiumPoly.length >= 3) {
-      out.push({ polygon: podiumPoly, fromY: y, toY: y + podiumH, kind: "podium" });
-      labels.push(podiumCount > 1 ? `Podium · ${podiumCount}F` : "Podium");
+    if (podiumH > 0) {
+      const pSuffix = podiumCount > 1 ? ` · ${podiumCount}F` : "";
+      podiumPolys.forEach((poly, i) => {
+        if (poly.length < 3) return;
+        out.push({ polygon: poly, fromY: y, toY: y + podiumH, kind: "podium" });
+        labels.push(podiumPolys.length > 1 ? `Podium ${i + 1}${pSuffix}` : `Podium${pSuffix}`);
+      });
       y += podiumH;
     }
     if (towerH > 0) {
@@ -184,7 +206,7 @@ export default function MassingTab() {
       });
     }
     return { sceneVolumes: out, volumeLabels: labels };
-  }, [plotPoly, groundPoly, podiumPoly, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, towerCount]);
+  }, [plotPoly, groundPolys, podiumPolys, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, towerCount]);
 
   const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * towerCount;
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
@@ -268,6 +290,9 @@ export default function MassingTab() {
     if (towerPolys.length > 1) {
       lines.push(`- The project has ${towerPolys.length} SEPARATE towers rising from the shared base — keep all of them, in their positions.`);
     }
+    if (groundPolys.length > 1 || podiumPolys.length > 1) {
+      lines.push(`- The base is made of separate blocks (${groundPolys.length} ground, ${podiumPolys.length} podium) — keep them as distinct volumes, do not merge them into one slab.`);
+    }
     lines.push(`- Tower (residential): ${towerCount} typical floor(s) × ${towerHeightM.toFixed(1)} m. Draw exactly ${towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
     if (basementCount > 0) {
       lines.push(`- ${basementCount} basement(s) below ground — do NOT show them above ground.`);
@@ -277,7 +302,7 @@ export default function MassingTab() {
     lines.push("");
     lines.push("CAMERA: reuse the EXACT camera angle, framing, zoom level and crop of the input image. Do not pan, do not zoom, do not change orientation. The project's silhouette in the output must overlay 1:1 with the silhouette in the input.");
     return lines.join("\n");
-  }, [groundCount, groundHeightM, podiumCount, podiumHeightM, towerCount, towerHeightM, basementCount, totalH, towerArea, towerPolys.length]);
+  }, [groundCount, groundHeightM, podiumCount, podiumHeightM, towerCount, towerHeightM, basementCount, totalH, towerArea, towerPolys.length, groundPolys.length, podiumPolys.length]);
 
   const handleAiRender = useCallback(async () => {
     if (!apiKey) {
@@ -445,25 +470,23 @@ export default function MassingTab() {
                       ? project.parcel.tracePolygonPx.map((_, i) => edgeColor(i))
                       : undefined
                   }
-                  extraPolygons={[
-                    ...([
-                      ["ground", "#8a9a76", "Ground"],
-                      ["podium", "#a17e4c", "Podium"],
-                    ] as const).flatMap(([key, color, label]) => {
-                      const pts = project.parcel!.tierTracesPx?.[key];
-                      return pts && pts.length >= 3 ? [{ points: pts, color, label }] : [];
-                    }),
-                    ...(
-                      project.parcel!.tierTracesPx?.towers ??
-                      (project.parcel!.tierTracesPx?.tower ? [project.parcel!.tierTracesPx.tower] : [])
-                    )
+                  extraPolygons={([
+                    ["ground", "#8a9a76", "Ground"],
+                    ["podium", "#a17e4c", "Podium"],
+                    ["tower", "#3f5135", "Tower"],
+                  ] as const).flatMap(([key, color, label]) => {
+                    const t = project.parcel!.tierTracesPx;
+                    const plural = key === "ground" ? t?.grounds : key === "podium" ? t?.podiums : t?.towers;
+                    const single = t?.[key];
+                    const list = plural ?? (single ? [single] : []);
+                    return list
                       .filter((pts) => pts.length >= 3)
                       .map((pts, i, arr) => ({
                         points: pts,
-                        color: "#3f5135",
-                        label: arr.length > 1 ? `Tower ${i + 1}` : "Tower",
-                      })),
-                  ]}
+                        color,
+                        label: arr.length > 1 ? `${label} ${i + 1}` : label,
+                      }));
+                  })}
                 />
               </div>
             )}
@@ -485,57 +508,50 @@ export default function MassingTab() {
               plotArea={plotPolyArea}
             />
 
-            {(customGround || customPodium || customTowers) && (
+            {(customGrounds || customPodiums || customTowers) && (
               <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
                 <div className="eyebrow text-qube-800 text-[10px] mb-1">Custom footprints from Plot</div>
                 {([
-                  ["Ground", customGround, "groundPolygon"],
-                  ["Podium", customPodium, "podiumPolygon"],
-                ] as const).map(([label, poly, field]) =>
-                  poly ? (
-                    <div key={field} className="flex items-center justify-between gap-2 py-0.5">
+                  ["Ground", customGrounds, "ground"],
+                  ["Podium", customPodiums, "podium"],
+                  ["Tower", customTowers, "tower"],
+                ] as const).map(([label, blocks, tier]) =>
+                  blocks ? (
+                    <div key={tier} className="flex items-center justify-between gap-2 py-0.5">
                       <span>
-                        <strong>{label}</strong> uses a traced footprint ({fmt2(polygonArea(poly))} m²) — its
-                        setbacks below are ignored.
+                        <strong>
+                          {blocks.length === 1 ? label : `${blocks.length} ${label.toLowerCase()} blocks`}
+                        </strong>{" "}
+                        use{blocks.length === 1 ? "s" : ""} traced footprint{blocks.length === 1 ? "" : "s"}{" "}
+                        ({blocks.map((poly) => fmt2(polygonArea(poly))).join(" + ")} m²) — the{" "}
+                        {label.toLowerCase()} setbacks below are ignored. Add or remove blocks in the
+                        Plot tab.
                       </span>
                       <button
                         className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
                         onClick={() => {
-                          const tierKey = field === "groundPolygon" ? "ground" : "podium";
+                          const singular = { ground: "groundPolygon", podium: "podiumPolygon", tower: "towerPolygon" } as const;
+                          const plural = { ground: "groundPolygons", podium: "podiumPolygons", tower: "towerPolygons" } as const;
+                          const traceKey = { ground: "grounds", podium: "podiums", tower: "towers" } as const;
                           patch({
-                            [field]: undefined,
+                            [singular[tier]]: undefined,
+                            [plural[tier]]: undefined,
                             parcel: project.parcel
-                              ? { ...project.parcel, tierTracesPx: { ...project.parcel.tierTracesPx, [tierKey]: undefined } }
+                              ? {
+                                  ...project.parcel,
+                                  tierTracesPx: {
+                                    ...project.parcel.tierTracesPx,
+                                    [tier]: undefined,
+                                    [traceKey[tier]]: undefined,
+                                  },
+                                }
                               : project.parcel,
                           });
                         }}
-                        title="Remove the traced footprint and fall back to setbacks"
+                        title={`Remove every traced ${label.toLowerCase()} block and fall back to setbacks`}
                       >clear</button>
                     </div>
                   ) : null,
-                )}
-                {customTowers && (
-                  <div className="flex items-center justify-between gap-2 py-0.5">
-                    <span>
-                      <strong>{customTowers.length === 1 ? "Tower" : `${customTowers.length} towers`}</strong>{" "}
-                      use{customTowers.length === 1 ? "s" : ""} traced footprint{customTowers.length === 1 ? "" : "s"}{" "}
-                      ({customTowers.map((poly) => fmt2(polygonArea(poly))).join(" + ")} m²) — tower setbacks
-                      below are ignored. Add or remove towers in the Plot tab.
-                    </span>
-                    <button
-                      className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
-                      onClick={() => {
-                        patch({
-                          towerPolygon: undefined,
-                          towerPolygons: undefined,
-                          parcel: project.parcel
-                            ? { ...project.parcel, tierTracesPx: { ...project.parcel.tierTracesPx, tower: undefined, towers: undefined } }
-                            : project.parcel,
-                        });
-                      }}
-                      title="Remove every traced tower and fall back to setbacks"
-                    >clear</button>
-                  </div>
                 )}
               </div>
             )}
