@@ -70,7 +70,9 @@ export default function PlanTrace({
   const hovering = useRef(false);
   const dragRef = useRef<{ startX: number; startY: number; ox: number; oy: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const swallowClick = useRef(false);
+  /** When the last real pan ended — a click within CLICK_AFTER_PAN_MS of
+   *  it is the drag's own click and must not place a vertex. */
+  const dragEndedAt = useRef(0);
 
   function clampPan(x: number, y: number, k: number): { x: number; y: number } {
     const r = outerRef.current?.getBoundingClientRect();
@@ -143,27 +145,50 @@ export default function PlanTrace({
     };
   }, []);
 
+  // Pointer handling: a PRESS never captures the pointer, so a plain click
+  // always reaches the SVG and places a vertex. Only once the pointer has
+  // travelled past DRAG_SLOP does it become a pan (capturing from there on).
+  // That gives CAD behaviour at any zoom and in any mode — click to place,
+  // drag to pan — instead of forcing SPACE while tracing.
+  const DRAG_SLOP = 4;
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    const wantPan = e.button === 1 || spaceHeld.current || (mode === "idle" && e.button === 0);
-    if (!wantPan || zoomRef.current <= 1) {
-      // At 1× there is nothing to pan — don't hijack the pointer.
-      if (!(e.button === 1 && zoomRef.current > 1)) return;
+    if (e.button !== 0 && e.button !== 1) return;
+    if (zoomRef.current <= 1 && !spaceHeld.current) return; // nothing to pan
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      ox: panRef.current.x,
+      oy: panRef.current.y,
+      moved: false,
+    };
+    // Middle button / SPACE are explicit pan gestures — start panning at once.
+    if (e.button === 1 || spaceHeld.current) {
+      e.preventDefault();
+      dragRef.current.moved = true;
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      setDragging(true);
     }
-    e.preventDefault();
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, ox: panRef.current.x, oy: panRef.current.y, moved: false };
-    setDragging(true);
   }
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const d = dragRef.current;
     if (!d) return;
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+    if (!d.moved) {
+      if (Math.abs(dx) + Math.abs(dy) <= DRAG_SLOP) return; // still a click
+      d.moved = true;
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      setDragging(true);
+    }
     setPan(clampPan(d.ox + dx, d.oy + dy, zoomRef.current));
   }
   function onPointerUp() {
-    if (dragRef.current?.moved) swallowClick.current = true;
+    // Stamp the end of a real pan instead of latching a "swallow the next
+    // click" flag: during a SPACE-pan the SVG has pointer-events:none, so the
+    // click that would clear the flag never arrives and the flag would eat a
+    // genuine vertex click later on. A timestamp expires by itself.
+    if (dragRef.current?.moved) dragEndedAt.current = Date.now();
     dragRef.current = null;
     setDragging(false);
   }
@@ -256,10 +281,7 @@ export default function PlanTrace({
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
             onClick={(e) => {
-              if (swallowClick.current) {
-                swallowClick.current = false;
-                return;
-              }
+              if (Date.now() - dragEndedAt.current < 250) return; // click of a pan
               if (!onPick || spaceHeld.current) return;
               const p = svgToImagePx(e.clientX, e.clientY);
               if (p) onPick(p);
@@ -380,10 +402,7 @@ export default function PlanTrace({
                   style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (swallowClick.current) {
-                      swallowClick.current = false;
-                      return;
-                    }
+                    if (Date.now() - dragEndedAt.current < 250) return;
                     onSelectCandidate?.(i);
                   }}
                   onMouseEnter={() => setHoveredCandidate(i)}
@@ -421,7 +440,7 @@ export default function PlanTrace({
           </div>
           <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 bg-white/85 border border-ink-200 text-[9.5px] text-ink-500 z-10 pointer-events-none select-none">
             {zoom > 1 ? `${zoom.toFixed(1)}× · ` : ""}scroll to zoom
-            {zoom > 1 ? ` · ${mode === "idle" ? "drag" : "hold Space + drag"} to pan` : ""}
+            {zoom > 1 ? " · drag to pan · click to place" : ""}
           </div>
         </>
       )}
