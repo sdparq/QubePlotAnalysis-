@@ -13,8 +13,10 @@ export interface PlanTraceProps {
   calibration?: ParcelInfo["calibration"];
   /** Live points for the active operation (vertices being clicked or 2 calibration points) */
   livePoints?: { x: number; y: number }[];
-  /** Receive a click in pixel coords */
-  onPick?: (p: { x: number; y: number }) => void;
+  /** Receive a click in pixel coords. `meta.screenPxPerImagePx` is the live
+   *  screen-px : image-px ratio, so consumers can express snap thresholds in
+   *  SCREEN pixels (constant to the eye at any zoom). */
+  onPick?: (p: { x: number; y: number }, meta?: { screenPxPerImagePx: number }) => void;
   /** Hover position for live preview lines (pixel coords) */
   onHover?: (p: { x: number; y: number } | null) => void;
   hoverPoint?: { x: number; y: number } | null;
@@ -214,16 +216,19 @@ export default function PlanTrace({
     return () => ro.disconnect();
   }, [parcel.imageDataUrl]);
 
+  // Map a client point to image pixels through the img's ON-SCREEN rect
+  // (getBoundingClientRect reflects the zoom/pan CSS transform in every
+  // browser — unlike svg.getScreenCTM(), which ignores ancestor CSS
+  // transforms in Safari and would misplace every vertex while zoomed).
   function svgToImagePx(clientX: number, clientY: number): { x: number; y: number } | null {
-    const svg = svgRef.current;
-    if (!svg) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const ctm = svg.getScreenCTM(); // includes the zoom/pan transform
-    if (!ctm) return null;
-    const local = pt.matrixTransform(ctm.inverse());
-    return { x: local.x, y: local.y };
+    const img = imgRef.current;
+    if (!img || W <= 0 || H <= 0) return null;
+    const r = img.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    return {
+      x: ((clientX - r.left) / r.width) * W,
+      y: ((clientY - r.top) / r.height) * H,
+    };
   }
 
   const panCursor = dragging ? "grabbing" : "grab";
@@ -284,7 +289,7 @@ export default function PlanTrace({
               if (Date.now() - dragEndedAt.current < 250) return; // click of a pan
               if (!onPick || spaceHeld.current) return;
               const p = svgToImagePx(e.clientX, e.clientY);
-              if (p) onPick(p);
+              if (p) onPick(p, { screenPxPerImagePx: pxScale });
             }}
             onMouseMove={(e) => {
               if (!onHover) return;

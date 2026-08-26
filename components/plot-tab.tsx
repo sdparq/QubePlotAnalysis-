@@ -345,14 +345,21 @@ export default function PlotTab() {
     runAutoCalibration(livePoints, nextParcel);
     setLivePoints([]);
   }
-  function onTraceClick(p: { x: number; y: number }) {
+  function onTraceClick(p: { x: number; y: number }, meta?: { screenPxPerImagePx: number }) {
     if (traceMode !== "tracing") return;
-    // Click near first point closes the polygon
+    // Click ON the first point's marker closes the polygon. The threshold is
+    // ~the marker radius in SCREEN pixels — constant to the eye at any zoom.
+    // (It used to be 2% of the image width in IMAGE pixels, which at 4× zoom
+    // swallowed clicks tens of screen-px away from the start point, so small
+    // footprints — the reason to zoom in — closed after their third vertex.)
     if (livePoints.length >= 3) {
       const a = livePoints[0];
       const dist = Math.hypot(p.x - a.x, p.y - a.y);
-      const W = parcel?.imageNaturalWidth ?? 1000;
-      if (dist < W * 0.02) {
+      const threshold =
+        meta && meta.screenPxPerImagePx > 0
+          ? 14 / meta.screenPxPerImagePx
+          : (parcel?.imageNaturalWidth ?? 1000) * 0.02;
+      if (dist < threshold) {
         // Close
         const final = livePoints;
         if (traceTarget !== "plot") {
@@ -551,8 +558,8 @@ export default function PlotTab() {
                             : TIER_LABELS[t],
                       })),
                   )}
-                  onPick={(p) => {
-                    if (traceMode === "tracing") onTraceClick(p);
+                  onPick={(p, meta) => {
+                    if (traceMode === "tracing") onTraceClick(p, meta);
                     else if (traceMode === "calibrating") onCalibClick(p);
                   }}
                   onHover={setHoverPoint}
