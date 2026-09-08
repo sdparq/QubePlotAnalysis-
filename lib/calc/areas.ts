@@ -12,6 +12,12 @@ import { computeParking } from "./parking";
  * placed (falling back to the Distribution quota while it is empty) — so this
  * always agrees with what the Apartments tab reports.
  *
+ * Balconies vs GFA: the project decides (Typologies) whether 0, 50 or 100 %
+ * of each balcony counts as GFA. The Apartments GFA the matrix CONSUMES is
+ * therefore interior + that share of the balconies, and that is what gets
+ * compared with the Distribution target. GSA and BUA take the whole balcony
+ * regardless — they are physical areas.
+ *
  * BUA (construction) = what actually gets built:
  *     residential sellable (apartments interior + balconies)
  *   + retail GFA  + commercial GFA
@@ -45,7 +51,14 @@ export interface AreasResult {
   apartmentsInterior: number;
   /** True when the figures come from the placed units rather than the quota. */
   usesMatrix: boolean;
-  /** apartmentsInterior − apartmentsQuota (0 when the matrix is empty). */
+  /** Share (0 / 0.5 / 1) of the balconies counted as GFA — Typologies. */
+  balconyGfaFactor: number;
+  /** Balcony area that counts as GFA = balconies × balconyGfaFactor. */
+  balconiesGFA: number;
+  /** GFA the apartments consume = interior + balconiesGFA (the matrix's own
+   *  figure when it holds units, else the quota). */
+  apartmentsGFA: number;
+  /** apartmentsGFA − apartmentsQuota (0 when the matrix is empty). */
   apartmentsDrift: number;
   /** Units placed in the matrix. */
   matrixUnits: number;
@@ -106,9 +119,12 @@ export function computeAreas(project: Project): AreasResult {
   const balconyShare =
     program.totalInteriorGFA > 0 ? program.totalBalcony / program.totalInteriorGFA : 0;
   const balconies = usesMatrix ? program.totalBalcony : apartmentsQuota * balconyShare;
-  /** Matrix interior − quota. Negative = the placed units fall short of the
+  const bf = program.balconyGfaFactor;
+  const balconiesGFA = balconies * bf;
+  const apartmentsGFA = usesMatrix ? program.totalApartmentsGFA : apartmentsQuota;
+  /** Matrix GFA − quota. Negative = the placed units fall short of the
    *  Apartments GFA target; positive = they overshoot it. */
-  const apartmentsDrift = apartmentsInterior - apartmentsQuota;
+  const apartmentsDrift = apartmentsGFA - apartmentsQuota;
 
   // Parking surfaces — same model as the Parking tab.
   const parking = computeParking(project);
@@ -150,6 +166,9 @@ export function computeAreas(project: Project): AreasResult {
     apartmentsQuota,
     apartmentsInterior,
     usesMatrix,
+    balconyGfaFactor: bf,
+    balconiesGFA,
+    apartmentsGFA,
     apartmentsDrift,
     matrixUnits: program.totalUnits,
     balconyShare,

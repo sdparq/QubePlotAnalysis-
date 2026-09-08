@@ -194,9 +194,17 @@ export default function SummaryTab() {
             m2={gsaTotal}
             total
           />
+          {a.balconyGfaFactor > 0 && a.usesMatrix && (
+            <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
+              Balconies in GFA: {Math.round(a.balconyGfaFactor * 100)} % (Typologies). The apartments
+              consume {fmt0(a.apartmentsGFA)} m² of GFA = {fmt0(a.apartmentsInterior)} m² interior +{" "}
+              {fmt0(a.balconiesGFA)} m² of balconies; the sellable figures above take the whole balcony.
+            </p>
+          )}
           {a.usesMatrix && Math.abs(a.apartmentsDrift) > Math.max(1, a.apartmentsQuota * 0.01) && (
             <p className="text-[10.5px] text-amber-800 px-3 py-1.5 leading-snug border-t border-ink-100">
-              ⚠ The matrix holds {fmt0(a.apartmentsInterior)} m² of interior against the{" "}
+              ⚠ The matrix consumes {fmt0(a.apartmentsGFA)} m² of GFA
+              {a.balconyGfaFactor > 0 ? ` (interior + ${Math.round(a.balconyGfaFactor * 100)} % of balconies)` : " (interior)"} against the{" "}
               {fmt0(a.apartmentsQuota)} m² Apartments GFA target from Distribution —{" "}
               <strong>
                 {a.apartmentsDrift > 0 ? "+" : ""}{fmt0(a.apartmentsDrift)} m² (

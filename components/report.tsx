@@ -179,7 +179,12 @@ function ReportDocument() {
                 fmt0(aptInterior),
                 fmt0(aptInterior * M2_TO_SQFT),
               ],
-              [`Balconies — ${pct(balconyShare * 100)} of interior`, fmt0(balconiesBUA), fmt0(balconiesBUA * M2_TO_SQFT)],
+              [
+                `Balconies — ${pct(balconyShare * 100)} of interior` +
+                  (a.balconyGfaFactor > 0 ? ` (${Math.round(a.balconyGfaFactor * 100)} % counted as GFA)` : " (GFA-exempt)"),
+                fmt0(balconiesBUA),
+                fmt0(balconiesBUA * M2_TO_SQFT),
+              ],
               ...(retailM2 > 0 ? [["Retail — leasable/sellable", fmt0(retailM2), fmt0(retailM2 * M2_TO_SQFT)]] : []),
             ] as (string | number)[][]}
             foot={["Σ GSA (sellable)", fmt0(gsa), fmt0(gsa * M2_TO_SQFT)]}

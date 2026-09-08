@@ -141,6 +141,13 @@ export interface Project {
    *  This is what lets "Studio Premium" and "Studio Standard" carry different
    *  percentages. */
   typologyMixById?: Record<string, number>;
+  /** How much of each unit's balcony COUNTS AS GFA — 0, 50 or 100 (%).
+   *  Authorities differ (many exempt balconies, some count half, some all).
+   *  Drives the "GFA per unit" = interior + pct × balcony that the
+   *  Apartments auto-fill sizes against the Apartments GFA target, so a
+   *  50 % rule places fewer units for the same GFA. Sellable (GSA) and
+   *  construction (BUA) areas are physical and unaffected. Default 0. */
+  balconyGfaPct?: 0 | 50 | 100;
   program: ProgramCell[];
   commonAreas: CommonArea[];
   parking: ParkingLevel[];

@@ -1,5 +1,6 @@
 import type { Project, ProgramCell, Typology, UnitCategory } from "../types";
 import { residentialSubGFA } from "./gfa";
+import { unitGfaArea } from "./balcony";
 import { TYPOLOGY_KEYS, type TypologyKey } from "../zone-classes";
 
 const CATEGORY_FOR_TYPOLOGY_KEY: Record<TypologyKey, UnitCategory | null> = {
@@ -72,6 +73,7 @@ export interface AutoFillResult {
   perTypology: Array<{
     typology: Typology;
     units: number;
+    /** units × GFA per unit (interior + counted balcony share). */
     allocatedGFA: number;
     sameCat: number;
     /** EFFECTIVE share of total units for this typology (0..100) — the
@@ -85,8 +87,10 @@ export interface AutoFillResult {
 /** Pure computation of the Apartments matrix from a project + a resolved
  *  typology mix. Treats `mix` as a share of TOTAL UNITS (fractions 0..1) and
  *  derives total unit count from the apartments GFA target and the
- *  weighted-average interior area. Distributes units across floors so that
- *  per-floor totals end up as balanced as possible.
+ *  weighted-average GFA PER UNIT — interior plus whatever share of the
+ *  balcony the project counts as GFA (Typologies → Balconies in GFA), so a
+ *  50 % rule yields fewer units for the same target. Distributes units
+ *  across floors so that per-floor totals end up as balanced as possible.
  *
  *  Returns `null` when the inputs can't drive a meaningful fill — empty
  *  Apartments GFA, no typologies, no floors.
@@ -106,14 +110,14 @@ export function computeProgramAutoFill(
     return { typology: t, unitShare, sameCat };
   });
 
-  const avgArea = rows.reduce((s, r) => s + r.unitShare * r.typology.internalArea, 0);
+  const avgArea = rows.reduce((s, r) => s + r.unitShare * unitGfaArea(project, r.typology), 0);
   const N = avgArea > 0 ? apartmentsGFA / avgArea : 0;
   const targets = rows.map((r) => {
     const units = Math.round(N * r.unitShare);
     return {
       typology: r.typology,
       units,
-      allocatedGFA: units * r.typology.internalArea,
+      allocatedGFA: units * unitGfaArea(project, r.typology),
       sameCat: r.sameCat,
       unitSharePct: r.unitShare * 100,
     };

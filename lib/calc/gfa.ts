@@ -13,14 +13,20 @@
  *
  *   apartments% = 100 − amenities% − circulation%    (services excluded)
  *
- *   apartments BUA = apartments GFA × (1 + balconyShare)
+ *   apartments BUA = apartments GFA × (unit BUA ÷ unit GFA)
  *   services BUA   = services% × residentialGFA
  *   residentialBUA = apartments + amenities + circulation + services
+ *
+ *   Balconies and GFA: a unit's GFA is interior + balconyGfaFactor × balcony
+ *   (the project chooses 0 / 50 / 100 % in Typologies). Its BUA and its
+ *   sellable area are always interior + the WHOLE balcony.
  */
 
 import type { GfaBreakdownItem, Project, ResidentialSubCategory } from "../types";
 import { DEFAULT_RESIDENTIAL_BREAKDOWN } from "../types";
 import { computeProgram } from "./program";
+
+export { balconyGfaFactor, unitGfaArea } from "./balcony";
 
 export const RESIDENTIAL_SUBS: ResidentialSubCategory[] = ["apartments", "amenities", "circulation", "services"];
 
@@ -70,10 +76,12 @@ export function residentialSubBUA(project: Project, sub: ResidentialSubCategory)
   const quota = residentialSubQuota(project, sub);
   if (quota <= 0) return 0;
   if (sub === "apartments") {
+    // Built envelope per GFA-counted m²: the placed units' full sellable
+    // (interior + whole balcony) over the GFA they consume (interior + the
+    // counted balcony share).
     const program = computeProgram(project);
-    if (program.totalInteriorGFA > 0) {
-      const balconyShare = program.totalBalcony / program.totalInteriorGFA;
-      return quota * (1 + balconyShare);
+    if (program.totalApartmentsGFA > 0) {
+      return quota * (program.totalSellable / program.totalApartmentsGFA);
     }
     return quota;
   }

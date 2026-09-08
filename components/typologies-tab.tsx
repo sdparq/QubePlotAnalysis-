@@ -120,6 +120,7 @@ export default function TypologiesTab() {
   function patchAndRefill(partial: {
     typologyMix?: Partial<Record<UnitCategory, number>> | undefined;
     typologyMixById?: Record<string, number> | undefined;
+    balconyGfaPct?: 0 | 50 | 100;
   }) {
     const projAfter = { ...project, ...partial };
     const classMix = detectedClass ? library[detectedClass].typologyMix : null;
@@ -386,6 +387,22 @@ export default function TypologiesTab() {
         />
       )}
 
+      {/* Balconies in GFA — decides how much GFA each unit consumes, hence how
+          many units the Apartments GFA target yields. */}
+      <BalconyGfaCard
+        value={project.balconyGfaPct ?? 0}
+        onChange={(pct) => patchAndRefill({ balconyGfaPct: pct })}
+        apartmentsGFA={residentialSubGFA(project, "apartments")}
+        unitsUnder={(pct) => {
+          // The exact auto-fill each rule would produce — same engine, same
+          // mix — so the read-out matches what Apartments will show.
+          const classMix = detectedClass ? library[detectedClass].typologyMix : null;
+          if (!classMix) return 0;
+          const projAt = { ...project, balconyGfaPct: pct };
+          return computeProgramAutoFill(projAt, resolveTypologyMix(projAt, classMix))?.totalUnits ?? 0;
+        }}
+      />
+
       <div className="card">
         <div className="flex items-start justify-between gap-4 mb-5">
           <div>
@@ -647,6 +664,91 @@ function UnitMixCard({
         The mix drives the Apartments auto-fill: total units N = Apartments GFA / average interior
         area weighted by these %s, then units<sub>typology</sub> = round(N × % / 100).
       </p>
+    </div>
+  );
+}
+
+const BALCONY_GFA_OPTIONS: { pct: 0 | 50 | 100; label: string; blurb: string }[] = [
+  { pct: 0, label: "0 % — exempt", blurb: "Balconies consume no GFA. Only interiors count against the Apartments GFA target." },
+  { pct: 50, label: "50 % — half counts", blurb: "Half of every balcony counts as GFA. Each unit consumes interior + ½ balcony." },
+  { pct: 100, label: "100 % — fully counts", blurb: "The whole balcony counts as GFA. Each unit consumes interior + balcony." },
+];
+
+/** How much of each balcony counts as GFA. Changing it re-runs the Apartments
+ *  auto-fill (via patchAndRefill) so the unit count follows at once. */
+function BalconyGfaCard({
+  value,
+  onChange,
+  apartmentsGFA,
+  unitsUnder,
+}: {
+  value: 0 | 50 | 100;
+  onChange: (pct: 0 | 50 | 100) => void;
+  apartmentsGFA: number;
+  /** Units the Apartments auto-fill yields under a given rule. */
+  unitsUnder: (pct: 0 | 50 | 100) => number;
+}) {
+  const factor = value / 100;
+  return (
+    <div className="card border-qube-200">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-[260px] flex-1">
+          <h2 className="section-title">Balconies in GFA</h2>
+          <p className="section-sub">
+            How much of each unit&apos;s balcony counts towards the FAR-regulated GFA. Authorities
+            differ — pick the rule that applies to this plot. It changes the <strong>GFA each unit
+            consumes</strong> (interior + counted balcony), so the Apartments auto-fill places
+            {" "}{value === 0 ? "the most" : value === 50 ? "fewer" : "the fewest"} units for the
+            same Apartments GFA target. Sellable (GSA) and built (BUA) areas always take the whole
+            balcony — they are physical.
+          </p>
+        </div>
+        <div className="flex border border-ink-200 overflow-hidden shrink-0 self-start">
+          {BALCONY_GFA_OPTIONS.map((o) => (
+            <button
+              key={o.pct}
+              className={`px-3 py-2 text-[11px] uppercase tracking-[0.08em] transition-colors ${
+                value === o.pct
+                  ? "bg-qube-700 text-white"
+                  : "bg-white text-ink-700 hover:bg-bone-100"
+              } ${o.pct !== 0 ? "border-l border-ink-200" : ""}`}
+              onClick={() => onChange(o.pct)}
+              title={o.blurb}
+            >{o.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+        {BALCONY_GFA_OPTIONS.map((o) => {
+          const active = o.pct === value;
+          const n = unitsUnder(o.pct);
+          return (
+            <div
+              key={o.pct}
+              className={`border p-3 text-[11.5px] leading-snug ${
+                active ? "border-qube-500 bg-qube-50 text-ink-900" : "border-ink-100 text-ink-500"
+              }`}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={`eyebrow text-[10px] ${active ? "text-qube-800" : "text-ink-500"}`}>{o.label}</span>
+                {n > 0 && (
+                  <span className="tabular-nums text-[11px]">
+                    ≈ {n.toLocaleString("en-US")} units
+                  </span>
+                )}
+              </div>
+              <div className="mt-1">{o.blurb}</div>
+            </div>
+          );
+        })}
+      </div>
+      {apartmentsGFA > 0 && (
+        <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
+          Unit counts are the exact Apartments auto-fill for each rule (current unit mix and
+          typology areas) against the {Math.round(apartmentsGFA).toLocaleString("en-US")} m² Apartments
+          GFA target. Current rule: each unit consumes interior + {Math.round(factor * 100)} % of its balcony.
+        </p>
+      )}
     </div>
   );
 }

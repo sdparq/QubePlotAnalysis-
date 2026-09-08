@@ -6,6 +6,7 @@ import { fmt0, fmt2 } from "@/lib/format";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone, TYPOLOGY_KEYS, type TypologyKey } from "@/lib/zone-classes";
 import { residentialSubGFA } from "@/lib/calc/gfa";
+import { balconyGfaFactor, unitGfaArea } from "@/lib/calc/balcony";
 import { computeProgramAutoFill, resolveTypologyMix } from "@/lib/calc/program-autofill";
 import {
   type Typology,
@@ -34,6 +35,10 @@ export default function ProgramTab() {
   const project = useProject();
   const setCell = useStore((s) => s.setProgramCell);
   const program = computeProgram(project);
+  const gfaColLabel =
+    program.balconyGfaFactor > 0
+      ? `GFA (int. + ${Math.round(program.balconyGfaFactor * 100)}% balc.)`
+      : "Interior GFA";
   const { library } = useZoneLibrary();
   const detectedClass = useMemo(() => classForZone(project.zone, library), [project.zone, library]);
   const apartmentsGFA = useMemo(() => computeApartmentsGFA(project), [project]);
@@ -100,7 +105,7 @@ export default function ProgramTab() {
                 ))}
                 <th className="text-right !px-1">Units</th>
                 <th className="text-right">Sellable</th>
-                <th className="text-right">Interior GFA</th>
+                <th className="text-right">{gfaColLabel}</th>
               </tr>
             </thead>
             <tbody>
@@ -120,7 +125,7 @@ export default function ProgramTab() {
                   ))}
                   <td className="text-right font-medium !px-2">{fmt0(f.units)}</td>
                   <td className="text-right">{fmt2(f.totalSellable)}</td>
-                  <td className="text-right">{fmt2(f.totalInteriorGFA)}</td>
+                  <td className="text-right">{fmt2(f.totalGFA)}</td>
                 </tr>
               ))}
               <tr className="row-total">
@@ -131,10 +136,17 @@ export default function ProgramTab() {
                 })}
                 <td className="text-right !px-2">{fmt0(program.totalUnits)}</td>
                 <td className="text-right">{fmt2(program.totalSellable)}</td>
-                <td className="text-right">{fmt2(program.totalInteriorGFA)}</td>
+                <td className="text-right">{fmt2(program.totalApartmentsGFA)}</td>
               </tr>
             </tbody>
           </table>
+          {program.balconyGfaFactor > 0 && (
+            <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
+              GFA counts interior + {Math.round(program.balconyGfaFactor * 100)} % of each balcony
+              (Typologies → Balconies in GFA): {fmt2(program.totalInteriorGFA)} m² interior +{" "}
+              {fmt2(program.totalBalconyGFA)} m² of the {fmt2(program.totalBalcony)} m² of balconies.
+            </p>
+          )}
         </div>
       </div>
 
@@ -155,7 +167,7 @@ export default function ProgramTab() {
               <th>Typology</th>
               <th className="text-right">Units</th>
               <th className="text-right">% of total</th>
-              <th className="text-right">Total interior (m²)</th>
+              <th className="text-right">{gfaColLabel} (m²)</th>
               <th className="text-right">Total sellable (m²)</th>
             </tr>
           </thead>
@@ -165,7 +177,7 @@ export default function ProgramTab() {
                 <td className="font-medium text-ink-900">{ts.typology.name} <span className="text-ink-400 text-xs ml-1">{ts.typology.category}</span></td>
                 <td className="text-right">{fmt0(ts.totalUnits)}</td>
                 <td className="text-right">{(ts.pctOfTotal * 100).toFixed(1)}%</td>
-                <td className="text-right">{fmt2(ts.totalInteriorGFA)}</td>
+                <td className="text-right">{fmt2(ts.totalGFA)}</td>
                 <td className="text-right">{fmt2(ts.totalSellable)}</td>
               </tr>
             ))}
@@ -173,7 +185,7 @@ export default function ProgramTab() {
               <td>TOTAL</td>
               <td className="text-right">{fmt0(program.totalUnits)}</td>
               <td className="text-right">100.0%</td>
-              <td className="text-right">{fmt2(program.totalInteriorGFA)}</td>
+              <td className="text-right">{fmt2(program.totalApartmentsGFA)}</td>
               <td className="text-right">{fmt2(program.totalSellable)}</td>
             </tr>
           </tbody>
@@ -210,8 +222,11 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
   const fill = useMemo(() => computeProgramAutoFill(project, mix), [project, mix]);
   const targets = fill?.perTypology ?? [];
   const totalUnits = fill?.totalUnits ?? 0;
-  const actualInteriorGFA = targets.reduce((s, x) => s + x.units * x.typology.internalArea, 0);
+  // Σ units × GFA per unit — interior + the balcony share the project counts
+  // as GFA (Typologies → Balconies in GFA). allocatedGFA already carries it.
+  const actualInteriorGFA = targets.reduce((s, x) => s + x.allocatedGFA, 0);
   const interiorGFADrift = actualInteriorGFA - apartmentsGFA;
+  const bf = balconyGfaFactor(project);
 
   // What the matrix holds RIGHT NOW, so we can warn before Apply overwrites a
   // table that no longer matches the auto-fill (edited by hand, or filled
@@ -221,7 +236,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
     existingProgramCount > 0 &&
     !!fill &&
     totalUnits > 0 &&
-    (current.totalUnits !== totalUnits || Math.abs(current.totalInteriorGFA - actualInteriorGFA) > 1);
+    (current.totalUnits !== totalUnits || Math.abs(current.totalApartmentsGFA - actualInteriorGFA) > 1);
 
   function apply() {
     if (apartmentsGFA <= 0) {
@@ -234,7 +249,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
     }
     if (existingProgramCount > 0) {
       const ok = confirm(
-        `Replace the current matrix (${current.totalUnits} units · Σ ${Math.round(current.totalInteriorGFA).toLocaleString("en-US")} m² interior) with ${totalUnits} units across ${numFloors} floors (Σ Interior ≈ ${Math.round(actualInteriorGFA).toLocaleString("en-US")} m²)? This recomputes everything from the current class mix, Apartments GFA and typology areas — manual edits to the matrix are lost.`,
+        `Replace the current matrix (${current.totalUnits} units · Σ ${Math.round(current.totalApartmentsGFA).toLocaleString("en-US")} m² GFA) with ${totalUnits} units across ${numFloors} floors (Σ GFA ≈ ${Math.round(actualInteriorGFA).toLocaleString("en-US")} m²)? This recomputes everything from the current class mix, Apartments GFA and typology areas — manual edits to the matrix are lost.`,
       );
       if (!ok) return;
     }
@@ -251,7 +266,10 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
             Distributes units across the matrix using the project&apos;s unit mix (class {letter}&apos;s
             defaults plus any per-typology override from Typologies) and
             the <strong>Apartments GFA</strong> from Setup as the target. After applying,
-            <em> Σ count × Interior</em> in Program should equal the Apartments GFA target.
+            <em> Σ count × GFA per unit</em> in Program should equal the Apartments GFA target
+            {bf > 0
+              ? ` — GFA per unit = interior + ${Math.round(bf * 100)} % of the balcony (Typologies → Balconies in GFA).`
+              : " — balconies are GFA-exempt (Typologies → Balconies in GFA), so GFA per unit = interior."}
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
             <div>
@@ -265,7 +283,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
               <div className="text-[16px] font-medium text-ink-900 tabular-nums">{totalUnits.toLocaleString("en-US")}</div>
             </div>
             <div>
-              <div className="eyebrow text-ink-500 text-[10px]">After rounding · Σ Interior</div>
+              <div className="eyebrow text-ink-500 text-[10px]">After rounding · Σ GFA{bf > 0 ? ` (int. + ${Math.round(bf * 100)}% balc.)` : ""}</div>
               <div className="text-[16px] font-medium text-ink-900 tabular-nums">
                 {Math.round(actualInteriorGFA).toLocaleString("en-US")} m²
               </div>
@@ -302,7 +320,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
           {matrixDiverges && (
             <div className="border border-amber-200 bg-amber-50 text-amber-900 p-2.5 mt-3 text-[11.5px] leading-snug">
               The matrix below currently holds <strong>{current.totalUnits} units</strong> (Σ{" "}
-              {Math.round(current.totalInteriorGFA).toLocaleString("en-US")} m² interior) — different
+              {Math.round(current.totalApartmentsGFA).toLocaleString("en-US")} m² GFA) — different
               from the <strong>{totalUnits} units</strong> this auto-fill would produce. It was
               either edited by hand or filled when Setup / unit mix / typology areas had other
               values. <strong>Apply replaces it entirely</strong> with the recomputed distribution.
@@ -317,7 +335,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
                   <tr className="text-[10px] uppercase tracking-[0.08em] text-ink-500">
                     <th className="text-left py-1 font-medium">Typology</th>
                     <th className="text-right py-1 font-medium">Mix %</th>
-                    <th className="text-right py-1 font-medium">Interior / unit</th>
+                    <th className="text-right py-1 font-medium">{bf > 0 ? "GFA / unit" : "Interior / unit"}</th>
                     <th className="text-right py-1 font-medium">Allocated GFA</th>
                     <th className="text-right py-1 font-medium">Units</th>
                     <th className="text-right py-1 font-medium">Units / floor</th>
@@ -332,7 +350,7 @@ function AutoFillPanel({ letter, project, mix, apartmentsGFA, onApply }: AutoFil
                       <tr key={x.typology.id} className="border-t border-qube-200/60">
                         <td className="py-1 text-ink-900">{x.typology.name}</td>
                         <td className="py-1 text-right text-ink-700">{(sharePct * 100).toFixed(1)}%</td>
-                        <td className="py-1 text-right text-ink-700">{x.typology.internalArea.toFixed(1)} m²</td>
+                        <td className="py-1 text-right text-ink-700">{unitGfaArea(project, x.typology).toFixed(1)} m²</td>
                         <td className="py-1 text-right text-ink-700">{Math.round(x.allocatedGFA).toLocaleString("en-US")} m²</td>
                         <td className="py-1 text-right text-ink-900 font-medium">{x.units}</td>
                         <td className="py-1 text-right text-ink-700">

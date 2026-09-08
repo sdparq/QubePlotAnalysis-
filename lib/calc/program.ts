@@ -1,5 +1,6 @@
 import type { Project, Typology } from "../types";
 import { deriveCommonAreas } from "./common-areas";
+import { balconyGfaFactor } from "./balcony";
 
 export interface FloorSummary {
   floor: number;
@@ -7,6 +8,8 @@ export interface FloorSummary {
   totalBalcony: number;
   totalSellable: number;
   totalInteriorGFA: number;
+  /** GFA consumed: interior + the counted balcony share. */
+  totalGFA: number;
 }
 
 export interface TypologySummary {
@@ -15,6 +18,8 @@ export interface TypologySummary {
   totalInteriorGFA: number;
   totalBalcony: number;
   totalSellable: number;
+  /** GFA consumed: interior + the counted balcony share. */
+  totalGFA: number;
   pctOfTotal: number;
 }
 
@@ -22,6 +27,13 @@ export interface ProgramResult {
   totalUnits: number;
   totalInteriorGFA: number;
   totalBalcony: number;
+  /** Share (0 / 0.5 / 1) of the balconies that counts as GFA — Typologies. */
+  balconyGfaFactor: number;
+  /** totalBalcony × balconyGfaFactor. */
+  totalBalconyGFA: number;
+  /** GFA the placed units consume = interior + counted balconies. This is
+   *  what the Apartments GFA target from Distribution is compared against. */
+  totalApartmentsGFA: number;
   totalSellable: number;
   shaftsDeduction: number;
   commonAreasGFA: number;
@@ -51,6 +63,7 @@ export interface ProgramResult {
 
 export function computeProgram(project: Project): ProgramResult {
   const tById = new Map(project.typologies.map((t) => [t.id, t]));
+  const bf = balconyGfaFactor(project);
 
   // Only consider cells whose floor is within the project's current floor range.
   // Stale cells (left over after numFloors was reduced) must not contribute to any total.
@@ -71,13 +84,22 @@ export function computeProgram(project: Project): ProgramResult {
       totalInteriorGFA += cell.count * t.internalArea;
       totalSellable += cell.count * (t.internalArea + t.balconyArea);
     }
-    return { floor, units, totalBalcony, totalSellable, totalInteriorGFA };
+    return {
+      floor,
+      units,
+      totalBalcony,
+      totalSellable,
+      totalInteriorGFA,
+      totalGFA: totalInteriorGFA + bf * totalBalcony,
+    };
   });
 
   const totalUnits = byFloor.reduce((s, f) => s + f.units, 0);
   const totalInteriorGFA = byFloor.reduce((s, f) => s + f.totalInteriorGFA, 0);
   const totalBalcony = byFloor.reduce((s, f) => s + f.totalBalcony, 0);
   const totalSellable = byFloor.reduce((s, f) => s + f.totalSellable, 0);
+  const totalBalconyGFA = bf * totalBalcony;
+  const totalApartmentsGFA = totalInteriorGFA + totalBalconyGFA;
 
   const byTypology: TypologySummary[] = project.typologies.map((t) => {
     const totalUnitsT = activeCells
@@ -89,6 +111,7 @@ export function computeProgram(project: Project): ProgramResult {
       totalInteriorGFA: totalUnitsT * t.internalArea,
       totalBalcony: totalUnitsT * t.balconyArea,
       totalSellable: totalUnitsT * (t.internalArea + t.balconyArea),
+      totalGFA: totalUnitsT * (t.internalArea + bf * t.balconyArea),
       pctOfTotal: totalUnits > 0 ? totalUnitsT / totalUnits : 0,
     };
   });
@@ -111,7 +134,7 @@ export function computeProgram(project: Project): ProgramResult {
   const commonAreasOpen = derived.commonAreasOpen;
   const commonAreasNonGFA = commonAreasBUAonly + commonAreasOpen;
 
-  const totalGFABuilding = totalInteriorGFA + commonAreasGFA - shaftsDeduction;
+  const totalGFABuilding = totalApartmentsGFA + commonAreasGFA - shaftsDeduction;
   // BUA = unit interiors + balconies (already inside the unit envelope) + every common area that
   // forms part of the built envelope (GFA-counting + shafts/MEP/lift/parking style spaces). Open-air
   // amenities are not counted.
@@ -123,13 +146,16 @@ export function computeProgram(project: Project): ProgramResult {
   const servicesGFA = derived.servicesArea;
   const amenitiesGFAarea = derived.amenitiesGFA;
 
-  const residentialNetGFA = totalInteriorGFA - shaftsDeduction;
+  const residentialNetGFA = totalApartmentsGFA - shaftsDeduction;
   const denom = totalGFABuilding || 1;
 
   return {
     totalUnits,
     totalInteriorGFA,
     totalBalcony,
+    balconyGfaFactor: bf,
+    totalBalconyGFA,
+    totalApartmentsGFA,
     totalSellable,
     shaftsDeduction,
     commonAreasGFA,
@@ -151,7 +177,7 @@ export function computeProgram(project: Project): ProgramResult {
       amenitiesGFAarea,
       amenitiesPct: amenitiesGFAarea / denom,
       amenitiesNonGFA: commonAreasOpen,
-      balconiesNonGFA: totalBalcony,
+      balconiesNonGFA: totalBalcony - totalBalconyGFA,
     },
     far: project.plotArea > 0 ? totalGFABuilding / project.plotArea : 0,
   };
