@@ -115,6 +115,39 @@ export default function TypologiesTab() {
     upsert({ ...t, ...partial });
   }
 
+  /** Re-run the Apartments auto-fill for a project state — same silent path
+   *  the unit-mix editor uses. Returns the current matrix when the auto-fill
+   *  can't run (no class mix or no Apartments GFA target). */
+  function refilledProgram(projAfter: typeof project) {
+    const classMix = detectedClass ? library[detectedClass].typologyMix : null;
+    if (!classMix) return projAfter.program;
+    const fill = computeProgramAutoFill(projAfter, resolveTypologyMix(projAfter, classMix));
+    return fill?.cells ?? projAfter.program;
+  }
+
+  /** Save a typology whose AREAS or CATEGORY changed and refill Apartments.
+   *  A different interior / balcony split changes the GFA each unit consumes,
+   *  so the unit count that fits the Apartments GFA target — and with it GSA,
+   *  BUA, parking and lifts — must follow at once. */
+  function upsertAndRefill(t: Typology) {
+    const exists = project.typologies.some((x) => x.id === t.id);
+    const typologies = exists
+      ? project.typologies.map((x) => (x.id === t.id ? t : x))
+      : [...project.typologies, t];
+    const projAfter = { ...project, typologies };
+    patch({ typologies, program: refilledProgram(projAfter) });
+  }
+
+  function removeAndRefill(id: string) {
+    const typologies = project.typologies.filter((x) => x.id !== id);
+    const program = project.program.filter((c) => c.typologyId !== id);
+    const mixById = project.typologyMixById ? { ...project.typologyMixById } : undefined;
+    if (mixById) delete mixById[id];
+    const typologyMixById = mixById && Object.keys(mixById).length > 0 ? mixById : undefined;
+    const projAfter = { ...project, typologies, program, typologyMixById };
+    patch({ typologies, typologyMixById, program: refilledProgram(projAfter) });
+  }
+
   /** Persist mix changes and silently re-run the Apartments auto-fill so the
    *  next tab reflects the change immediately. */
   function patchAndRefill(partial: {
@@ -186,20 +219,19 @@ export default function TypologiesTab() {
     }
     const balcony = Number((totalM2 * pct).toFixed(2));
     const interior = Number((totalM2 - balcony).toFixed(2));
-    upsert({ ...t, internalArea: interior, balconyArea: balcony });
+    upsertAndRefill({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
-  /** Edit balcony % directly. We keep the Total area constant (= average of
-   *  min/max for the class) and redistribute between interior and balcony.
-   *  The Program tab reflects this through `Interior GFA` (= interior × units
-   *  per floor) — Sellable stays fixed because Total is the sum of the two. */
+  /** Edit balcony % directly. The Total area stays constant and is
+   *  redistributed between interior and balcony; the Apartments matrix is
+   *  refilled because each unit now consumes a different GFA. */
   function setBalconyPct(t: Typology, pctValue: number) {
     if (!Number.isFinite(pctValue) || pctValue < 0) pctValue = 0;
     if (pctValue > 100) pctValue = 100;
     const total = t.internalArea + t.balconyArea;
     const balcony = Number(((total * pctValue) / 100).toFixed(2));
     const interior = Number((total - balcony).toFixed(2));
-    upsert({ ...t, internalArea: interior, balconyArea: balcony });
+    upsertAndRefill({ ...t, internalArea: interior, balconyArea: balcony });
   }
 
   /**
@@ -450,7 +482,7 @@ export default function TypologiesTab() {
                         value={t.category}
                         onChange={(e) => {
                           const cat = e.target.value as UnitCategory;
-                          update(t, { category: cat, occupancy: DEFAULT_OCCUPANCY[cat], parkingPerUnit: DEFAULT_PARKING[cat] });
+                          upsertAndRefill({ ...t, category: cat, occupancy: DEFAULT_OCCUPANCY[cat], parkingPerUnit: DEFAULT_PARKING[cat] });
                         }}
                       >
                         {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
@@ -491,13 +523,9 @@ export default function TypologiesTab() {
                         className="btn btn-danger btn-xs"
                         onClick={() => {
                           if (!confirm(`Delete ${t.name}?`)) return;
-                          remove(t.id);
-                          // Drop its per-typology mix override too.
-                          if (project.typologyMixById?.[t.id] !== undefined) {
-                            const next = { ...project.typologyMixById };
-                            delete next[t.id];
-                            patch({ typologyMixById: Object.keys(next).length === 0 ? undefined : next });
-                          }
+                          // Drops its mix override too, and refills Apartments
+                          // so its share goes to the remaining typologies.
+                          removeAndRefill(t.id);
                         }}
                       >Delete</button>
                     </td>
