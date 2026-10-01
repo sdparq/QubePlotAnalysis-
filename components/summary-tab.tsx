@@ -201,7 +201,14 @@ export default function SummaryTab() {
               {fmt0(a.balconiesGFA)} m² of balconies; the sellable figures above take the whole balcony.
             </p>
           )}
-          {a.usesMatrix && Math.abs(a.apartmentsDrift) > Math.max(1, a.apartmentsQuota * 0.01) && (
+          {a.usesMatrix && a.apartmentsQuota <= 0 && (
+            <p className="text-[10.5px] text-amber-800 px-3 py-1.5 leading-snug border-t border-ink-100">
+              ⚠ No Apartments GFA target yet (set <em>Residential</em> in Setup → GFA breakdown), so
+              there is nothing to compare the matrix&apos;s {fmt0(a.apartmentsGFA)} m² with. These
+              figures follow the units placed in the Apartments matrix.
+            </p>
+          )}
+          {a.usesMatrix && a.apartmentsQuota > 0 && Math.abs(a.apartmentsDrift) > Math.max(1, a.apartmentsQuota * 0.01) && (
             <p className="text-[10.5px] text-amber-800 px-3 py-1.5 leading-snug border-t border-ink-100">
               ⚠ The matrix consumes {fmt0(a.apartmentsGFA)} m² of GFA
               {a.balconyGfaFactor > 0 ? ` (interior + ${Math.round(a.balconyGfaFactor * 100)} % of balconies)` : " (interior)"} against the{" "}
@@ -214,7 +221,7 @@ export default function SummaryTab() {
               <em>Apartments → Apply to N floors</em> to realign it with the target.
             </p>
           )}
-          {a.usesMatrix && Math.abs(a.apartmentsDrift) <= Math.max(1, a.apartmentsQuota * 0.01) && (
+          {a.usesMatrix && a.apartmentsQuota > 0 && Math.abs(a.apartmentsDrift) <= Math.max(1, a.apartmentsQuota * 0.01) && (
             <p className="text-[10.5px] text-ink-500 px-3 py-1.5 leading-snug border-t border-ink-100">
               Matches the Apartments tab: {fmt0(a.matrixUnits)} units ={" "}
               {fmt0(program.totalSellable)} m² sellable. Apartments GFA target from Distribution:{" "}

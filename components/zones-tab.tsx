@@ -539,7 +539,7 @@ function NumberMatrix({
                       type="number"
                       step={0.5}
                       min={0}
-                      className="cell-input text-right !py-1 !px-1.5 pr-6 w-full"
+                      className="cell-input text-right !py-1 !pl-1.5 !pr-6 w-full"
                       value={getDisplay(rowFor(l)[tk])}
                       onChange={(e) => {
                         const v = parseFloat(e.target.value);

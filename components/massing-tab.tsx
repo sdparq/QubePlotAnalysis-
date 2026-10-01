@@ -534,7 +534,7 @@ export default function MassingTab() {
             )}
           </div>
 
-          <aside ref={asideRef} className="border border-ink-200 bg-white xl:sticky xl:top-4 scroll-mt-4 min-w-0">
+          <aside ref={asideRef} className="border border-ink-200 bg-white xl:sticky xl:top-[72px] scroll-mt-[72px] min-w-0">
             <div className="px-4 pt-4 pb-3 border-b border-ink-200 bg-bone-50/60">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="eyebrow text-ink-700">Design controls</span>
@@ -557,7 +557,7 @@ export default function MassingTab() {
                 ))}
               </div>
             </div>
-            <div className="p-4 grid gap-4 xl:max-h-[calc(100vh-200px)] xl:overflow-y-auto scroll-thin">
+            <div className="p-4 grid gap-4 xl:max-h-[calc(100vh-250px)] xl:overflow-y-auto scroll-thin">
               {panel === "design" && (
                 <>
                   <TowerDesignPanel

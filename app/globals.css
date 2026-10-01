@@ -7,7 +7,12 @@ body {
   color: #0e0e0e;
   background: #f6f4ee;
   font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+::selection { background: rgba(100, 125, 87, 0.22); }
+:focus-visible { outline: 2px solid rgba(100, 125, 87, 0.55); outline-offset: 2px; }
 
 /* Hide number input spinners */
 input[type="number"]::-webkit-outer-spin-button,
@@ -17,11 +22,12 @@ input[type="number"] { -moz-appearance: textfield; }
 /* ---------- form controls ---------- */
 .cell-input {
   @apply w-full px-3 py-2 bg-white border border-ink-200 text-ink-900 text-sm
-         placeholder:text-ink-400
-         focus:outline-none focus:ring-1 focus:ring-qube-500 focus:border-qube-500
-         transition-colors;
+         placeholder:text-ink-400 hover:border-ink-300
+         focus:outline-none focus:border-qube-500
+         transition-[border-color,box-shadow] duration-150;
   border-radius: 2px;
 }
+.cell-input:focus { box-shadow: 0 0 0 3px rgba(100, 125, 87, 0.16); }
 .cell-input:disabled { @apply bg-bone-100 text-ink-500; }
 
 select.cell-input {
@@ -36,12 +42,13 @@ select.cell-input {
 /* ---------- buttons ---------- */
 .btn {
   @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium
-         transition-colors uppercase tracking-wider;
+         transition-[background-color,border-color,color,box-shadow] duration-150 uppercase tracking-wider
+         disabled:opacity-50 disabled:cursor-not-allowed;
   letter-spacing: 0.08em;
   font-size: 11.5px;
   border-radius: 2px;
 }
-.btn-primary { @apply bg-ink-900 text-bone-100 hover:bg-qube-700; }
+.btn-primary { @apply bg-ink-900 text-bone-100 hover:bg-qube-700 shadow-[0_1px_2px_rgba(14,14,14,0.18)]; }
 .btn-secondary { @apply bg-transparent border border-ink-300 text-ink-800 hover:border-ink-700 hover:bg-bone-200; }
 .btn-ghost { @apply bg-transparent text-ink-700 hover:text-ink-900; }
 .btn-danger { @apply bg-transparent border border-red-300 text-red-700 hover:bg-red-50; }
@@ -49,13 +56,15 @@ select.cell-input {
 
 /* ---------- cards & layout ---------- */
 .card {
-  @apply bg-white border border-ink-200 p-6;
+  @apply bg-white border border-ink-200/90 p-6;
   border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(14, 14, 14, 0.035), 0 10px 28px -22px rgba(14, 14, 14, 0.22);
 }
 .kpi {
-  @apply bg-white border border-ink-200 p-5 flex flex-col gap-2;
+  @apply bg-white border border-ink-200 p-5 flex flex-col gap-2 transition-colors;
   border-radius: 2px;
 }
+.kpi:hover { @apply border-ink-300; }
 .kpi-label { @apply text-[10.5px] uppercase tracking-[0.18em] text-ink-500 font-medium; }
 .kpi-value { @apply text-2xl font-medium text-ink-900 tabular-nums; }
 .kpi-sub { @apply text-xs text-ink-500; }
@@ -63,6 +72,17 @@ select.cell-input {
 .section-title {
   @apply text-base font-medium text-ink-900 uppercase;
   letter-spacing: 0.12em;
+}
+/* QUBE marker: a small green square ahead of every section title. */
+.section-title::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 11px;
+  background: #647d57;
+  vertical-align: middle;
+  transform: translateY(-2px);
 }
 .section-sub { @apply text-sm text-ink-500 mt-1; }
 .section-rule { @apply h-px bg-ink-200 my-4; }
@@ -78,6 +98,7 @@ table.tbl th {
 table.tbl td {
   @apply px-3 py-2 border-b border-ink-100 align-middle text-ink-800 tabular-nums;
 }
+table.tbl tbody tr { @apply transition-colors; }
 table.tbl tr:hover td { @apply bg-bone-50; }
 table.tbl td.cell-edit { @apply p-1.5; }
 table.tbl tfoot td, table.tbl tr.row-total td { @apply bg-bone-200/60 font-medium text-ink-900; }

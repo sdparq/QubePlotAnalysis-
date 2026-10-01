@@ -52,6 +52,14 @@ export default function Page() {
     setLibraryUnlocked(window.sessionStorage.getItem(LIBRARY_UNLOCK_KEY) === "1");
     setHydrated(true);
   }, []);
+  // The tab bar stays pinned while scrolling, so a new tab would otherwise
+  // open half-way down: bring its top under the bar.
+  useEffect(() => {
+    // The bar's resting position is right under the header (once pinned,
+    // its own rect always reads 0).
+    const navTop = document.querySelector("header")?.offsetHeight ?? 0;
+    if (window.scrollY > navTop) window.scrollTo({ top: navTop });
+  }, [tab]);
   if (!hydrated) return null;
 
   async function openLibrary() {
@@ -82,9 +90,9 @@ export default function Page() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col overflow-x-hidden">
+    <div className="min-h-screen flex flex-col overflow-x-clip">
       <HeaderBar />
-      <nav className="border-b border-ink-200 bg-white sticky top-0 z-20">
+      <nav className="border-b border-ink-200 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-[0_1px_0_rgba(14,14,14,0.02),0_6px_18px_-14px_rgba(14,14,14,0.25)]">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-wrap gap-x-1 gap-y-0 items-center">
             {TABS.map((t) => {
@@ -93,14 +101,19 @@ export default function Page() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`relative px-4 py-4 text-[13px] font-semibold transition-colors flex items-baseline gap-2 ${
+                  className={`group relative px-4 py-4 text-[13px] font-semibold transition-colors flex items-baseline gap-2 ${
                     active ? "text-ink-900" : "text-ink-500 hover:text-ink-900"
                   }`}
                   style={{ letterSpacing: "0.06em" }}
+                  aria-current={active ? "page" : undefined}
                 >
-                  <span className={`text-[10px] font-medium ${active ? "text-qube-600" : "text-ink-400"}`}>{t.num}</span>
+                  <span className={`text-[10px] font-medium transition-colors ${active ? "text-qube-600" : "text-ink-400 group-hover:text-qube-500"}`}>{t.num}</span>
                   <span className="uppercase">{t.label}</span>
-                  {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-qube-500" />}
+                  <span
+                    className={`absolute left-3 right-3 -bottom-px h-0.5 transition-all ${
+                      active ? "bg-qube-500 opacity-100" : "bg-ink-300 opacity-0 group-hover:opacity-100"
+                    }`}
+                  />
                 </button>
               );
             })}

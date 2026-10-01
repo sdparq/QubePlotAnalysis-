@@ -337,7 +337,7 @@ function GroupRow({
             type="number"
             step={0.5}
             min={0}
-            className="cell-input text-right pr-6 !py-1 !px-1.5 w-[110px]"
+            className="cell-input text-right !py-1 !pl-1 !pr-6.5 w-[110px]"
             value={Number(value.toFixed(2))}
             onChange={(e) => {
               const n = parseFloat(e.target.value);

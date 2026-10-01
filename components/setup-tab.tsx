@@ -433,7 +433,7 @@ function GfaBreakdownCard({
                     type="number"
                     step={item.mode === "absolute" ? 10 : 0.5}
                     min={0}
-                    className="cell-input text-right pr-7"
+                    className="cell-input text-right !pr-7"
                     value={item.value || 0}
                     onChange={(e) => {
                       const n = parseFloat(e.target.value);
@@ -493,7 +493,7 @@ function GfaBreakdownCard({
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
-    <label className="grid gap-2">
+    <label className="grid gap-2 content-start">
       <span className="eyebrow">{label}</span>
       {children}
       {hint && <span className="text-[10.5px] text-ink-500 tabular-nums">{hint}</span>}
@@ -515,7 +515,7 @@ function NumInput({ value, onChange, step = 1, suffix }: { value: number; onChan
       <input
         type="text"
         inputMode="decimal"
-        className="cell-input pr-9"
+        className="cell-input !pr-9"
         value={text}
         onChange={(e) => {
           const raw = e.target.value;

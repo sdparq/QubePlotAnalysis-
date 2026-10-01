@@ -470,7 +470,7 @@ export default function TypologiesTab() {
                           value={total > 0 ? Number(((t.balconyArea / total) * 100).toFixed(1)) : 0}
                           min={0}
                           max={100}
-                          className="cell-input text-right pr-7"
+                          className="cell-input text-right !pr-7"
                           onCommit={(n) => setBalconyPct(t, n)}
                           title="Balcony as % of Total area. Editing this keeps Total constant."
                         />
