@@ -1,6 +1,22 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BuildingComplex,
+  Camera,
+  Compass as CompassIcon,
+  Footprints,
+  ImageDown,
+  MapPin,
+  Maximize2,
+  Pause,
+  Play,
+  Rotate3d,
+  Ruler,
+  Sun,
+  TreePalm,
+  X,
+} from "lucide-react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt2 } from "@/lib/format";
 import { renderSchemeWithGemini, DEFAULT_SCHEME_PROMPT, DEFAULT_HYPERREAL_PROMPT } from "@/lib/ai-render";
@@ -17,11 +33,20 @@ import {
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import type { Volume } from "@/lib/massing";
+import type { FacadeConfig, TowerFacadeStyle } from "@/lib/types";
+import type { CaptureFn, SceneStyle, ViewPresetKind } from "./massing-scene";
+import type { FacadeParams as WalkFacadeParams } from "./massing-walk-kit";
+import { dubaiDaylight, dubaiSun, formatClock } from "@/lib/sun";
+import { projectMetrics, type ProjectMetrics } from "@/lib/metrics";
+import { composeBrandedImage, downloadDataUrl, slug } from "@/lib/branded-image";
+import { ACCENTS, FACADE_STYLES, GLASSES, resolveFacade, type FacadeParams } from "@/lib/facade";
+import { formatLatLng, isInUae, parseLatLng, type LatLng, type SiteContext } from "@/lib/site-context";
+import { useSiteContext, type ContextStatus } from "@/lib/use-site-context";
 
 const MassingScene = dynamic(() => import("./massing-scene"), {
   ssr: false,
   loading: () => (
-    <div className="aspect-[4/3] border border-ink-200 bg-bone-100 flex items-center justify-center">
+    <div className="absolute inset-0 flex items-center justify-center bg-bone-100">
       <div className="text-center">
         <div className="mx-auto w-8 h-8 border-2 border-qube-500 border-t-transparent rounded-full animate-spin mb-3" />
         <div className="text-xs text-ink-500 uppercase tracking-[0.18em]">Loading 3D viewer…</div>
@@ -37,6 +62,24 @@ const PROMPT_FOR: Record<AiStyle, string> = {
   scheme: DEFAULT_SCHEME_PROMPT,
   hyperreal: DEFAULT_HYPERREAL_PROMPT,
 };
+
+/** Tier colours of the Diagram style — kept in sync with PALETTES.diagram in massing-scene. */
+const TIER_SWATCH: Record<NonNullable<Volume["kind"]>, string> = {
+  basement: "#9aa3b2",
+  ground: "#eb6834",
+  podium: "#2a78d6",
+  tower: "#1baf7a",
+};
+
+/** QUBE logo, as in the header. */
+function QubeMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 100" className={className} fill="none" stroke="#0f7a35" strokeWidth={11} strokeLinejoin="miter" strokeMiterlimit={4} aria-label="QUBE logo">
+      <path d="M 8 8 L 72 8 L 92 28 L 92 92 L 28 92 L 8 72 Z" />
+    </svg>
+  );
+}
+
 
 /** Resolve a per-edge setback array for a tier:
  *   - if the persisted perEdge array matches the plot polygon length, use it
@@ -175,7 +218,7 @@ export default function MassingTab() {
     const out: Volume[] = [];
     const labels: string[] = [];
     if (basementH > 0 && plotPoly.length >= 3) {
-      out.push({ polygon: plotPoly, fromY: -basementH, toY: 0, kind: "basement" });
+      out.push({ polygon: plotPoly, fromY: -basementH, toY: 0, kind: "basement", floors: basementCount });
       labels.push(basementCount > 1 ? `Basement · ${basementCount}F` : "Basement");
     }
     let y = 0;
@@ -184,7 +227,7 @@ export default function MassingTab() {
       const gSuffix = groundCount > 1 ? ` · ${groundCount}F` : "";
       groundPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
-        out.push({ polygon: poly, fromY: y, toY: y + groundH, kind: "ground" });
+        out.push({ polygon: poly, fromY: y, toY: y + groundH, kind: "ground", floors: groundCount });
         labels.push(groundPolys.length > 1 ? `Ground ${i + 1}${gSuffix}` : `Ground${gSuffix}`);
       });
       y += groundH;
@@ -193,7 +236,7 @@ export default function MassingTab() {
       const pSuffix = podiumCount > 1 ? ` · ${podiumCount}F` : "";
       podiumPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
-        out.push({ polygon: poly, fromY: y, toY: y + podiumH, kind: "podium" });
+        out.push({ polygon: poly, fromY: y, toY: y + podiumH, kind: "podium", floors: podiumCount });
         labels.push(podiumPolys.length > 1 ? `Podium ${i + 1}${pSuffix}` : `Podium${pSuffix}`);
       });
       y += podiumH;
@@ -201,7 +244,7 @@ export default function MassingTab() {
     if (towerH > 0) {
       towerPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
-        out.push({ polygon: poly, fromY: y, toY: y + towerH, kind: "tower" });
+        out.push({ polygon: poly, fromY: y, toY: y + towerH, kind: "tower", floors: towerCount });
         labels.push(towerPolys.length > 1 ? `Tower ${i + 1} · ${towerCount}F` : `Tower · ${towerCount}F`);
       });
     }
@@ -211,48 +254,77 @@ export default function MassingTab() {
   const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * towerCount;
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
 
-  const [viewPreset, setViewPreset] = useState<{ kind: "iso" | "front" | "top"; nonce: number } | null>(null);
-  const [autoRotate, setAutoRotate] = useState(false);
-  const [showAnnotations, setShowAnnotations] = useState(true);
-  const captureRef = useRef<(() => string) | null>(null);
+  const captureRef = useRef<CaptureFn | null>(null);
 
-  // Facade parameters, persisted per project with sensible defaults.
-  const facadeParams = {
-    mode: project.facade?.mode ?? "massing",
-    panelWidthM: project.facade?.panelWidthM ?? 3.2,
-    balconyDepthM: project.facade?.balconyDepthM ?? 1.8,
-    balconyEveryNBays: project.facade?.balconyEveryNBays ?? 2,
-    solidPanelRatio: project.facade?.solidPanelRatio ?? 0.25,
-    balconyLayout: project.facade?.balconyLayout ?? "rhythm",
-    patternSeed: project.facade?.patternSeed ?? 1,
-    groundPodiumTreatment: project.facade?.groundPodiumTreatment ?? "massing",
-    finSpacingM: project.facade?.finSpacingM ?? 1.0,
-    finWidthM: project.facade?.finWidthM ?? 0.15,
-    finDepthM: project.facade?.finDepthM ?? 0.35,
-    podiumPool: project.facade?.podiumPool ?? false,
-    podiumLoungeBbq: project.facade?.podiumLoungeBbq ?? false,
-  } as const;
+  // Designed façade of the viewer, persisted per project with every default
+  // applied. Memoised so the 3D scene only rebuilds the building when it changes.
+  const facadeParams: FacadeParams = useMemo(() => resolveFacade(project.facade), [project.facade]);
+  // The first-person walk keeps its own façade model (mullion grid, balcony
+  // rhythm, precast panels) and shares mode, balconies and fins with the viewer.
+  const walkFacade: WalkFacadeParams = useMemo(
+    () => ({
+      mode: facadeParams.mode,
+      panelWidthM: project.facade?.panelWidthM ?? 3.2,
+      balconyDepthM: facadeParams.balconyDepthM,
+      balconyEveryNBays: project.facade?.balconyEveryNBays ?? 2,
+      solidPanelRatio: project.facade?.solidPanelRatio ?? 0.25,
+      balconyLayout: project.facade?.balconyLayout ?? "rhythm",
+      patternSeed: project.facade?.patternSeed ?? 1,
+      groundPodiumTreatment: facadeParams.groundPodiumTreatment,
+      finSpacingM: facadeParams.finSpacingM,
+      finWidthM: facadeParams.finWidthM,
+      finDepthM: facadeParams.finDepthM,
+      podiumPool: facadeParams.podiumPool,
+      podiumLoungeBbq: facadeParams.podiumLoungeBbq,
+    }),
+    [facadeParams, project.facade],
+  );
 
-  function patchFacade(partial: Partial<NonNullable<typeof project.facade>>) {
+  function patchFacade(partial: Partial<FacadeConfig>) {
     patch({ facade: { ...project.facade, ...partial } });
   }
 
   const [amenityFit, setAmenityFit] = useState({ pool: true, lounge: true });
   const [immersive, setImmersive] = useState(false);
+  const [panel, setPanel] = useState<"design" | "scheme" | "site" | "render">("design");
 
-  function requestPreset(kind: "iso" | "front" | "top") {
-    setAutoRotate(false);
-    setViewPreset((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1 }));
-  }
+  const metrics = useMemo(() => projectMetrics(project), [project]);
+  const northDeg = project.northDeg ?? 0;
 
-  function downloadSnapshot() {
-    const data = captureRef.current?.();
-    if (!data) return;
-    const a = document.createElement("a");
-    a.href = data;
-    a.download = `${project.name.replace(/\s+/g, "-").toLowerCase() || "project"}-massing.png`;
-    a.click();
-  }
+  // Real surroundings (OpenStreetMap) around the plot's location.
+  const location = project.location;
+  const siteContext = project.siteContext;
+  const contextRadius = siteContext?.radiusM ?? 400;
+  const contextOn = !!siteContext?.enabled && !!location;
+  const siteCtx = useSiteContext(location, contextRadius, contextOn);
+  const contextState: ContextStatus | "unplaced" = !location ? "unplaced" : contextOn ? siteCtx.status : "off";
+  const locationInputRef = useRef<HTMLInputElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+
+  const toggleContext = useCallback(() => {
+    if (!location) {
+      // Nowhere to put the plot yet: take the user to the location field.
+      setPanel("site");
+      requestAnimationFrame(() => {
+        asideRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        locationInputRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    patch({ siteContext: { ...siteContext, enabled: !siteContext?.enabled } });
+  }, [location, siteContext, patch]);
+
+  const tiersPresent = useMemo(() => {
+    const kinds = new Set(sceneVolumes.map((v) => v.kind ?? "tower"));
+    return (["tower", "podium", "ground", "basement"] as const).filter((k) => kinds.has(k));
+  }, [sceneVolumes]);
+
+  const viewerContext =
+    siteCtx.status === "ready" && contextOn && siteCtx.data &&
+    siteCtx.data.buildings.length + siteCtx.data.roads.length + siteCtx.data.water.length > 0
+      ? siteCtx.data
+      : null;
+
 
   // ---- AI render (Gemini image-to-image over the studio capture) ----
   const [apiKey, setApiKey] = useState<string>("");
@@ -309,7 +381,7 @@ export default function MassingTab() {
       setKeyDialog({ open: true, draft: "" });
       return;
     }
-    const png = captureRef.current?.();
+    const png = await captureRef.current?.();
     if (!png) { setAiError("Could not capture the 3D viewer."); return; }
     const basePrompt = (aiPrompts[aiStyle] ?? PROMPT_FOR[aiStyle]).trim() || PROMPT_FOR[aiStyle];
     const prompt = `${geometryFacts}\n\n${basePrompt}`;
@@ -366,6 +438,13 @@ export default function MassingTab() {
     patch({ plotPolygon: next });
   }
 
+  const PANELS = [
+    { id: "design", label: "Design" },
+    { id: "scheme", label: "Scheme" },
+    { id: "site", label: "Site" },
+    { id: "render", label: "AI render" },
+  ] as const;
+
   return (
     <div className="grid gap-6">
       <div className="card">
@@ -373,84 +452,47 @@ export default function MassingTab() {
           <div>
             <h2 className="section-title">Massing study · 3D</h2>
             <p className="section-sub">
-              Simple stratification: the <strong>basement</strong> fills the full plot line;{" "}
-              <strong>ground</strong>, <strong>podium</strong> and <strong>tower</strong> are built
-              on the plot footprint with their own per-edge setbacks. Floor heights come from
-              Setup&apos;s floor breakdown.
+              The <strong>basement</strong> fills the plot line; <strong>ground</strong>,{" "}
+              <strong>podium</strong> and <strong>tower</strong> follow their per-edge setbacks or the
+              footprints traced in Plot. Floor heights come from Setup&apos;s floor breakdown. The
+              façade, sun and surroundings are visual only — areas never change.
             </p>
           </div>
-          <div className="inline-flex border border-ink-200 bg-bone-50">
-            <button
-              onClick={() => setPlotMode("rectangular")}
-              className={`px-4 py-2 text-[11px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                mode === "rectangular" ? "bg-qube-500 text-white" : "text-ink-700 hover:bg-bone-200"
-              }`}
-            >Rectangular</button>
-            <button
-              onClick={() => setPlotMode("polygon")}
-              className={`px-4 py-2 text-[11px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                mode === "polygon" ? "bg-qube-500 text-white" : "text-ink-700 hover:bg-bone-200"
-              }`}
-            >Polygon (irregular)</button>
+          <div className="seg">
+            <button className="seg-btn" data-active={mode === "rectangular"} onClick={() => setPlotMode("rectangular")}>
+              Rectangular
+            </button>
+            <button className="seg-btn" data-active={mode === "polygon"} onClick={() => setPlotMode("polygon")}>
+              Polygon (irregular)
+            </button>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
-          <div className="grid gap-4 content-start">
-            <div className="relative aspect-[4/3] lg:aspect-auto lg:h-[calc(100vh-260px)] lg:min-h-[380px] lg:max-h-[640px] border border-ink-200 bg-bone-100 overflow-hidden">
-              <MassingScene
-                plot={plotPoly}
-                buildable={towerPoly}
-                volumes={sceneVolumes}
-                primaryFootprint={towerPoly}
-                floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
-                showFrontMarker={mode === "rectangular"}
-                edgeColors={edgeColors}
-                volumeLabels={volumeLabels}
-                showAnnotations={showAnnotations}
-                viewPreset={viewPreset}
-                autoRotate={autoRotate}
-                captureRef={captureRef}
-                facade={facadeParams}
-                onAmenityFit={setAmenityFit}
-              />
-              <div className="absolute bottom-2 left-2 flex items-stretch gap-1.5 flex-wrap">
-                <div className="inline-flex border border-ink-200 bg-white/90 backdrop-blur-sm shadow-sm">
-                  {([["iso", "Iso"], ["front", "Front"], ["top", "Top"]] as const).map(([kind, label]) => (
-                    <button
-                      key={kind}
-                      onClick={() => requestPreset(kind)}
-                      className="px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 transition-colors"
-                      title={`${label} view`}
-                    >{label}</button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => setAutoRotate((v) => !v)}
-                  className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
-                    autoRotate ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
-                  }`}
-                  title="Slow turntable rotation"
-                >⟳ Orbit</button>
-                <button
-                  onClick={() => setShowAnnotations((v) => !v)}
-                  className={`px-3 py-1.5 border border-ink-200 text-[10.5px] font-medium uppercase tracking-[0.10em] shadow-sm transition-colors ${
-                    showAnnotations ? "bg-ink-900 text-bone-100" : "bg-white/90 backdrop-blur-sm text-ink-700 hover:bg-bone-50"
-                  }`}
-                  title="Toggle height dimension and tier labels"
-                >Dims</button>
-                <button
-                  onClick={downloadSnapshot}
-                  className="px-3 py-1.5 border border-ink-200 bg-white/90 backdrop-blur-sm text-[10.5px] font-medium uppercase tracking-[0.10em] text-ink-700 hover:bg-bone-50 shadow-sm transition-colors"
-                  title="Download the current view as a PNG image"
-                >↓ PNG</button>
-                <button
-                  onClick={() => setImmersive(true)}
-                  className="px-3 py-1.5 border border-qube-600 bg-qube-500 text-white text-[10.5px] font-semibold uppercase tracking-[0.10em] hover:bg-qube-600 shadow-sm transition-colors"
-                  title="Walk around the building in first person — WASD + mouse"
-                >🎮 Immersive</button>
-              </div>
-            </div>
+        <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
+          <div className="grid gap-4 content-start min-w-0">
+            <MassingViewer
+              projectId={project.id}
+              projectName={project.name}
+              zone={project.zone}
+              plot={plotPoly}
+              buildable={towerPoly}
+              volumes={sceneVolumes}
+              floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
+              showFrontMarker={mode === "rectangular"}
+              edgeColors={edgeColors}
+              volumeLabels={volumeLabels}
+              facade={facadeParams}
+              onAmenityFit={setAmenityFit}
+              captureRef={captureRef}
+              northDeg={northDeg}
+              metrics={metrics}
+              tiersPresent={tiersPresent}
+              context={viewerContext}
+              contextRadius={contextRadius}
+              contextState={contextState}
+              onToggleContext={toggleContext}
+              onImmersive={() => setImmersive(true)}
+            />
 
             {project.parcel && !!project.parcel.imageDataUrl && (
               <div className="border border-ink-200 bg-bone-50 overflow-hidden">
@@ -492,207 +534,237 @@ export default function MassingTab() {
             )}
           </div>
 
-          <div className="grid gap-4 content-start">
-            <TierSummary
-              groundCount={groundCount}
-              groundHeightM={groundHeightM}
-              podiumCount={podiumCount}
-              podiumHeightM={podiumHeightM}
-              towerCount={towerCount}
-              towerHeightM={towerHeightM}
-              basementCount={basementCount}
-              basementHeightM={basementHeightM}
-              groundArea={groundArea}
-              podiumArea={podiumArea}
-              towerArea={towerArea}
-              plotArea={plotPolyArea}
-            />
-
-            {(customGrounds || customPodiums || customTowers) && (
-              <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
-                <div className="eyebrow text-qube-800 text-[10px] mb-1">Custom footprints from Plot</div>
-                {([
-                  ["Ground", customGrounds, "ground"],
-                  ["Podium", customPodiums, "podium"],
-                  ["Tower", customTowers, "tower"],
-                ] as const).map(([label, blocks, tier]) =>
-                  blocks ? (
-                    <div key={tier} className="flex items-center justify-between gap-2 py-0.5">
-                      <span>
-                        <strong>
-                          {blocks.length === 1 ? label : `${blocks.length} ${label.toLowerCase()} blocks`}
-                        </strong>{" "}
-                        use{blocks.length === 1 ? "s" : ""} traced footprint{blocks.length === 1 ? "" : "s"}{" "}
-                        ({blocks.map((poly) => fmt2(polygonArea(poly))).join(" + ")} m²) — the{" "}
-                        {label.toLowerCase()} setbacks below are ignored. Add or remove blocks in the
-                        Plot tab.
-                      </span>
-                      <button
-                        className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
-                        onClick={() => {
-                          const singular = { ground: "groundPolygon", podium: "podiumPolygon", tower: "towerPolygon" } as const;
-                          const plural = { ground: "groundPolygons", podium: "podiumPolygons", tower: "towerPolygons" } as const;
-                          const traceKey = { ground: "grounds", podium: "podiums", tower: "towers" } as const;
-                          patch({
-                            [singular[tier]]: undefined,
-                            [plural[tier]]: undefined,
-                            parcel: project.parcel
-                              ? {
-                                  ...project.parcel,
-                                  tierTracesPx: {
-                                    ...project.parcel.tierTracesPx,
-                                    [tier]: undefined,
-                                    [traceKey[tier]]: undefined,
-                                  },
-                                }
-                              : project.parcel,
-                          });
-                        }}
-                        title={`Remove every traced ${label.toLowerCase()} block and fall back to setbacks`}
-                      >clear</button>
-                    </div>
-                  ) : null,
-                )}
+          <aside ref={asideRef} className="border border-ink-200 bg-white xl:sticky xl:top-4 scroll-mt-4 min-w-0">
+            <div className="px-4 pt-4 pb-3 border-b border-ink-200 bg-bone-50/60">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="eyebrow text-ink-700">Design controls</span>
+                <span className="text-[11px] text-ink-500 tabular-nums">
+                  {metrics.heightCode} · {totalH.toFixed(1)} m
+                </span>
               </div>
-            )}
-
-            <SetbacksTable
-              plotPoly={plotPoly}
-              groundEdges={groundEdges}
-              podiumEdges={podiumEdges}
-              towerEdges={towerEdges}
-              groundUni={groundUni}
-              podiumUni={podiumUni}
-              towerUni={towerUni}
-              onPatch={patch}
-            />
-
-            <FacadePanel params={facadeParams} onPatch={patchFacade} />
-
-            <PodiumAmenitiesPanel
-              hasDeck={podiumH > 0 || groundH > 0}
-              deckKind={podiumH > 0 ? "podium" : "ground"}
-              pool={facadeParams.podiumPool}
-              lounge={facadeParams.podiumLoungeBbq}
-              fit={amenityFit}
-              onPatch={patchFacade}
-            />
-
-            <TowerOffset
-              dx={towerDx}
-              dy={towerDy}
-              onPatch={patch}
-            />
-
-            <div className="border border-ink-200">
-              <div className="grid grid-cols-2 divide-x divide-ink-200 border-b border-ink-200">
-                <HeroStat label="Height above ground" value={fmt2(totalH)} unit="m" />
-                <HeroStat label="FAR (volume)" value={computedFar.toFixed(2)} />
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm p-3 bg-bone-50/40">
-                <Stat label="Plot area" value={`${fmt2(plotPolyArea)} m²`} />
-                <Stat label="Tower footprint" value={`${fmt2(towerArea)} m²`} />
-                <Stat label="Basement depth" value={`${fmt2(basementH)} m`} />
-                <Stat label="Σ Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} />
+              <div className="seg mt-3 w-full grid grid-cols-4" role="tablist" aria-label="Design control groups">
+                {PANELS.map((p) => (
+                  <button
+                    key={p.id}
+                    role="tab"
+                    aria-selected={panel === p.id}
+                    data-active={panel === p.id}
+                    className="seg-btn !px-1"
+                    onClick={() => setPanel(p.id)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
             </div>
-
-            <div className="border border-ink-200">
-              <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
-                <span className="eyebrow text-ink-500 text-[10px]">AI render</span>
-                <div className="inline-flex border border-ink-200 bg-white">
-                  {([["scheme", "Schematic"], ["hyperreal", "Hyperreal"]] as const).map(([id, label]) => (
-                    <button
-                      key={id}
-                      onClick={() => setAiStyle(id)}
-                      className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                        aiStyle === id ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-                      }`}
-                    >{label}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="p-3 grid gap-2">
-                <button
-                  className="px-2.5 py-2 text-[10.5px] font-medium uppercase tracking-[0.10em] bg-qube-500 text-white hover:bg-qube-600 disabled:opacity-50 disabled:cursor-wait transition-colors"
-                  onClick={handleAiRender}
-                  disabled={aiRendering}
-                  title="Capture the current 3D view and re-render it via Google Gemini"
-                >
-                  {aiRendering ? "Rendering…" : "✦ Render current view"}
-                </button>
-                <details>
-                  <summary className="cursor-pointer text-[10.5px] uppercase tracking-[0.10em] text-ink-500 hover:text-ink-900">Prompt</summary>
-                  <textarea
-                    className="cell-input !text-[10.5px] !leading-snug !py-1.5 !px-1.5 font-mono mt-1.5 w-full"
-                    rows={6}
-                    value={aiPrompts[aiStyle]}
-                    onChange={(e) => setAiPrompts((p) => ({ ...p, [aiStyle]: e.target.value }))}
-                    spellCheck={false}
+            <div className="p-4 grid gap-4 xl:max-h-[calc(100vh-200px)] xl:overflow-y-auto scroll-thin">
+              {panel === "design" && (
+                <>
+                  <TowerDesignPanel
+                    params={facadeParams}
+                    onPatch={patchFacade}
+                    hasGround={groundH > 0}
+                    hasPodium={podiumH > 0}
+                    towers={towerPolys.length}
                   />
-                  {aiPrompts[aiStyle] !== PROMPT_FOR[aiStyle] && (
-                    <button
-                      className="text-[10px] text-qube-700 hover:text-qube-900 underline mt-1"
-                      onClick={() => setAiPrompts((p) => ({ ...p, [aiStyle]: PROMPT_FOR[aiStyle] }))}
-                    >Reset to default</button>
+                  <PodiumAmenitiesPanel
+                    hasDeck={podiumH > 0 || groundH > 0}
+                    deckKind={podiumH > 0 ? "podium" : "ground"}
+                    pool={facadeParams.podiumPool}
+                    lounge={facadeParams.podiumLoungeBbq}
+                    fit={amenityFit}
+                    onPatch={patchFacade}
+                  />
+                </>
+              )}
+
+              {panel === "scheme" && (
+                <>
+                  <div className="border border-ink-200">
+                    <div className="grid grid-cols-2 divide-x divide-ink-200 border-b border-ink-200">
+                      <HeroStat label="Height above ground" value={fmt2(totalH)} unit="m" />
+                      <HeroStat label="FAR (volume)" value={computedFar.toFixed(2)} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm p-3 bg-bone-50/40">
+                      <Stat label="Plot area" value={`${fmt2(plotPolyArea)} m²`} />
+                      <Stat label="Tower footprint" value={`${fmt2(towerArea)} m²`} />
+                      <Stat label="Basement depth" value={`${fmt2(basementH)} m`} />
+                      <Stat label="Σ Volume GFA" value={`${fmt2(totalVolumeGFA)} m²`} />
+                    </div>
+                  </div>
+                  <TierSummary
+                    groundCount={groundCount}
+                    groundHeightM={groundHeightM}
+                    podiumCount={podiumCount}
+                    podiumHeightM={podiumHeightM}
+                    towerCount={towerCount}
+                    towerHeightM={towerHeightM}
+                    basementCount={basementCount}
+                    basementHeightM={basementHeightM}
+                    groundArea={groundArea}
+                    podiumArea={podiumArea}
+                    towerArea={towerArea}
+                    plotArea={plotPolyArea}
+                  />
+                  {(customGrounds || customPodiums || customTowers) && (
+                    <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
+                      <div className="eyebrow text-qube-800 text-[10px] mb-1">Custom footprints from Plot</div>
+                      {([
+                        ["Ground", customGrounds, "ground"],
+                        ["Podium", customPodiums, "podium"],
+                        ["Tower", customTowers, "tower"],
+                      ] as const).map(([label, blocks, tier]) =>
+                        blocks ? (
+                          <div key={tier} className="flex items-center justify-between gap-2 py-0.5">
+                            <span>
+                              <strong>
+                                {blocks.length === 1 ? label : `${blocks.length} ${label.toLowerCase()} blocks`}
+                              </strong>{" "}
+                              use{blocks.length === 1 ? "s" : ""} traced footprint{blocks.length === 1 ? "" : "s"}{" "}
+                              ({blocks.map((poly) => fmt2(polygonArea(poly))).join(" + ")} m²) — the{" "}
+                              {label.toLowerCase()} setbacks are ignored. Add or remove blocks in the Plot tab.
+                            </span>
+                            <button
+                              className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
+                              onClick={() => {
+                                const singular = { ground: "groundPolygon", podium: "podiumPolygon", tower: "towerPolygon" } as const;
+                                const plural = { ground: "groundPolygons", podium: "podiumPolygons", tower: "towerPolygons" } as const;
+                                const traceKey = { ground: "grounds", podium: "podiums", tower: "towers" } as const;
+                                patch({
+                                  [singular[tier]]: undefined,
+                                  [plural[tier]]: undefined,
+                                  parcel: project.parcel
+                                    ? {
+                                        ...project.parcel,
+                                        tierTracesPx: {
+                                          ...project.parcel.tierTracesPx,
+                                          [tier]: undefined,
+                                          [traceKey[tier]]: undefined,
+                                        },
+                                      }
+                                    : project.parcel,
+                                });
+                              }}
+                              title={`Remove every traced ${label.toLowerCase()} block and fall back to setbacks`}
+                            >clear</button>
+                          </div>
+                        ) : null,
+                      )}
+                    </div>
                   )}
-                </details>
-                <button
-                  className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
-                  onClick={() => setKeyDialog({ open: true, draft: apiKey })}
-                >
-                  {apiKey ? "Replace Gemini key" : "Set Gemini key"}
-                </button>
-                {aiError && (
-                  <div className="text-[10px] text-red-700 leading-snug whitespace-pre-wrap">{aiError}</div>
-                )}
-              </div>
-            </div>
+                  <TowerOffset dx={towerDx} dy={towerDy} onPatch={patch} />
+                </>
+              )}
 
-            <Collapsible
-              title={mode === "polygon" ? "Plot geometry · vertices" : "Plot dimensions"}
-              defaultOpen={mode === "polygon" ? (project.plotPolygon?.length ?? 0) === 0 : false}
-            >
-              {mode === "rectangular" ? (
-                <RectangularInputs project={project} patch={patch} placeholder={sqRoot.toFixed(1)} />
-              ) : (
-                <PolygonInputs
-                  vertices={project.plotPolygon ?? []}
-                  onUpdate={updateVertex}
-                  onAddAfter={addVertexAfter}
-                  onDelete={deleteVertex}
-                  onRecentre={recentrePolygon}
-                />
+              {panel === "site" && (
+                <>
+                  <NorthControl value={northDeg} onChange={(v) => patch({ northDeg: v })} />
+                  <SiteContextPanel
+                    location={location}
+                    enabled={!!siteContext?.enabled}
+                    radius={contextRadius}
+                    status={contextOn ? siteCtx.status : "off"}
+                    error={siteCtx.error}
+                    context={siteCtx.data}
+                    inputRef={locationInputRef}
+                    onLocation={(loc) =>
+                      patch({
+                        location: loc ?? undefined,
+                        // Placing the plot for the first time switches the surroundings on.
+                        siteContext: loc && siteContext?.enabled === undefined ? { ...siteContext, enabled: true } : siteContext,
+                      })
+                    }
+                    onEnabled={(v) => patch({ siteContext: { ...siteContext, enabled: v } })}
+                    onRadius={(r) => patch({ siteContext: { ...siteContext, radiusM: r } })}
+                    onRetry={siteCtx.retry}
+                  />
+                  <Collapsible
+                    title={mode === "polygon" ? "Plot geometry · vertices" : "Plot dimensions"}
+                    defaultOpen={mode === "polygon" ? (project.plotPolygon?.length ?? 0) === 0 : false}
+                  >
+                    {mode === "rectangular" ? (
+                      <RectangularInputs project={project} patch={patch} placeholder={sqRoot.toFixed(1)} />
+                    ) : (
+                      <PolygonInputs
+                        vertices={project.plotPolygon ?? []}
+                        onUpdate={updateVertex}
+                        onAddAfter={addVertexAfter}
+                        onDelete={deleteVertex}
+                        onRecentre={recentrePolygon}
+                      />
+                    )}
+                  </Collapsible>
+                  <SetbacksTable
+                    plotPoly={plotPoly}
+                    groundEdges={groundEdges}
+                    podiumEdges={podiumEdges}
+                    towerEdges={towerEdges}
+                    groundUni={groundUni}
+                    podiumUni={podiumUni}
+                    towerUni={towerUni}
+                    onPatch={patch}
+                  />
+                </>
               )}
-            </Collapsible>
 
-            <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.18em] text-ink-500 flex-wrap">
-              <span className="inline-block w-3 h-3 bg-[#ede9df] border border-[#3f5135]" />
-              Plot
-              <span className="inline-block w-3 h-3 bg-[#647d57] ml-3" />
-              Tower
-              {groundH > 0 && (
-                <>
-                  <span className="inline-block w-3 h-3 bg-[#8a9a76] ml-3" />
-                  Ground
-                </>
-              )}
-              {podiumH > 0 && (
-                <>
-                  <span className="inline-block w-3 h-3 bg-[#a3b08a] ml-3" />
-                  Podium
-                </>
-              )}
-              {basementH > 0 && (
-                <>
-                  <span className="inline-block w-3 h-3 bg-[#bdb9ad] ml-3" />
-                  Basement
-                </>
+              {panel === "render" && (
+                <div className="border border-ink-200">
+                  <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
+                    <span className="eyebrow text-ink-500 text-[10px]">AI render · Gemini</span>
+                    <div className="seg">
+                      {([["scheme", "Schematic"], ["hyperreal", "Hyperreal"]] as const).map(([id, label]) => (
+                        <button key={id} className="seg-btn !py-0.5" data-active={aiStyle === id} onClick={() => setAiStyle(id)}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="p-3 grid gap-2">
+                    <p className="text-[11.5px] text-ink-500 leading-snug">
+                      Captures the current 3D view — camera, sun and façade included — and re-renders it
+                      keeping the building&apos;s geometry.
+                    </p>
+                    <button
+                      className="btn btn-primary w-full disabled:opacity-50 disabled:cursor-wait"
+                      onClick={handleAiRender}
+                      disabled={aiRendering}
+                      title="Capture the current 3D view and re-render it via Google Gemini"
+                    >
+                      {aiRendering ? "Rendering…" : "✦ Render current view"}
+                    </button>
+                    <details>
+                      <summary className="cursor-pointer text-[10.5px] uppercase tracking-[0.10em] text-ink-500 hover:text-ink-900">Prompt</summary>
+                      <textarea
+                        className="cell-input !text-[10.5px] !leading-snug !py-1.5 !px-1.5 font-mono mt-1.5 w-full"
+                        rows={6}
+                        value={aiPrompts[aiStyle]}
+                        onChange={(e) => setAiPrompts((p) => ({ ...p, [aiStyle]: e.target.value }))}
+                        spellCheck={false}
+                      />
+                      {aiPrompts[aiStyle] !== PROMPT_FOR[aiStyle] && (
+                        <button
+                          className="text-[10px] text-qube-700 hover:text-qube-900 underline mt-1"
+                          onClick={() => setAiPrompts((p) => ({ ...p, [aiStyle]: PROMPT_FOR[aiStyle] }))}
+                        >Reset to default</button>
+                      )}
+                    </details>
+                    <button
+                      className="text-[10px] text-ink-500 hover:text-ink-900 underline justify-self-start"
+                      onClick={() => setKeyDialog({ open: true, draft: apiKey })}
+                    >
+                      {apiKey ? "Replace Gemini key" : "Set Gemini key"}
+                    </button>
+                    {aiError && (
+                      <div className="text-[10px] text-red-700 leading-snug whitespace-pre-wrap">{aiError}</div>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-          </div>
+          </aside>
         </div>
       </div>
+
 
       {/* First-person immersive walk */}
       {immersive && (
@@ -700,7 +772,7 @@ export default function MassingTab() {
           plot={plotPoly}
           volumes={sceneVolumes}
           floorHeight={towerHeightM > 0 ? towerHeightM : project.floorHeight}
-          facade={facadeParams}
+          facade={walkFacade}
           geometryFacts={geometryFacts}
           onExit={() => setImmersive(false)}
         />
@@ -809,6 +881,904 @@ export default function MassingTab() {
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                  Viewer                                    */
+/* -------------------------------------------------------------------------- */
+
+const STYLES: { id: SceneStyle; label: string; hint: string }[] = [
+  { id: "realistic", label: "Realistic", hint: "Dubai daylight with the chosen glass and metal" },
+  { id: "model", label: "Model", hint: "White architectural model" },
+  { id: "diagram", label: "Diagram", hint: "Colour by tier — basement, ground, podium, tower" },
+];
+
+const VIEWS: { id: ViewPresetKind; label: string; hint: string }[] = [
+  { id: "aerial", label: "Aerial", hint: "Back to the aerial view" },
+  { id: "front", label: "Front", hint: "Street-level view of the front" },
+  { id: "top", label: "Top", hint: "Plan view from above" },
+];
+
+const SUN_DATES: { label: string; m: number; d: number }[] = [
+  { label: "21 Mar", m: 3, d: 21 },
+  { label: "21 Jun", m: 6, d: 21 },
+  { label: "21 Sep", m: 9, d: 21 },
+  { label: "21 Dec", m: 12, d: 21 },
+];
+
+const OSM_CREDIT = "© OpenStreetMap contributors";
+
+interface ViewerProps {
+  projectId: string;
+  projectName: string;
+  zone: string;
+  plot: Point[];
+  buildable: Point[];
+  volumes: Volume[];
+  floorHeight: number;
+  showFrontMarker: boolean;
+  edgeColors?: string[];
+  volumeLabels: string[];
+  facade: FacadeParams;
+  onAmenityFit: (fit: { pool: boolean; lounge: boolean }) => void;
+  captureRef: React.MutableRefObject<CaptureFn | null>;
+  northDeg: number;
+  metrics: ProjectMetrics;
+  tiersPresent: NonNullable<Volume["kind"]>[];
+  /** OpenStreetMap surroundings, when loaded. */
+  context: SiteContext | null;
+  contextRadius: number;
+  contextState: ContextStatus | "unplaced";
+  onToggleContext: () => void;
+  onImmersive: () => void;
+}
+
+const MassingViewer = memo(function MassingViewer(props: ViewerProps) {
+  const {
+    projectId, projectName, zone, plot, buildable, volumes, floorHeight, showFrontMarker, edgeColors,
+    volumeLabels, facade, onAmenityFit, captureRef, northDeg, metrics, tiersPresent,
+    context, contextRadius, contextState, onToggleContext, onImmersive,
+  } = props;
+
+  const [style, setStyle] = useState<SceneStyle>("realistic");
+  const [viewPreset, setViewPreset] = useState<{ kind: ViewPresetKind; nonce: number } | null>(null);
+  const [autoRotate, setAutoRotate] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const [showPlanting, setShowPlanting] = useState(true);
+  const [present, setPresent] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const compassRef = useRef<HTMLDivElement>(null);
+
+  // Sun study — Dubai, a chosen day and hour.
+  const year = new Date().getFullYear();
+  const [sunOn, setSunOn] = useState(true);
+  const [sunDate, setSunDate] = useState({ m: 3, d: 21 });
+  const [hour, setHour] = useState(14);
+  const [playing, setPlaying] = useState(false);
+  const daylight = useMemo(() => dubaiDaylight(year, sunDate.m, sunDate.d), [year, sunDate]);
+  const clampedHour = Math.min(daylight.sunset - 0.05, Math.max(daylight.sunrise + 0.05, hour));
+  const sun = useMemo(
+    () => (sunOn ? dubaiSun(year, sunDate.m, sunDate.d, clampedHour) : null),
+    [sunOn, year, sunDate, clampedHour],
+  );
+
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = performance.now();
+    let acc = 0;
+    const tick = (now: number) => {
+      acc += now - last;
+      last = now;
+      // ~12 s for a whole day, updated at ~24 fps.
+      if (acc > 40) {
+        const step = ((daylight.sunset - daylight.sunrise) / 12000) * acc;
+        acc = 0;
+        setHour((h) => {
+          const next = Math.max(h, daylight.sunrise) + step;
+          return next >= daylight.sunset - 0.05 ? daylight.sunrise + 0.05 : next;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, daylight]);
+
+  // Presentation mode: Esc exits, and the page behind stops scrolling.
+  useEffect(() => {
+    if (!present) return;
+    document.body.classList.add("present-open");
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPresent(false);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("present-open");
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [present]);
+
+  function flyTo(kind: ViewPresetKind) {
+    setAutoRotate(false);
+    setViewPreset((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1 }));
+  }
+
+  const stats: Array<[string, string]> = useMemo(() => {
+    const out: Array<[string, string]> = [];
+    if (metrics.totalGFA > 0) out.push(["GFA", `${Math.round(metrics.totalGFA).toLocaleString("en-US")} m²`]);
+    if (metrics.units > 0) out.push(["Units", metrics.units.toLocaleString("en-US")]);
+    out.push(["Height", `${metrics.heightCode} · ${metrics.heightM.toFixed(0)} m`]);
+    if (metrics.far !== null) out.push(["FAR", metrics.far.toFixed(2)]);
+    if (metrics.gsa > 0) out.push(["Sellable", `${Math.round(metrics.gsa).toLocaleString("en-US")} m²`]);
+    return out;
+  }, [metrics]);
+
+  async function exportImage() {
+    const cap = captureRef.current;
+    if (!cap || exporting) return;
+    setExporting(true);
+    try {
+      const shot = await cap({ scale: 2 });
+      if (!shot) return;
+      const when = sun
+        ? ` · sun ${SUN_DATES.find((d) => d.m === sunDate.m && d.d === sunDate.d)?.label ?? ""} ${formatClock(clampedHour)}`
+        : "";
+      const exportStats: Array<[string, string]> = [];
+      if (metrics.totalGFA > 0) exportStats.push(["GFA", `${Math.round(metrics.totalGFA).toLocaleString("en-US")} m²`]);
+      if (metrics.units > 0) exportStats.push(["Units", metrics.units.toLocaleString("en-US")]);
+      exportStats.push(["Height", `${metrics.heightM.toFixed(0)} m`]);
+      if (metrics.far !== null) exportStats.push(["FAR", metrics.far.toFixed(2)]);
+      const img = await composeBrandedImage(shot, {
+        title: projectName || "Untitled project",
+        subtitle: `${zone || "Dubai"} · ${metrics.heightCode} · massing study${when}`,
+        stats: exportStats,
+        brand: "QUBE",
+        tagline: "QUBE Development · Plot feasibility",
+        attribution: context ? `Surroundings ${OSM_CREDIT}` : undefined,
+      });
+      downloadDataUrl(img, `${slug(projectName)}-massing.png`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const toolBtn =
+    "inline-flex items-center gap-1.5 h-8 px-2.5 text-[10.5px] font-medium uppercase tracking-[0.08em] transition-colors whitespace-nowrap";
+  const glass = "bg-white/90 backdrop-blur-md border border-ink-200 shadow-sm";
+  const on = "bg-ink-900 text-bone-100";
+  const off = "text-ink-700 hover:bg-bone-200/70";
+
+  return (
+    <div
+      className={
+        present
+          ? "fixed inset-0 z-[70] bg-ink-900"
+          : "relative overflow-hidden border border-ink-200 bg-bone-100 aspect-[3/4] sm:aspect-[4/3] xl:aspect-auto xl:h-[calc(100vh-345px)] xl:min-h-[540px] xl:max-h-[820px]"
+      }
+    >
+      <MassingScene
+        plot={plot}
+        buildable={buildable}
+        volumes={volumes}
+        primaryFootprint={buildable}
+        floorHeight={floorHeight}
+        showFrontMarker={showFrontMarker}
+        edgeColors={edgeColors}
+        volumeLabels={volumeLabels}
+        showAnnotations={showAnnotations && !present}
+        viewPreset={viewPreset}
+        autoRotate={autoRotate}
+        captureRef={captureRef}
+        facade={facade}
+        onAmenityFit={onAmenityFit}
+        style={style}
+        sun={sun}
+        northDeg={northDeg}
+        showPlanting={showPlanting}
+        quality={present ? "high" : "standard"}
+        compassRef={compassRef}
+        frameKey={projectId}
+        context={context}
+        contextRadius={contextRadius}
+      />
+
+      {/* Top-left: style + legend */}
+      <div className="absolute z-20 top-3 left-3 grid gap-2 justify-items-start max-w-[calc(100%-24px)]">
+        {present && (
+          <div className={`${glass} px-4 py-3 flex items-center gap-3`}>
+            <QubeMark className="w-8 h-8 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[16px] font-medium text-ink-900 truncate max-w-[46vw]">{projectName}</div>
+              <div className="text-[10.5px] uppercase tracking-[0.14em] text-ink-500 truncate">{zone} · QUBE massing study</div>
+            </div>
+          </div>
+        )}
+        <div className={`${glass} p-0.5 inline-flex gap-0.5`} role="radiogroup" aria-label="Viewer style">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              role="radio"
+              aria-checked={style === s.id}
+              onClick={() => setStyle(s.id)}
+              title={s.hint}
+              className={`${toolBtn} !h-7 ${style === s.id ? on : off}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {style === "diagram" && (
+          <div className={`${glass} px-2.5 py-2 grid gap-1`} aria-label="Legend">
+            {tiersPresent.map((k) => (
+              <div key={k} className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.08em] text-ink-700">
+                <span className="w-2.5 h-2.5" style={{ background: TIER_SWATCH[k], opacity: k === "basement" ? 0.6 : 1 }} />
+                {k === "tower" ? "Tower · residential" : k}
+              </div>
+            ))}
+          </div>
+        )}
+        {contextState === "loading" && (
+          <div className={`${glass} px-2.5 py-1.5 flex items-center gap-2 text-[11px] text-ink-700`} role="status">
+            <span className="w-3 h-3 border-2 border-qube-500 border-t-transparent rounded-full animate-spin" />
+            Loading surroundings…
+          </div>
+        )}
+        {contextState === "error" && (
+          <div className={`${glass} px-2.5 py-1.5 text-[11px] text-amber-800`} role="status">
+            Surroundings unavailable — retry in Site
+          </div>
+        )}
+      </div>
+
+      {/* OpenStreetMap credit, required wherever its data is shown */}
+      {context && (
+        <div className="absolute z-10 right-3 top-[52px] px-1.5 py-0.5 bg-white/75 text-[10px] text-ink-500 pointer-events-auto">
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="hover:underline">
+            {OSM_CREDIT}
+          </a>
+        </div>
+      )}
+
+      {/* Top-right: camera */}
+      <div className="absolute z-20 top-3 right-3 flex items-center gap-2">
+        <div className={`${glass} p-0.5 inline-flex gap-0.5`} role="group" aria-label="Camera views">
+          {VIEWS.map((v) => (
+            <button key={v.id} onClick={() => flyTo(v.id)} className={`${toolBtn} !h-7 ${off}`} title={v.hint}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setAutoRotate((v) => !v)}
+          className={`${toolBtn} ${glass} ${autoRotate ? "!bg-ink-900 text-bone-100" : off}`}
+          title="Turntable rotation"
+          aria-pressed={autoRotate}
+        >
+          <Rotate3d className="w-4 h-4" />
+        </button>
+        {present && (
+          <button onClick={() => setPresent(false)} className={`${toolBtn} ${glass} ${off}`} title="Exit presentation (Esc)">
+            <X className="w-4 h-4" /> Exit
+          </button>
+        )}
+      </div>
+
+      {/* Bottom: compass + sun study + actions */}
+      <div className="absolute z-20 left-3 right-3 bottom-3 grid gap-2 sm:flex sm:flex-wrap sm:items-end">
+        <div className={`${glass} order-1 sm:order-2 px-3 py-2 grid gap-1.5 sm:flex sm:items-center sm:gap-3 min-w-0 sm:min-w-[440px]`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setSunOn((v) => !v)}
+              className={`w-8 h-8 grid place-items-center shrink-0 ${sunOn ? "bg-sand-100 text-sand-700 border border-sand-300" : "text-ink-400 hover:bg-bone-200/70"}`}
+              title={sunOn ? "Sun & shadow study on — Dubai" : "Turn the Dubai sun & shadow study on"}
+              aria-pressed={sunOn}
+            >
+              <Sun className="w-4 h-4" />
+            </button>
+            {sunOn ? (
+              <>
+                <div className="flex items-center gap-0.5 sm:gap-1" role="radiogroup" aria-label="Day of the year">
+                  {SUN_DATES.map((d) => {
+                    const active = d.m === sunDate.m && d.d === sunDate.d;
+                    return (
+                      <button
+                        key={d.label}
+                        role="radio"
+                        aria-checked={active}
+                        aria-label={d.label}
+                        onClick={() => setSunDate({ m: d.m, d: d.d })}
+                        className={`h-7 px-1.5 sm:px-2 text-[10.5px] font-medium uppercase tracking-[0.06em] whitespace-nowrap ${active ? on : "text-ink-600 hover:bg-bone-200/70"}`}
+                      >
+                        <span className="sm:hidden">{d.label.split(" ")[1]}</span>
+                        <span className="hidden sm:inline">{d.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="sm:hidden ml-auto text-right leading-tight shrink-0">
+                  <div className="text-[13px] font-medium text-ink-900 tabular-nums">{formatClock(clampedHour)}</div>
+                </div>
+              </>
+            ) : (
+              <span className="text-[11px] text-ink-500 pr-2">Sun study off — studio light</span>
+            )}
+          </div>
+          {sunOn && (
+            <div className="flex items-center gap-2 flex-1 min-w-0 sm:min-w-[180px]">
+              <button
+                onClick={() => setPlaying((p) => !p)}
+                className="w-7 h-7 grid place-items-center text-ink-700 hover:bg-bone-200/70 shrink-0"
+                title={playing ? "Pause the day" : "Play the day — sunrise to sunset"}
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </button>
+              <input
+                type="range"
+                min={Math.ceil(daylight.sunrise * 12) / 12}
+                max={Math.floor(daylight.sunset * 12) / 12}
+                step={1 / 12}
+                value={clampedHour}
+                onChange={(e) => {
+                  setPlaying(false);
+                  setHour(parseFloat(e.target.value));
+                }}
+                className="flex-1 accent-[#a17e4c] min-w-[80px]"
+                aria-label="Time of day"
+              />
+              <div className="text-right leading-tight shrink-0 w-[70px] sm:w-[92px]">
+                <div className="hidden sm:block text-[13px] font-medium text-ink-900 tabular-nums">{formatClock(clampedHour)}</div>
+                <div className="text-[10px] text-ink-500 tabular-nums whitespace-nowrap">
+                  {sun ? `alt ${sun.altitudeDeg.toFixed(0)}° · az ${sun.azimuthDeg.toFixed(0)}°` : ""}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="order-2 flex items-end justify-between gap-2 sm:contents">
+          <div className={`${glass} sm:order-1 w-11 h-11 rounded-full grid place-items-center shrink-0`} title="North">
+            <div ref={compassRef} className="w-8 h-8 relative" aria-label="North arrow">
+              <svg viewBox="0 0 32 32" className="w-8 h-8">
+                <path d="M16 3 L20 16 L16 14 L12 16 Z" fill="#506646" />
+                <path d="M16 29 L12 16 L16 18 L20 16 Z" fill="#c9c4b9" />
+              </svg>
+              <span className="absolute -top-1 left-1/2 -translate-x-1/2 text-[8px] font-bold text-qube-700">N</span>
+            </div>
+          </div>
+
+          <div className={`${glass} sm:order-3 p-1 flex items-center gap-0.5 sm:ml-auto`}>
+            <button
+              onClick={() => setShowAnnotations((v) => !v)}
+              className={`${toolBtn} ${showAnnotations ? "text-qube-800 bg-qube-50" : off}`}
+              title="Height dimension and tier labels"
+              aria-label="Dimensions and labels"
+              aria-pressed={showAnnotations}
+            >
+              <Ruler className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setShowPlanting((v) => !v)}
+              className={`${toolBtn} ${showPlanting ? "text-qube-800 bg-qube-50" : off}`}
+              title="Street trees and palms"
+              aria-label="Street trees and palms"
+              aria-pressed={showPlanting}
+            >
+              <TreePalm className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onToggleContext}
+              className={`${toolBtn} ${
+                contextState === "ready" || contextState === "loading" ? "text-qube-800 bg-qube-50" : off
+              }`}
+              title={
+                contextState === "unplaced"
+                  ? "Neighbouring buildings — add the plot location in Site first"
+                  : "Neighbouring buildings, streets and water (OpenStreetMap)"
+              }
+              aria-label="Neighbouring buildings"
+              aria-pressed={contextState === "ready" || contextState === "loading"}
+            >
+              <BuildingComplex className="w-4 h-4" />
+            </button>
+            <button onClick={() => void exportImage()} className={`${toolBtn} ${off}`} title="Download a presentation image (PNG)" aria-label="Download image" disabled={exporting}>
+              {exporting ? <Camera className="w-4 h-4 animate-pulse" /> : <ImageDown className="w-4 h-4" />}
+              <span className="hidden md:inline">Image</span>
+            </button>
+            {!present && (
+              <>
+                <button
+                  onClick={onImmersive}
+                  className={`${toolBtn} ${off}`}
+                  title="Walk around the building in first person — WASD + mouse"
+                  aria-label="Immersive walk"
+                >
+                  <Footprints className="w-4 h-4" />
+                  <span className="hidden md:inline">Walk</span>
+                </button>
+                <button onClick={() => setPresent(true)} className={`${toolBtn} bg-qube-600 text-white hover:bg-qube-700`} title="Full-screen presentation mode" aria-label="Present">
+                  <Maximize2 className="w-4 h-4" />
+                  <span className="hidden md:inline">Present</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Presentation KPI band */}
+      {present && (
+        <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-[132px] sm:bottom-[76px] max-w-[calc(100%-24px)]">
+          <div className={`${glass} px-2 py-2 flex items-stretch overflow-x-auto no-scrollbar`}>
+            {stats.map(([label, value]) => (
+              <div key={label} className="px-4 py-1 border-r last:border-r-0 border-ink-200 min-w-[120px]">
+                <div className="text-[10px] uppercase tracking-[0.14em] text-ink-500 font-medium whitespace-nowrap">{label}</div>
+                <div className="text-[18px] font-medium text-ink-900 whitespace-nowrap tracking-tight tabular-nums">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/*                              Inspector panels                              */
+/* -------------------------------------------------------------------------- */
+
+function NorthControl({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="flex items-center gap-2">
+          <CompassIcon className="w-4 h-4 text-ink-400" /> True north
+        </span>
+        <span className="text-[11px] text-ink-500 tabular-nums normal-case tracking-normal">{value.toFixed(0)}°</span>
+      </div>
+      <div className="p-3 grid gap-2">
+        <input
+          type="range"
+          min={-180}
+          max={180}
+          step={1}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="w-full accent-[#506646]"
+          aria-label="True north bearing"
+        />
+        <p className="text-[11px] text-ink-500 leading-snug">
+          Bearing of true north, clockwise from the top of the plot drawing. Copy it from the north arrow on the
+          affection plan (0° = drawing is north-up). It orients the sun & shadow study and the surroundings.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const RADII = [250, 400, 600];
+
+function SiteContextPanel({
+  location, enabled, radius, status, error, context, inputRef, onLocation, onEnabled, onRadius, onRetry,
+}: {
+  location: LatLng | undefined;
+  enabled: boolean;
+  radius: number;
+  status: ContextStatus;
+  error?: string;
+  context: SiteContext | null;
+  inputRef: React.RefObject<HTMLInputElement>;
+  onLocation: (loc: LatLng | null) => void;
+  onEnabled: (v: boolean) => void;
+  onRadius: (r: number) => void;
+  onRetry: () => void;
+}) {
+  const [draft, setDraft] = useState(location ? formatLatLng(location) : "");
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => {
+    setDraft(location ? formatLatLng(location) : "");
+    setInvalid(false);
+  }, [location]);
+
+  function commit() {
+    const text = draft.trim();
+    if (!text) {
+      if (location) onLocation(null);
+      setInvalid(false);
+      return;
+    }
+    const loc = parseLatLng(text);
+    if (!loc) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    if (!location || loc.lat !== location.lat || loc.lng !== location.lng) onLocation(loc);
+    else setDraft(formatLatLng(loc));
+  }
+
+  const estimated = context?.buildings.filter((b) => b.estimated).length ?? 0;
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-ink-400" /> Location & surroundings
+        </span>
+      </div>
+      <div className="p-3 grid gap-3">
+        <label className="grid gap-1.5">
+          <span className="text-[10.5px] uppercase tracking-[0.10em] font-medium text-ink-500">Plot location</span>
+          <input
+            ref={inputRef}
+            className={`cell-input ${invalid ? "!border-red-400" : ""}`}
+            value={draft}
+            placeholder="25.18650, 55.26400 or a Google Maps link"
+            spellCheck={false}
+            inputMode="text"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === "Enter" && commit()}
+            aria-invalid={invalid}
+          />
+          {invalid ? (
+            <span className="text-[11px] text-red-700">
+              Not a location — paste coordinates like 25.18650, 55.26400 or a Google Maps link.
+            </span>
+          ) : (
+            <span className="text-[11px] text-ink-500 leading-snug">
+              In Google Maps, right-click the middle of the plot and click the coordinates to copy them.
+            </span>
+          )}
+        </label>
+        {location && !isInUae(location) && (
+          <p className="text-[11px] text-amber-800 leading-snug -mt-1">
+            These coordinates are outside the UAE — check that the latitude comes first.
+          </p>
+        )}
+        {location && (
+          <a
+            href={`https://www.google.com/maps?q=${location.lat},${location.lng}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[11.5px] font-medium text-qube-700 hover:text-qube-900 justify-self-start -mt-1"
+          >
+            Check it on Google Maps ↗
+          </a>
+        )}
+
+        <div className="panel divide-y divide-ink-100">
+          <ToggleRow
+            label="Neighbouring buildings"
+            hint="Buildings, streets and water from OpenStreetMap"
+            checked={enabled && !!location}
+            disabled={!location}
+            onChange={onEnabled}
+          />
+          <div className={`px-3 py-2.5 flex items-center justify-between gap-3 ${enabled && location ? "" : "opacity-45"}`}>
+            <span className="text-[12px] font-medium text-ink-900">Radius</span>
+            <div className="seg">
+              {RADII.map((r) => (
+                <button
+                  key={r}
+                  className="seg-btn !py-0.5"
+                  data-active={radius === r}
+                  disabled={!enabled || !location}
+                  onClick={() => onRadius(r)}
+                >
+                  {r} m
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {status === "loading" && (
+          <div className="flex items-center gap-2 text-[11.5px] text-ink-600" role="status">
+            <span className="w-3.5 h-3.5 border-2 border-qube-500 border-t-transparent rounded-full animate-spin" />
+            Loading OpenStreetMap…
+          </div>
+        )}
+        {status === "ready" && context && (
+          <p className="text-[11.5px] text-ink-700 leading-snug" role="status">
+            {context.buildings.length.toLocaleString("en-US")} buildings · {context.roads.length.toLocaleString("en-US")} streets
+            {context.water.length > 0 ? " · water" : ""}
+            {estimated > 0 && (
+              <span className="text-ink-500"> — {estimated.toLocaleString("en-US")} without a height in OpenStreetMap, shown at a typical height</span>
+            )}
+          </p>
+        )}
+        {status === "error" && (
+          <div className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 px-3 py-2">
+            <span className="text-[11.5px] text-amber-900 leading-snug">{error || "OpenStreetMap is not responding."}</span>
+            <button className="btn btn-secondary btn-xs shrink-0" onClick={onRetry}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        <p className="text-[11px] text-ink-500 leading-snug">
+          The plot centre goes on these coordinates, turned by True north above. Buildings standing on the plot are
+          left out. Map data{" "}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline hover:text-ink-800">
+            © OpenStreetMap contributors
+          </a>
+          .
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function mix(a: string, b: string, t: number) {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (shift: number) => Math.round(((pa >> shift) & 255) * (1 - t) + ((pb >> shift) & 255) * t);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, "0")}`;
+}
+
+/** Mini elevation of a façade concept, in the chosen glass and metal. */
+function FacadePictogram({ style, glass, accent }: { style: TowerFacadeStyle; glass: string; accent: string }) {
+  const sky = "#eef1ec";
+  const white = "#ffffff";
+  const x0 = 40;
+  const x1 = 80;
+  const top = 8;
+  const bottom = 58;
+  const rows = Array.from({ length: 8 }, (_, i) => top + 6 + i * 6.2);
+  const cols = (step: number) => Array.from({ length: Math.floor((x1 - x0) / step) + 1 }, (_, i) => x0 + i * step);
+  return (
+    <svg viewBox="0 0 120 64" className="w-full h-14" aria-hidden>
+      <rect width="120" height="64" fill={sky} />
+      <rect x="0" y="58" width="120" height="6" fill="#dcd6c8" />
+      <rect x={x0} y={top} width={x1 - x0} height={bottom - top} rx={style === "frame" ? 1 : 5} fill={glass} />
+      {style === "balconies" &&
+        rows.map((y) => (
+          <g key={y}>
+            <rect x={x0 - 4} y={y} width={x1 - x0 + 8} height={1.8} rx={0.9} fill={white} />
+            <rect x={x0 - 4} y={y - 2.4} width={x1 - x0 + 8} height={0.8} fill={accent} />
+          </g>
+        ))}
+      {style === "curtain" && (
+        <>
+          {rows.map((y) => (
+            <rect key={y} x={x0} y={y} width={x1 - x0} height={1.6} fill={mix(glass, "#0e0e0e", 0.45)} />
+          ))}
+          {cols(4).map((x, i) => (
+            <rect key={x} x={x - (i % 4 === 0 ? 0.9 : 0.3)} y={top} width={i % 4 === 0 ? 1.8 : 0.6} height={bottom - top} fill={i % 4 === 0 ? accent : white} opacity={i % 4 === 0 ? 1 : 0.55} />
+          ))}
+        </>
+      )}
+      {style === "fins" && (
+        <>
+          {rows.map((y) => (
+            <rect key={y} x={x0} y={y} width={x1 - x0} height={0.9} fill={white} opacity={0.85} />
+          ))}
+          {cols(4.4).map((x, i) => (
+            <rect key={x} x={x - 0.9} y={top} width={1.8 + 0.9 * Math.abs(Math.sin(i * 0.7))} height={bottom - top} fill={accent} />
+          ))}
+        </>
+      )}
+      {style === "frame" && (
+        <>
+          {cols(3.3).map((x) => (
+            <rect key={x} x={x - 0.25} y={top} width={0.5} height={bottom - top} fill={white} opacity={0.5} />
+          ))}
+          {[top, ...rows.filter((_, i) => i % 2 === 1)].map((y) => (
+            <rect key={y} x={x0 - 1.5} y={y} width={x1 - x0 + 3} height={2.4} fill={accent} />
+          ))}
+          {cols(10).map((x) => (
+            <rect key={`p${x}`} x={x - 1.3} y={top} width={2.6} height={bottom - top} fill={accent} />
+          ))}
+        </>
+      )}
+      {/* crown */}
+      {Array.from({ length: 9 }, (_, i) => (
+        <rect key={i} x={x0 + 1 + i * 4.75} y={2.5} width={0.9} height={top - 2.5} fill={accent} />
+      ))}
+      <rect x={x0} y={2} width={x1 - x0} height={1.2} fill={accent} />
+    </svg>
+  );
+}
+
+function SwatchRow<K extends string>({
+  label, value, options, onChange,
+}: {
+  label: string;
+  value: K;
+  options: { id: K; label: string; swatch: string }[];
+  onChange: (id: K) => void;
+}) {
+  const current = options.find((o) => o.id === value);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-[10.5px] uppercase tracking-[0.10em] font-medium text-ink-500">{label}</span>
+        <span className="text-[11.5px] font-medium text-ink-900">{current?.label}</span>
+      </div>
+      <div className="flex items-center gap-2.5" role="radiogroup" aria-label={label}>
+        {options.map((o) => {
+          const active = o.id === value;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-label={o.label}
+              title={o.label}
+              onClick={() => onChange(o.id)}
+              className={`w-8 h-8 rounded-full grid place-items-center transition-shadow ${
+                active ? "ring-2 ring-qube-500 ring-offset-2" : "ring-1 ring-ink-200 hover:ring-ink-400"
+              }`}
+            >
+              <span
+                className="w-6 h-6 rounded-full"
+                style={{
+                  background: `linear-gradient(145deg, ${mix(o.swatch, "#ffffff", 0.45)} 0%, ${o.swatch} 55%, ${mix(o.swatch, "#000000", 0.25)} 100%)`,
+                }}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label, hint, checked, disabled, onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-bone-50 transition-colors disabled:opacity-45 disabled:hover:bg-transparent"
+    >
+      <span className="flex-1 min-w-0">
+        <span className="block text-[12px] font-medium text-ink-900">{label}</span>
+        <span className="block text-[11px] text-ink-500 leading-snug">{hint}</span>
+      </span>
+      <span className={`relative w-9 h-5 rounded-full shrink-0 transition-colors ${checked && !disabled ? "bg-qube-600" : "bg-ink-200"}`}>
+        <span
+          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-4" : ""}`}
+        />
+      </span>
+    </button>
+  );
+}
+
+function TowerDesignPanel({
+  params, onPatch, hasGround, hasPodium, towers,
+}: {
+  params: FacadeParams;
+  onPatch: (p: Partial<FacadeConfig>) => void;
+  hasGround: boolean;
+  hasPodium: boolean;
+  towers: number;
+}) {
+  const designed = params.mode === "residential";
+  const glass = GLASSES[params.glass].swatch;
+  const accent = ACCENTS[params.accent].swatch;
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="eyebrow text-ink-700">Tower façade</span>
+        <div className="seg">
+          <button className="seg-btn !py-0.5" data-active={designed} onClick={() => onPatch({ mode: "residential" })}>
+            Designed
+          </button>
+          <button
+            className="seg-btn !py-0.5"
+            data-active={!designed}
+            onClick={() => onPatch({ mode: "massing" })}
+            title="Plain tier volumes with floor lines"
+          >
+            Plain massing
+          </button>
+        </div>
+      </div>
+
+      <div className={`grid gap-4 transition-opacity ${designed ? "" : "opacity-40 pointer-events-none select-none"}`} aria-disabled={!designed}>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Façade concept">
+          {FACADE_STYLES.map((f) => {
+            const active = params.style === f.id;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onPatch({ style: f.id, mode: "residential" })}
+                className={`text-left p-2 transition-shadow bg-white border ${
+                  active ? "border-qube-500 ring-1 ring-qube-500 shadow-sm" : "border-ink-200 hover:border-ink-400"
+                }`}
+              >
+                <FacadePictogram style={f.id} glass={glass} accent={accent} />
+                <span className="block mt-2 px-0.5 text-[12px] font-medium text-ink-900 leading-tight">{f.label}</span>
+                <span className="block px-0.5 mt-0.5 text-[10.5px] text-ink-500 leading-snug">{f.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <SwatchRow
+            label="Glass"
+            value={params.glass}
+            options={(Object.keys(GLASSES) as (keyof typeof GLASSES)[]).map((id) => ({ id, label: GLASSES[id].label, swatch: GLASSES[id].swatch }))}
+            onChange={(id) => onPatch({ glass: id })}
+          />
+          <SwatchRow
+            label="Metal"
+            value={params.accent}
+            options={(Object.keys(ACCENTS) as (keyof typeof ACCENTS)[]).map((id) => ({ id, label: ACCENTS[id].label, swatch: ACCENTS[id].swatch }))}
+            onChange={(id) => onPatch({ accent: id })}
+          />
+        </div>
+
+        {params.style === "balconies" && (
+          <label className="grid gap-1.5">
+            <span className="flex items-baseline justify-between">
+              <span className="text-[10.5px] uppercase tracking-[0.10em] font-medium text-ink-500">Balcony depth</span>
+              <span className="text-[11.5px] font-medium text-ink-900 tabular-nums">{params.balconyDepthM.toFixed(1)} m</span>
+            </span>
+            <input
+              type="range"
+              min={1.2}
+              max={3.5}
+              step={0.1}
+              value={params.balconyDepthM}
+              onChange={(e) => onPatch({ balconyDepthM: parseFloat(e.target.value) })}
+              className="w-full accent-[#506646]"
+            />
+          </label>
+        )}
+
+        <div className="panel divide-y divide-ink-100">
+          <ToggleRow
+            label="Rounded corners"
+            hint="Soft, sculpted tower corners"
+            checked={params.roundedCorners}
+            onChange={(v) => onPatch({ roundedCorners: v })}
+          />
+          <ToggleRow
+            label="Crown & sky pool"
+            hint={towers > 1 ? "Crown screen over a rooftop pool and lounge on each tower" : "Crown screen over a rooftop pool and lounge"}
+            checked={params.crown}
+            onChange={(v) => onPatch({ crown: v })}
+          />
+          <ToggleRow
+            label="Lobby & entrance canopy"
+            hint="Glazed ground floor with a drop-off canopy"
+            checked={params.entrance}
+            disabled={!hasGround}
+            onChange={(v) => onPatch({ entrance: v })}
+          />
+          <ToggleRow
+            label="Podium screen"
+            hint="Metal fins screening the podium car park"
+            checked={params.groundPodiumTreatment === "fins"}
+            disabled={!hasPodium}
+            onChange={(v) => onPatch({ groundPodiumTreatment: v ? "fins" : "massing" })}
+          />
+        </div>
+      </div>
+
+      <p className="text-[11px] text-ink-500 leading-snug">
+        Visual only — areas and ratios never change. The Diagram style shows plain tier colours.
+      </p>
+    </div>
+  );
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                              Tier setbacks                                 */
@@ -988,192 +1958,6 @@ function SetbacksTable({
   );
 }
 
-interface FacadePanelParams {
-  mode: "massing" | "residential";
-  panelWidthM: number;
-  balconyDepthM: number;
-  balconyEveryNBays: number;
-  solidPanelRatio: number;
-  balconyLayout: "rhythm" | "random";
-  patternSeed: number;
-  groundPodiumTreatment: "massing" | "fins";
-  finSpacingM: number;
-  finWidthM: number;
-  finDepthM: number;
-}
-
-function FacadePanel({
-  params, onPatch,
-}: {
-  params: FacadePanelParams;
-  onPatch: (p: Partial<FacadePanelParams>) => void;
-}) {
-  const residential = params.mode === "residential";
-  const fins = params.groundPodiumTreatment === "fins";
-  return (
-    <div className="border border-ink-200">
-      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 flex items-center justify-between gap-2">
-        <span className="eyebrow text-ink-500 text-[10px]">Facade · Tower</span>
-        <div className="inline-flex border border-ink-200 bg-white">
-          <button
-            onClick={() => onPatch({ mode: "massing" })}
-            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-              !residential ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-            }`}
-          >Massing</button>
-          <button
-            onClick={() => onPatch({ mode: "residential" })}
-            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-              residential ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-            }`}
-            title="Model the tower facade: floor slabs, glazing, mullions and balconies"
-          >Residential</button>
-        </div>
-      </div>
-      {residential && (
-        <div className="p-3 grid gap-2">
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Bay width m">
-              <input
-                type="number"
-                step={0.2}
-                min={1}
-                className="cell-input text-right"
-                value={Number(params.panelWidthM.toFixed(1))}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 1) onPatch({ panelWidthM: n });
-                }}
-                title="Vertical mullion spacing along the facade"
-              />
-            </Field>
-            <Field label="Balcony m">
-              <input
-                type="number"
-                step={0.2}
-                min={0}
-                className="cell-input text-right"
-                value={Number(params.balconyDepthM.toFixed(1))}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 0) onPatch({ balconyDepthM: n });
-                }}
-                title="Balcony depth — 0 removes balconies"
-              />
-            </Field>
-            <Field label="Every N bays">
-              <input
-                type="number"
-                step={1}
-                min={1}
-                className="cell-input text-right"
-                value={params.balconyEveryNBays}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  if (Number.isFinite(n) && n >= 1) onPatch({ balconyEveryNBays: n });
-                }}
-                title="A balcony on every Nth facade bay (or 1/N probability in random layout)"
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <Field label="Solid panels %">
-              <input
-                type="number"
-                step={5}
-                min={0}
-                max={100}
-                className="cell-input text-right"
-                value={Math.round(params.solidPanelRatio * 100)}
-                onChange={(e) => {
-                  const n = parseFloat(e.target.value);
-                  if (Number.isFinite(n) && n >= 0 && n <= 100) onPatch({ solidPanelRatio: n / 100 });
-                }}
-                title="Share of facade cells filled with a solid precast panel instead of glazing"
-              />
-            </Field>
-            <Field label="Balcony layout">
-              <div className="inline-flex border border-ink-200 bg-white">
-                {([["rhythm", "Rhythm"], ["random", "Random"]] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    onClick={() => onPatch({ balconyLayout: id })}
-                    className={`px-2.5 py-[7px] text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-                      params.balconyLayout === id ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-                    }`}
-                    title={id === "rhythm" ? "Balconies stack in regular columns" : "Balconies scattered randomly across the facade"}
-                  >{label}</button>
-                ))}
-              </div>
-            </Field>
-          </div>
-          <button
-            className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 bg-white text-ink-800 hover:bg-bone-50 transition-colors"
-            onClick={() => onPatch({ patternSeed: Math.floor(Math.random() * 100000) + 1 })}
-            title="Re-roll the random pattern of solid panels and scattered balconies"
-          >⤲ Shuffle pattern</button>
-          <p className="text-[10.5px] text-ink-500 leading-snug">
-            Applies to the tower: floor slabs, recessed glazing, mullions on the bay rhythm,
-            solid panels scattered at the given share, and balconies.
-          </p>
-        </div>
-      )}
-
-      <div className="px-3 py-2 bg-bone-50 border-y border-ink-200 flex items-center justify-between gap-2">
-        <span className="eyebrow text-ink-500 text-[10px]">Facade · Ground / Podium</span>
-        <div className="inline-flex border border-ink-200 bg-white">
-          <button
-            onClick={() => onPatch({ groundPodiumTreatment: "massing" })}
-            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-              !fins ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-            }`}
-          >Massing</button>
-          <button
-            onClick={() => onPatch({ groundPodiumTreatment: "fins" })}
-            className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.10em] transition-colors ${
-              fins ? "bg-ink-900 text-bone-100" : "text-ink-700 hover:bg-bone-100"
-            }`}
-            title="Wrap ground and podium in a vertical fin / louvre screen"
-          >Vertical fins</button>
-        </div>
-      </div>
-      {fins && (
-        <div className="p-3 grid gap-2">
-          <div className="grid grid-cols-3 gap-2">
-            <DecimalField
-              label="Spacing m"
-              value={params.finSpacingM}
-              step={0.1}
-              min={0.2}
-              onChange={(n) => onPatch({ finSpacingM: n })}
-              title="Centre-to-centre spacing between fins"
-            />
-            <DecimalField
-              label="Width m"
-              value={params.finWidthM}
-              step={0.02}
-              min={0.03}
-              onChange={(n) => onPatch({ finWidthM: n })}
-              title="Fin blade width along the facade"
-            />
-            <DecimalField
-              label="Depth m"
-              value={params.finDepthM}
-              step={0.05}
-              min={0.05}
-              onChange={(n) => onPatch({ finDepthM: n })}
-              title="How far the fins project outward from the facade"
-            />
-          </div>
-          <p className="text-[10.5px] text-ink-500 leading-snug">
-            Full-height vertical blades wrap the Ground and Podium perimeter, spaced evenly
-            per edge, in front of the solid volume underneath.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function PodiumAmenitiesPanel({
   hasDeck, deckKind, pool, lounge, fit, onPatch,

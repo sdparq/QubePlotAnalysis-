@@ -14,6 +14,7 @@ const config: Config = {
           900: "#0e0e0e",
           800: "#1a1a1a",
           700: "#2a2a2a",
+          600: "#4a4a4a",
           500: "#6b6b6b",
           400: "#8a8a8a",
           300: "#b8b5ad",
@@ -37,6 +38,15 @@ const config: Config = {
           700: "#405238",
           800: "#33422e",
           900: "#243121",
+        },
+        /* Warm bronze accent — the sun study and highlights. */
+        sand: {
+          50: "#fbf7ef",
+          100: "#f5ecda",
+          200: "#e9d7b3",
+          300: "#d9bd88",
+          500: "#a17e4c",
+          700: "#6e5431",
         },
       },
       letterSpacing: {

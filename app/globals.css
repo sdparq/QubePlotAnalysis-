@@ -90,6 +90,37 @@ table.tbl tr.row-subtotal td { @apply bg-bone-100 font-medium; }
 .tag-bad { @apply tag bg-red-50 text-red-800 border border-red-200; }
 .tag-info { @apply tag bg-bone-200 text-ink-700 border border-ink-200; }
 
+/* ---------- segmented control ---------- */
+.seg {
+  @apply inline-flex items-stretch gap-0.5 p-0.5 bg-bone-200/70 border border-ink-200;
+  border-radius: 2px;
+}
+.seg-btn {
+  @apply px-3 py-1 text-[10.5px] font-medium uppercase text-ink-600 whitespace-nowrap
+         transition-colors hover:text-ink-900 disabled:opacity-40 disabled:hover:text-ink-600;
+  letter-spacing: 0.08em;
+  border-radius: 1px;
+}
+.seg-btn[data-active="true"] { @apply bg-white text-ink-900 shadow-sm ring-1 ring-ink-200; }
+
+/* ---------- inspector panels ---------- */
+.panel { @apply bg-white border border-ink-200 overflow-hidden min-w-0; border-radius: 2px; }
+.panel-head {
+  @apply flex items-center justify-between gap-3 px-3 py-2 bg-bone-50 border-b border-ink-200
+         text-[10.5px] font-medium uppercase text-ink-700;
+  letter-spacing: 0.12em;
+}
+
+/* ---------- scrollbars ---------- */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(107,107,107,0.4) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(107,107,107,0.35); }
+
+/* Full-screen 3D presentation: the page behind stops scrolling. */
+body.present-open { overflow: hidden; }
+
 /* ---------- branding ---------- */
 .wordmark {
   font-family: var(--font-inter), ui-sans-serif, sans-serif;

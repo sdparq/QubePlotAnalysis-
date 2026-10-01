@@ -19,7 +19,7 @@ import {
   ROAD_W,
   SIDEWALK_W,
   type FacadeParams,
-} from "./massing-scene";
+} from "./massing-walk-kit";
 
 const EYE_H = 1.7;      // camera eye height (m)
 const WALK_SPEED = 4.5; // m/s

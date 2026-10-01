@@ -9,4 +9,6 @@ export interface Volume {
   fromY: number;
   toY: number;
   kind?: "tower" | "ground" | "podium" | "basement";
+  /** Storeys inside the volume — drives the floor lines of the façade. */
+  floors?: number;
 }

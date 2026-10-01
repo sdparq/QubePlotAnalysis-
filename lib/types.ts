@@ -252,12 +252,41 @@ export interface Project {
   economic?: EconomicConfig;
   /** Parametric facade treatment for the Massing viewer. */
   facade?: FacadeConfig;
+  /** Bearing of true north, clockwise from the drawing's +y axis (degrees).
+   *  Orients the sun & shadow study. Default 0 = the drawing is north-up. */
+  northDeg?: number;
+  /** WGS84 position of the plot centroid — places the site in its real surroundings. */
+  location?: { lat: number; lng: number };
+  /** Neighbouring buildings, streets and water from OpenStreetMap in the 3D massing. */
+  siteContext?: { enabled?: boolean; radiusM?: number };
 }
 
 /** Parameters for the modelled residential facade in the Massing viewer. */
+/** Tower façade concept of the designed façade. */
+export type TowerFacadeStyle = "balconies" | "curtain" | "fins" | "frame";
+/** Metal accent for fins, handrails, crown and canopy. */
+export type FacadeAccent = "white" | "champagne" | "bronze" | "graphite";
+/** Glass tint of the curtain wall. */
+export type FacadeGlass = "azure" | "aqua" | "grey" | "bronze";
+
+/** Façade of the 3D Massing viewer (visual only — areas never change).
+ *  The designed-façade fields (style … entrance) drive the Massing viewer;
+ *  panelWidthM … patternSeed drive the first-person immersive walk. */
 export interface FacadeConfig {
-  /** "massing" = flat volumes (default); "residential" = modelled facade with slabs, glazing, mullions and balconies. */
+  /** "residential" = designed façade (default); "massing" = plain tier volumes. */
   mode?: "massing" | "residential";
+  /** Tower façade concept. Default "balconies". */
+  style?: TowerFacadeStyle;
+  /** Glass tint. Default "azure". */
+  glass?: FacadeGlass;
+  /** Metal accent. Default "champagne". */
+  accent?: FacadeAccent;
+  /** Soft rounded tower corners. Default true. */
+  roundedCorners?: boolean;
+  /** Architectural crown with a rooftop sky pool and lounge. Default true. */
+  crown?: boolean;
+  /** Glazed lobby with an entrance canopy on the front of the plot. Default true. */
+  entrance?: boolean;
   /** Vertical mullion spacing along the facade (m). Default 3.2. */
   panelWidthM?: number;
   /** Balcony slab depth (m). 0 hides balconies. Default 1.8. */

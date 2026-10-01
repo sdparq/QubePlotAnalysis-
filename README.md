@@ -131,24 +131,24 @@ The app is configured as a fully static export — works on any static host, no 
 
 That's it — no plugin needed. For cloud sync set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in Netlify's environment (see *Cloud sync* above); without them the app stays local-only.
 
-## Urban-context 3D view
+## 3D Massing viewer
 
-The Massing tab has a *Studio / In context* toggle. The In-context view drops the project building onto an Esri satellite tile composite and surrounds it with the neighbouring buildings extruded as **white volumes** from OpenStreetMap data.
+The Massing tab renders the scheme — every traced tower, podium and ground block — in three
+styles: **Realistic** (Dubai daylight, designed façade), **Model** (white architectural model)
+and **Diagram** (colour by tier). Everything in it is visual only; areas and ratios never change.
 
-**No API keys, no signups.** Both the satellite imagery (Esri World Imagery) and the building footprints (OSM Overpass) are public free services with attribution shown on the viewer.
-
-To use it:
-
-1. Fill **Latitude** and **Longitude** in Setup. Optional **North heading** if the plot's +Y axis isn't aligned to true north.
-2. Open Massing → click **In context** in the top-right of the 3D viewer.
-3. **Click any white volume** (a surrounding building) to select it. A small editor appears on the top-left of the viewer where you can:
-   - Override its height — useful for masterplan plots that aren't built yet but you know the planned tower height.
-   - Hide it — useful when OSM has noise / parking shelters / etc. you don't want to see.
-   - Reset to OSM default at any time.
-
-Heights default to OSM's `height` tag (or `building:levels × 3.2 m`, fallback 9 m). Edits persist with the project.
-
-Limits: Esri's free tile usage and the Overpass API are rate-limited but sufficient for normal interactive use.
+- **Design** — tower façade concept (resort balconies, glass curtain wall, vertical fins, framed
+  grid), glass tint, metal accent, rounded corners, crown with sky pool, lobby canopy, podium fin
+  screen, and podium deck amenities.
+- **Sun & shadow study** — Dubai sun position for 21 Mar / Jun / Sep / Dec at any hour, with a
+  play-the-day animation. Set **True north** in *Site* so shadows fall the right way.
+- **Surroundings** — paste the plot's coordinates (or a Google Maps link) in *Site → Location &
+  surroundings* to download the neighbouring buildings, streets and water within 250 / 400 / 600 m
+  from OpenStreetMap (Overpass API, no key). A deployment can point `NEXT_PUBLIC_OVERPASS_URL` at
+  its own Overpass server.
+- **Camera** — Aerial / Front / Top views and a turntable; **Image** downloads a 2× PNG with a QUBE
+  title bar and headline figures; **Present** opens a full-screen presentation; **Walk** opens the
+  first-person immersive walk; *AI render* re-renders the current view through Gemini.
 
 ## Adding new normatives
 
