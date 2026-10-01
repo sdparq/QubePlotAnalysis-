@@ -116,10 +116,45 @@ export default function PlanTrace({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // Trackpad pinch arrives as ctrl+wheel with small deltas — zoom on it,
+      // a little faster so the gesture feels direct.
+      if (e.ctrlKey) {
+        applyZoom(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+        return;
+      }
+      // Two-finger trackpad scroll (sideways component or fractional pixel
+      // deltas — a mouse wheel sends whole notches with no deltaX) pans the
+      // zoomed plan instead of zooming it.
+      const trackpadScroll =
+        e.deltaMode === 0 && (Math.abs(e.deltaX) > 0.5 || !Number.isInteger(e.deltaY));
+      if (trackpadScroll && zoomRef.current > 1) {
+        const p = panRef.current;
+        setPan(clampPan(p.x - e.deltaX, p.y - e.deltaY, zoomRef.current));
+        return;
+      }
       applyZoom(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0016));
     };
+    // Safari reports pinch as proprietary gesture events (and would otherwise
+    // zoom the whole page).
+    let gestureScale = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gestureScale = 1;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Event & { scale: number; clientX: number; clientY: number };
+      applyZoom(g.clientX, g.clientY, g.scale / gestureScale);
+      gestureScale = g.scale;
+    };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("gesturestart", onGestureStart);
+    el.addEventListener("gesturechange", onGestureChange);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -149,13 +184,22 @@ export default function PlanTrace({
 
   // Pointer handling: a PRESS never captures the pointer, so a plain click
   // always reaches the SVG and places a vertex. Only once the pointer has
-  // travelled past DRAG_SLOP does it become a pan (capturing from there on).
+  // travelled past the slop does it become a pan (capturing from there on).
   // That gives CAD behaviour at any zoom and in any mode — click to place,
   // drag to pan — instead of forcing SPACE while tracing.
-  const DRAG_SLOP = 4;
+  //
+  // The slop is generous while placing points: a trackpad press or a quick
+  // mouse click routinely drifts 4–8 px, and a smaller slop turned those
+  // clicks into tiny pans that swallowed the vertex — only when zoomed,
+  // since at 1× there is nothing to pan.
+  const slop = () => (mode === "tracing" || mode === "calibrating" ? 12 : 5);
+  /** Where the current press started — the vertex goes THERE, not where the
+   *  pointer drifted to before release. */
+  const pressRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0 && e.button !== 1) return;
+    if (e.button === 0) pressRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
     if (zoomRef.current <= 1 && !spaceHeld.current) return; // nothing to pan
     dragRef.current = {
       startX: e.clientX,
@@ -178,7 +222,7 @@ export default function PlanTrace({
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
     if (!d.moved) {
-      if (Math.abs(dx) + Math.abs(dy) <= DRAG_SLOP) return; // still a click
+      if (Math.hypot(dx, dy) <= slop()) return; // still a click
       d.moved = true;
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
       setDragging(true);
@@ -286,9 +330,12 @@ export default function PlanTrace({
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
             onClick={(e) => {
-              if (Date.now() - dragEndedAt.current < 250) return; // click of a pan
+              if (Date.now() - dragEndedAt.current < 80) return; // click of a pan
               if (!onPick || spaceHeld.current) return;
-              const p = svgToImagePx(e.clientX, e.clientY);
+              const press = pressRef.current;
+              pressRef.current = null;
+              const usePress = press && Date.now() - press.t < 1500;
+              const p = svgToImagePx(usePress ? press.x : e.clientX, usePress ? press.y : e.clientY);
               if (p) onPick(p, { screenPxPerImagePx: pxScale });
             }}
             onMouseMove={(e) => {
@@ -407,7 +454,7 @@ export default function PlanTrace({
                   style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (Date.now() - dragEndedAt.current < 250) return;
+                    if (Date.now() - dragEndedAt.current < 80) return;
                     onSelectCandidate?.(i);
                   }}
                   onMouseEnter={() => setHoveredCandidate(i)}
@@ -444,7 +491,7 @@ export default function PlanTrace({
             >⤢</button>
           </div>
           <div className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 bg-white/85 border border-ink-200 text-[9.5px] text-ink-500 z-10 pointer-events-none select-none">
-            {zoom > 1 ? `${zoom.toFixed(1)}× · ` : ""}scroll to zoom
+            {zoom > 1 ? `${zoom.toFixed(1)}× · ` : ""}scroll or pinch to zoom
             {zoom > 1 ? " · drag to pan · click to place" : ""}
           </div>
         </>
