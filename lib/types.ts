@@ -259,6 +259,10 @@ export interface Project {
   location?: { lat: number; lng: number };
   /** Neighbouring buildings, streets and water from OpenStreetMap in the 3D massing. */
   siteContext?: { enabled?: boolean; radiusM?: number };
+  /** Class Library snapshot carried by a project imported from someone else's
+   *  file, when it differs from this browser's library — the project then
+   *  reads exactly as its author designed it. Raw rows, sanitised on read. */
+  classLibrary?: Record<string, unknown>;
 }
 
 /** Parameters for the modelled residential facade in the Massing viewer. */

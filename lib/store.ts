@@ -50,6 +50,8 @@ interface State {
   newProject: (name?: string) => string;
   loadSample: () => string;
   duplicateProject: (id: string, newName?: string) => string;
+  /** Add a project read from a shared file as a new local project and open it. */
+  importProject: (p: Project) => string;
   deleteProject: (id: string) => void;
   switchProject: (id: string) => void;
 
@@ -149,6 +151,14 @@ export const useStore = create<State>()(
         };
         set((s) => ({ projects: { ...s.projects, [copy.id]: copy }, activeProjectId: copy.id }));
         return copy.id;
+      },
+
+      importProject: (incoming) => {
+        const taken = new Set(Object.values(get().projects).map((x) => x.name));
+        const name = taken.has(incoming.name) ? `${incoming.name} (shared)` : incoming.name;
+        const p: Project = { ...incoming, name };
+        set((s) => ({ projects: { ...s.projects, [p.id]: p }, activeProjectId: p.id }));
+        return p.id;
       },
 
       deleteProject: (id) => {

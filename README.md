@@ -131,6 +131,18 @@ The app is configured as a fully static export — works on any static host, no 
 
 That's it — no plugin needed. For cloud sync set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in Netlify's environment (see *Cloud sync* above); without them the app stays local-only.
 
+## Sharing a project with someone outside the team
+
+Open **Projects** (the project name in the header) and click **⤓** next to the project: it downloads
+`<Project-name>.qube.json` with the whole design — plan image, traces, typologies, Apartments matrix,
+façade, north and location — plus your Class Library. Send that file (email, WhatsApp, Drive…).
+
+The recipient opens the app in their browser, clicks **Projects → Import** and picks the file. It opens
+as a new project on their computer, reading exactly as you designed it: if your Class Library differs
+from theirs, the project keeps yours (their own projects and library are not touched). Their copy is
+independent — edits on either side don't affect the other, and it never writes into your cloud row.
+Team members who share the cloud password can also simply unlock the cloud and open it there.
+
 ## 3D Massing viewer
 
 The Massing tab renders the scheme — every traced tower, podium and ground block — in three

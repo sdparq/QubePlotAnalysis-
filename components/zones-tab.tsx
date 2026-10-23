@@ -34,7 +34,7 @@ const SECTION_LABELS: { id: Section; label: string; hint: string }[] = [
 ];
 
 export default function ZonesTab() {
-  const { library, hydrated, updateClass, resetAll, resetClass } = useZoneLibrary();
+  const { library, hydrated, updateClass, resetAll, resetClass } = useZoneLibrary({ local: true });
   const [section, setSection] = useState<Section>("overview");
 
   if (!hydrated) return null;

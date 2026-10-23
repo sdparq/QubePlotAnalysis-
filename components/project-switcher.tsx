@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import type { Project } from "@/lib/types";
 import { deleteCloudProject, useAuth } from "@/lib/cloud";
+import { sanitizeLibrary, useZoneLibrary } from "@/lib/use-zone-library";
+import { buildProjectFile, parseProjectFile, projectFileName, PROJECT_FILE_EXT } from "@/lib/project-file";
 
 function relativeTime(ts: number): string {
   if (!ts) return "—";
@@ -27,7 +29,42 @@ export default function ProjectSwitcher() {
   const loadSample = useStore((s) => s.loadSample);
   const duplicateProject = useStore((s) => s.duplicateProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  const importProject = useStore((s) => s.importProject);
   const { user } = useAuth();
+  const { library: localLibrary } = useZoneLibrary({ local: true });
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Download the project as a file anyone can open in this app. A project
+   *  that itself came from a shared file passes on its author's library. */
+  function exportProject(p: Project) {
+    const library = p.classLibrary ? sanitizeLibrary(p.classLibrary) : localLibrary;
+    const blob = new Blob([buildProjectFile(p, library)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = projectFileName(p.name);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function onImportFile(file: File) {
+    const parsed = parseProjectFile(await file.text());
+    if (!parsed.ok) {
+      alert(parsed.error);
+      return;
+    }
+    // Keep the author's Class Library only when it differs from ours, so the
+    // project shows the same class, mix and defaults it was designed with.
+    let classLibrary: Record<string, unknown> | undefined;
+    if (parsed.classLibrary) {
+      const theirs = sanitizeLibrary(parsed.classLibrary);
+      if (JSON.stringify(theirs) !== JSON.stringify(localLibrary)) classLibrary = theirs as unknown as Record<string, unknown>;
+    }
+    importProject({ ...parsed.project, classLibrary });
+    setOpen(false);
+  }
 
   const sorted = Object.values(projects).sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -96,6 +133,22 @@ export default function ProjectSwitcher() {
             <div className="flex items-center gap-1">
               <button
                 className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 hover:bg-bone-100 text-ink-800"
+                onClick={() => fileRef.current?.click()}
+                title={`Open a project file (${PROJECT_FILE_EXT}) someone shared with you`}
+              >Import</button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={`${PROJECT_FILE_EXT},.json,application/json`}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void onImportFile(f);
+                }}
+              />
+              <button
+                className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.10em] border border-ink-300 hover:bg-bone-100 text-ink-800"
                 onClick={() => { loadSample(); setOpen(false); }}
               >Sample</button>
               <button
@@ -129,6 +182,17 @@ export default function ProjectSwitcher() {
                       </div>
                     </button>
                     <button
+                      title="Export — download a file to send; the recipient opens it with Projects → Import"
+                      aria-label={`Export ${p.name}`}
+                      className="p-1.5 text-ink-500 hover:text-ink-900 hover:bg-bone-200 transition-colors"
+                      onClick={() => exportProject(p)}
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M2.5 11.5v1.5a1 1 0 001 1h9a1 1 0 001-1v-1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                    <button
                       title="Duplicate"
                       className="p-1.5 text-ink-500 hover:text-ink-900 hover:bg-bone-200 transition-colors"
                       onClick={() => { duplicateProject(p.id); setOpen(false); }}
@@ -153,7 +217,7 @@ export default function ProjectSwitcher() {
             })}
           </ul>
           <div className="px-4 py-2.5 bg-bone-50 border-t border-ink-200 text-[10.5px] uppercase tracking-[0.18em] text-ink-500">
-            Tip: rename in Setup → Project name
+            Share: ⤓ Export a project, send the file — they open it with Import
           </div>
         </div>
       )}

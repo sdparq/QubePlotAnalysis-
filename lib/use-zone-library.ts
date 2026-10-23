@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useStore } from "./store";
 import {
   DEFAULT_ZONE_CLASSES,
   TYPOLOGY_KEYS,
@@ -96,11 +97,32 @@ function sanitizeRow(letter: ZoneClass, stored: Partial<ZoneClassRow> | undefine
   };
 }
 
+/** A whole library from untrusted JSON (an imported project file), every row
+ *  deep-sanitised against the seed. */
+export function sanitizeLibrary(raw: unknown): Record<ZoneClass, ZoneClassRow> {
+  const parsed = (raw && typeof raw === "object" ? raw : {}) as Record<ZoneClass, Partial<ZoneClassRow>>;
+  const out = { ...DEFAULT_ZONE_CLASSES };
+  for (const letter of Object.keys(DEFAULT_ZONE_CLASSES) as ZoneClass[]) {
+    out[letter] = sanitizeRow(letter, parsed[letter]);
+  }
+  return out;
+}
+
 /**
  * Editable, localStorage-backed copy of the Dubai class library. Shared across
  * every project — it lives outside the per-project Zustand store on purpose.
+ *
+ * A project imported from someone else's file may carry THEIR library
+ * (Project.classLibrary) so it reads exactly as they designed it; while that
+ * project is active its snapshot is what the tabs see. The admin editor
+ * passes `{ local: true }` to always edit this browser's own library.
  */
-export function useZoneLibrary() {
+export function useZoneLibrary(opts?: { local?: boolean }) {
+  const snapshot = useStore((s) => s.projects[s.activeProjectId]?.classLibrary);
+  const snapshotLibrary = useMemo(
+    () => (snapshot && !opts?.local ? sanitizeLibrary(snapshot) : null),
+    [snapshot, opts?.local],
+  );
   const [library, setLibrary] = useState<Record<ZoneClass, ZoneClassRow>>(DEFAULT_ZONE_CLASSES);
   const [hydrated, setHydrated] = useState(false);
 
@@ -170,5 +192,13 @@ export function useZoneLibrary() {
     [library, persist],
   );
 
-  return { library, hydrated, updateClass, resetAll, resetClass };
+  return {
+    library: snapshotLibrary ?? library,
+    /** True when the active project shows the sender's library snapshot. */
+    fromSnapshot: !!snapshotLibrary,
+    hydrated,
+    updateClass,
+    resetAll,
+    resetClass,
+  };
 }
