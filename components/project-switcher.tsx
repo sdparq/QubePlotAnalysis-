@@ -124,8 +124,8 @@ export default function ProjectSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute z-30 top-full left-0 mt-2 w-[420px] max-w-[calc(100vw-2rem)] bg-white text-ink-900 border border-ink-200 shadow-xl">
-          <div className="px-4 py-3 border-b border-ink-200 flex items-center justify-between">
+        <div className="absolute z-30 top-full left-0 mt-2 w-[420px] max-w-[calc(100vw-2rem)] bg-white text-ink-900 border border-ink-200 shadow-xl max-sm:fixed max-sm:inset-x-2 max-sm:top-2 max-sm:mt-0 max-sm:w-auto max-sm:max-w-none">
+          <div className="px-4 py-3 border-b border-ink-200 flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="eyebrow text-ink-500">Projects</div>
               <div className="text-xs text-ink-500 mt-0.5">{sorted.length} saved · auto-saved locally</div>

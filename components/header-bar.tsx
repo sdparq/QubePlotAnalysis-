@@ -9,7 +9,8 @@ const ReportOverlay = dynamic(() => import("./report"), { ssr: false });
 export default function HeaderBar() {
   const [report, setReport] = useState(false);
   return (
-    <header className="bg-ink-900 text-bone-100 relative z-30">
+    // z-50: above the pinned tab bar (z-40), which the project menu drops over.
+    <header className="bg-ink-900 text-bone-100 relative z-50">
       <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap min-w-0">
         <div className="flex items-center gap-5 min-w-0">
           <div className="flex items-center gap-3">
