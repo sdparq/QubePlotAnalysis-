@@ -1,5 +1,6 @@
 import type { Project } from "../types";
 import { residentialGFATarget } from "./gfa";
+import { computeOfficeStack } from "./offices";
 
 export interface TowerYieldResult {
   groundFootprintM2: number;
@@ -9,9 +10,12 @@ export interface TowerYieldResult {
   podiumCount: number;
   groundGFA: number;
   podiumGFA: number;
+  /** Podium levels given to offices (Distribution → offices) — their plates
+   *  hold office GFA, so they are NOT taken off the residential GFA. */
+  podiumOfficeLevels: number;
   /** Residential GFA that must land on the tower = residential target minus
-   *  the ground-floor AND podium surfaces (whatever the base absorbs doesn't
-   *  need tower floors). */
+   *  the ground-floor AND (non-office) podium surfaces (whatever the base
+   *  absorbs doesn't need tower floors). */
   towerTargetGFA: number;
   /** Floors that towerTargetGFA needs on this tower footprint, unclamped. */
   requiredTowerFloors: number;
@@ -42,7 +46,9 @@ export function computeTowerYield(project: Project): TowerYieldResult {
 
   const groundGFA = groundFootprintM2 * groundCount;
   const podiumGFA = podiumFootprintM2 * podiumCount;
-  const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA - podiumGFA);
+  const podiumOfficeLevels = computeOfficeStack(project).podiumLevels.length;
+  const podiumResidentialGFA = podiumFootprintM2 * Math.max(0, podiumCount - podiumOfficeLevels);
+  const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA - podiumResidentialGFA);
 
   const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(towerTargetGFA / towerFootprintM2) : 0;
   const maxTowerFloors = project.maxTowerFloors && project.maxTowerFloors > 0 ? project.maxTowerFloors : null;
@@ -58,6 +64,7 @@ export function computeTowerYield(project: Project): TowerYieldResult {
     podiumCount,
     groundGFA,
     podiumGFA,
+    podiumOfficeLevels,
     towerTargetGFA,
     requiredTowerFloors,
     maxTowerFloors,

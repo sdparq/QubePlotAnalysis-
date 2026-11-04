@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
+import { computeOfficeStack } from "@/lib/calc/offices";
 import { fmt0, fmt2 } from "@/lib/format";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone, TYPOLOGY_KEYS, type TypologyKey } from "@/lib/zone-classes";
@@ -35,6 +36,10 @@ export default function ProgramTab() {
   const project = useProject();
   const setCell = useStore((s) => s.setProgramCell);
   const program = computeProgram(project);
+  // Office floors at the bottom of the tower push apartment floor N up to
+  // tower level L(N + office floors) — shown next to each row.
+  const officeStack = computeOfficeStack(project);
+  const officeBelow = officeStack.towerPosition === "bottom" ? officeStack.towerFloors : 0;
   const gfaColLabel =
     program.balconyGfaFactor > 0
       ? `GFA (int. + ${Math.round(program.balconyGfaFactor * 100)}% balc.)`
@@ -111,7 +116,10 @@ export default function ProgramTab() {
             <tbody>
               {program.byFloor.map((f) => (
                 <tr key={f.floor}>
-                  <td className="font-medium text-ink-900">Floor {f.floor}</td>
+                  <td className="font-medium text-ink-900">
+                    Floor {f.floor}
+                    {officeBelow > 0 && <span className="text-[10.5px] text-ink-500 font-normal ml-1.5">L{f.floor + officeBelow}</span>}
+                  </td>
                   {project.typologies.map((t) => (
                     <td key={t.id} className="!p-1">
                       <input

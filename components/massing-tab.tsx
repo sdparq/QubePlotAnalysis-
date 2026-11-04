@@ -32,6 +32,7 @@ import {
   translatePolygon,
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
+import { computeOfficeStack } from "@/lib/calc/offices";
 import type { Volume } from "@/lib/massing";
 import type { FacadeConfig, TowerFacadeStyle } from "@/lib/types";
 import type { CaptureFn, SceneStyle, ViewPresetKind } from "./massing-scene";
@@ -64,7 +65,8 @@ const PROMPT_FOR: Record<AiStyle, string> = {
 };
 
 /** Tier colours of the Diagram style — kept in sync with PALETTES.diagram in massing-scene. */
-const TIER_SWATCH: Record<NonNullable<Volume["kind"]>, string> = {
+const TIER_SWATCH: Record<NonNullable<Volume["kind"]> | "office", string> = {
+  office: "#8e5bd0",
   basement: "#9aa3b2",
   ground: "#eb6834",
   podium: "#2a78d6",
@@ -212,7 +214,16 @@ export default function MassingTab() {
   const towerHeightM = project.typeFloors?.heightM ?? project.floorHeight;
   const towerH = Math.max(0, towerCount) * Math.max(0, towerHeightM);
 
-  const totalH = groundH + podiumH + towerH;
+  // Offices (mixed schemes): podium levels and tower floors given to them in
+  // Distribution. Residential tower floors stay = the Apartments matrix.
+  const officeStack = useMemo(() => computeOfficeStack(project), [project]);
+  const officeFloors = officeStack.towerFloors;
+  const officeFloorH = officeStack.heightM;
+  const officeH = officeFloors * officeFloorH;
+  const officeOnTop = officeStack.towerPosition === "top";
+  const podiumOfficeKey = officeStack.podiumLevels.join(",");
+
+  const totalH = groundH + podiumH + towerH + officeH;
 
   const { sceneVolumes, volumeLabels } = useMemo(() => {
     const out: Volume[] = [];
@@ -233,25 +244,66 @@ export default function MassingTab() {
       y += groundH;
     }
     if (podiumH > 0) {
-      const pSuffix = podiumCount > 1 ? ` · ${podiumCount}F` : "";
+      // Consecutive podium levels with the same use form one volume.
+      const officeLevels = new Set(podiumOfficeKey ? podiumOfficeKey.split(",").map(Number) : []);
+      const runs: { from: number; to: number; office: boolean }[] = [];
+      for (let l = 1; l <= podiumCount; l++) {
+        const office = officeLevels.has(l);
+        const last = runs[runs.length - 1];
+        if (last && last.office === office) last.to = l;
+        else runs.push({ from: l, to: l, office });
+      }
+      const levelName = (r: { from: number; to: number }) => (r.from === r.to ? `P${r.from}` : `P${r.from}–P${r.to}`);
       podiumPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
-        out.push({ polygon: poly, fromY: y, toY: y + podiumH, kind: "podium", floors: podiumCount });
-        labels.push(podiumPolys.length > 1 ? `Podium ${i + 1}${pSuffix}` : `Podium${pSuffix}`);
+        const block = podiumPolys.length > 1 ? ` ${i + 1}` : "";
+        runs.forEach((r, k) => {
+          const n = r.to - r.from + 1;
+          out.push({
+            polygon: poly,
+            fromY: y + (r.from - 1) * podiumHeightM,
+            toY: y + r.to * podiumHeightM,
+            kind: "podium",
+            floors: n,
+            use: r.office ? "office" : undefined,
+            roof: k < runs.length - 1 ? "none" : undefined,
+          });
+          labels.push(
+            runs.length === 1
+              ? `${r.office ? "Offices" : "Podium"}${block}${n > 1 ? ` · ${n}F` : ""}`
+              : `${r.office ? "Offices" : "Podium"}${block} · ${levelName(r)}`,
+          );
+        });
       });
       y += podiumH;
     }
-    if (towerH > 0) {
+    if (towerH + officeH > 0) {
+      // Residential and office stacks in the tower, office floors below or above.
+      const resFrom = officeOnTop ? y : y + officeH;
+      const offFrom = officeOnTop ? y + towerH : y;
       towerPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
-        out.push({ polygon: poly, fromY: y, toY: y + towerH, kind: "tower", floors: towerCount });
-        labels.push(towerPolys.length > 1 ? `Tower ${i + 1} · ${towerCount}F` : `Tower · ${towerCount}F`);
+        const name = towerPolys.length > 1 ? `Tower ${i + 1}` : "Tower";
+        if (officeH > 0) {
+          out.push({
+            polygon: poly, fromY: offFrom, toY: offFrom + officeH, kind: "tower", floors: officeFloors,
+            use: "office", roof: officeOnTop || towerH <= 0 ? "full" : "none",
+          });
+          labels.push(`${name} · Offices ${officeFloors}F`);
+        }
+        if (towerH > 0) {
+          out.push({
+            polygon: poly, fromY: resFrom, toY: resFrom + towerH, kind: "tower", floors: towerCount,
+            roof: officeOnTop && officeH > 0 ? "none" : "full",
+          });
+          labels.push(officeH > 0 ? `${name} · Residential ${towerCount}F` : `${name} · ${towerCount}F`);
+        }
       });
     }
     return { sceneVolumes: out, volumeLabels: labels };
-  }, [plotPoly, groundPolys, podiumPolys, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, towerCount]);
+  }, [plotPoly, groundPolys, podiumPolys, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, podiumHeightM, towerCount, officeH, officeFloors, officeOnTop, podiumOfficeKey]);
 
-  const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * towerCount;
+  const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * (towerCount + officeFloors);
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
 
   const captureRef = useRef<CaptureFn | null>(null);
@@ -315,8 +367,8 @@ export default function MassingTab() {
   }, [location, siteContext, patch]);
 
   const tiersPresent = useMemo(() => {
-    const kinds = new Set(sceneVolumes.map((v) => v.kind ?? "tower"));
-    return (["tower", "podium", "ground", "basement"] as const).filter((k) => kinds.has(k));
+    const kinds = new Set<string>(sceneVolumes.map((v) => (v.use === "office" ? "office" : v.kind ?? "tower")));
+    return (["office", "tower", "podium", "ground", "basement"] as const).filter((k) => kinds.has(k));
   }, [sceneVolumes]);
 
   const viewerContext =
@@ -350,7 +402,7 @@ export default function MassingTab() {
   /** Exact storey counts and proportions, prepended to the prompt so the
    *  model doesn't invent floors or warp the silhouette. */
   const geometryFacts = useMemo((): string => {
-    const totalAbove = groundCount + podiumCount + towerCount;
+    const totalAbove = groundCount + podiumCount + towerCount + officeFloors;
     const lines: string[] = [
       "GEOMETRY FACTS (the project building in the input image — preserve EXACTLY):",
       `- ${totalAbove} floors above ground in total.`,
@@ -366,6 +418,12 @@ export default function MassingTab() {
       lines.push(`- The base is made of separate blocks (${groundPolys.length} ground, ${podiumPolys.length} podium) — keep them as distinct volumes, do not merge them into one slab.`);
     }
     lines.push(`- Tower (residential): ${towerCount} typical floor(s) × ${towerHeightM.toFixed(1)} m. Draw exactly ${towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
+    if (officeFloors > 0) {
+      lines.push(`- Offices: ${officeFloors} floor(s) × ${officeFloorH.toFixed(1)} m at the ${officeOnTop ? "TOP" : "BOTTOM"} of the tower, with a glass curtain wall and NO balconies — keep that band distinct from the residential floors.`);
+    }
+    if (officeStack.podiumLevels.length > 0) {
+      lines.push(`- Podium level(s) ${officeStack.podiumLevels.map((l) => `P${l}`).join(", ")} are offices (glazed).`);
+    }
     if (basementCount > 0) {
       lines.push(`- ${basementCount} basement(s) below ground — do NOT show them above ground.`);
     }
@@ -374,7 +432,7 @@ export default function MassingTab() {
     lines.push("");
     lines.push("CAMERA: reuse the EXACT camera angle, framing, zoom level and crop of the input image. Do not pan, do not zoom, do not change orientation. The project's silhouette in the output must overlay 1:1 with the silhouette in the input.");
     return lines.join("\n");
-  }, [groundCount, groundHeightM, podiumCount, podiumHeightM, towerCount, towerHeightM, basementCount, totalH, towerArea, towerPolys.length, groundPolys.length, podiumPolys.length]);
+  }, [groundCount, groundHeightM, podiumCount, podiumHeightM, towerCount, towerHeightM, basementCount, totalH, towerArea, towerPolys.length, groundPolys.length, podiumPolys.length, officeFloors, officeFloorH, officeOnTop, officeStack.podiumLevels]);
 
   const handleAiRender = useCallback(async () => {
     if (!apiKey) {
@@ -605,6 +663,9 @@ export default function MassingTab() {
                     podiumArea={podiumArea}
                     towerArea={towerArea}
                     plotArea={plotPolyArea}
+                    officeTowerFloors={officeFloors}
+                    officeHeightM={officeFloorH}
+                    officePodiumLevels={officeStack.podiumLevels.length}
                   />
                   {(customGrounds || customPodiums || customTowers) && (
                     <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
@@ -923,7 +984,7 @@ interface ViewerProps {
   captureRef: React.MutableRefObject<CaptureFn | null>;
   northDeg: number;
   metrics: ProjectMetrics;
-  tiersPresent: NonNullable<Volume["kind"]>[];
+  tiersPresent: (NonNullable<Volume["kind"]> | "office")[];
   /** OpenStreetMap surroundings, when loaded. */
   context: SiteContext | null;
   contextRadius: number;
@@ -1110,7 +1171,7 @@ const MassingViewer = memo(function MassingViewer(props: ViewerProps) {
             {tiersPresent.map((k) => (
               <div key={k} className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.08em] text-ink-700">
                 <span className="w-2.5 h-2.5" style={{ background: TIER_SWATCH[k], opacity: k === "basement" ? 0.6 : 1 }} />
-                {k === "tower" ? "Tower · residential" : k}
+                {k === "tower" ? "Tower · residential" : k === "office" ? "Offices" : k}
               </div>
             ))}
           </div>
@@ -1790,24 +1851,33 @@ function TierSummary({
   towerCount, towerHeightM,
   basementCount, basementHeightM,
   groundArea, podiumArea, towerArea, plotArea,
+  officeTowerFloors = 0, officeHeightM = 0, officePodiumLevels = 0,
 }: {
   groundCount: number; groundHeightM: number;
   podiumCount: number; podiumHeightM: number;
   towerCount: number; towerHeightM: number;
   basementCount: number; basementHeightM: number;
   groundArea: number; podiumArea: number; towerArea: number; plotArea: number;
+  officeTowerFloors?: number; officeHeightM?: number; officePodiumLevels?: number;
 }) {
-  const rows: Array<{ label: string; floors: number; heightM: number; footprint: number; kind: "basement" | "ground" | "podium" | "tower" }> = [
+  const rows: Array<{ label: string; floors: number; heightM: number; footprint: number; kind: "basement" | "ground" | "podium" | "tower" | "office" }> = [
     { label: "Basement", floors: basementCount, heightM: basementHeightM, footprint: plotArea, kind: "basement" },
     { label: "Ground", floors: groundCount, heightM: groundHeightM, footprint: groundArea, kind: "ground" },
-    { label: "Podium", floors: podiumCount, heightM: podiumHeightM, footprint: podiumArea, kind: "podium" },
-    { label: "Tower (type floors)", floors: towerCount, heightM: towerHeightM, footprint: towerArea, kind: "tower" },
+    {
+      label: officePodiumLevels > 0 ? `Podium (${officePodiumLevels} office level${officePodiumLevels === 1 ? "" : "s"})` : "Podium",
+      floors: podiumCount, heightM: podiumHeightM, footprint: podiumArea, kind: "podium",
+    },
+    ...(officeTowerFloors > 0
+      ? [{ label: "Tower · offices", floors: officeTowerFloors, heightM: officeHeightM, footprint: towerArea, kind: "office" as const }]
+      : []),
+    { label: officeTowerFloors > 0 ? "Tower · residential" : "Tower (type floors)", floors: towerCount, heightM: towerHeightM, footprint: towerArea, kind: "tower" },
   ];
   const swatch: Record<typeof rows[number]["kind"], string> = {
     basement: "#bdb9ad",
     ground: "#8a9a76",
     podium: "#a3b08a",
     tower: "#647d57",
+    office: "#8e5bd0",
   };
   return (
     <div className="border border-ink-200">
@@ -1829,7 +1899,8 @@ function TierSummary({
         </div>
       ))}
       <div className="px-3 py-2 text-[10.5px] text-ink-500 leading-snug border-t border-ink-100">
-        Floor counts and heights come from <strong>Setup → Floor breakdown</strong>. Edit there to change them.
+        Floor counts and heights come from <strong>Setup → Floor breakdown</strong>; office floors from{" "}
+        <strong>Distribution → Offices · where they go</strong>.
       </div>
     </div>
   );

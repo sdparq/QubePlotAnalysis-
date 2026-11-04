@@ -179,13 +179,19 @@ interface TowerProps {
   floors?: number;
   params: FacadeParams;
   kind: FacadeMaterialKind;
+  /** Override the façade concept (office floors: curtain wall). */
+  styleOverride?: TowerFacadeStyle;
+  /** "none" when another volume stacks on top; "slab" for a plain roof. */
+  roof?: "full" | "slab" | "none";
 }
 
-export function TowerFacade({ polygon, fromY, toY, floorHeight, floors: floorsIn, params, kind }: TowerProps) {
-  const { style, roundedCorners, crown, balconyDepthM } = params;
+export function TowerFacade({ polygon, fromY, toY, floorHeight, floors: floorsIn, params, kind, styleOverride, roof = "full" }: TowerProps) {
+  const { roundedCorners, balconyDepthM } = params;
+  const style = styleOverride ?? params.style;
+  const crown = params.crown && roof === "full";
   const layers = useLayers(
-    () => buildTower({ polygon, fromY, toY, floorHeight, floors: floorsIn, style, roundedCorners, crown, balconyDepthM }),
-    [polygon, fromY, toY, floorHeight, floorsIn, style, roundedCorners, crown, balconyDepthM],
+    () => buildTower({ polygon, fromY, toY, floorHeight, floors: floorsIn, style, roundedCorners, crown, balconyDepthM, roof }),
+    [polygon, fromY, toY, floorHeight, floorsIn, style, roundedCorners, crown, balconyDepthM, roof],
   );
   const mats = useMemo(() => facadeMaterials(params, kind), [params, kind]);
   return <RenderLayers layers={layers} mats={mats} />;
@@ -201,6 +207,8 @@ export function buildTower(o: {
   roundedCorners: boolean;
   crown: boolean;
   balconyDepthM: number;
+  /** "none": another tower volume continues above — no roof, deck or crown. */
+  roof?: "full" | "slab" | "none";
 }): Layers {
   const L = new Layers();
   const { fromY, toY, style } = o;
@@ -288,6 +296,12 @@ export function buildTower(o: {
     }
   }
 
+  if (o.roof === "none") {
+    // A transfer slab where the next stack begins; the roof belongs to the top volume.
+    L.at("slab", bandGeometry(outline, 0.2, -0.4, 0.45), [toY - 0.45]);
+    return L;
+  }
+
   // Roof slab and the edge band of the top floor.
   L.at("slab", prismGeometry(grow(outline, 0.05), null, 0.32), [toY - 0.32]);
   L.at(style === "frame" ? "accent" : "slab", bandGeometry(outline, style === "frame" ? 0.75 : 0.14, -0.5, 0.6), [toY - 0.6]);
@@ -326,7 +340,7 @@ export function buildTower(o: {
     }
   } else {
     L.at("slab", bandGeometry(outline, 0.14, -0.3, 1.2), [toY - 0.08]);
-    if (roof.core) {
+    if (roof.core && o.roof !== "slab") {
       const c = roof.core;
       L.boxes("podiumBody", [boxAt(c.x, c.y, deckY + 1.6, c.yaw, c.len, 3.2, c.wid)]);
     }

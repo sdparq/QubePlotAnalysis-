@@ -7,7 +7,8 @@ import {
   residentialSubQuota,
 } from "@/lib/calc/gfa";
 import { computeTowerYield } from "@/lib/calc/tower-yield";
-import { computeOffices } from "@/lib/calc/offices";
+import { computeOffices, computeOfficeStack, type OfficeStackResult } from "@/lib/calc/offices";
+import type { OfficeStack } from "@/lib/types";
 import {
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -72,6 +73,7 @@ export default function CommonAreasTab() {
 
   const yield_ = useMemo(() => computeTowerYield(project), [project]);
   const offices = useMemo(() => computeOffices(project), [project]);
+  const officeStack = useMemo(() => computeOfficeStack(project), [project]);
 
   // Keep the persisted tower floor count in sync so Program / Parking / Lifts
   // / Massing — which all read project.typeFloors.count / project.numFloors
@@ -170,6 +172,20 @@ export default function CommonAreasTab() {
           patch({ officeBreakdown: { ...project.officeBreakdown, ...next } })
         }
       />
+
+      {offices.officeGFA > 0 && (
+        <OfficePlacementCard
+          stack={officeStack}
+          podiumCount={project.podium?.count ?? 0}
+          podiumFootprintM2={project.podiumFootprintM2 ?? 0}
+          towerFootprintM2={project.towerFootprintM2 ?? 0}
+          officeGFA={offices.officeGFA}
+          residentialFloors={project.typeFloors?.count ?? project.numFloors}
+          groundCount={project.ground?.count ?? 1}
+          basementCount={project.basements?.count ?? 0}
+          onPatch={(next) => patch({ officeStack: { ...project.officeStack, ...next } })}
+        />
+      )}
     </div>
   );
 }
@@ -319,7 +335,16 @@ function TowerYieldCard({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-        <Stat label="GFA to tower" value={y.towerTargetGFA > 0 ? `${fmt0(y.towerTargetGFA)} m²` : "—"} sub={y.groundGFA + y.podiumGFA > 0 ? `residential − ground ${fmt0(y.groundGFA)} − podium ${fmt0(y.podiumGFA)} m²` : "residential (no ground/podium plates set)"} />
+        <Stat
+          label="GFA to tower"
+          value={y.towerTargetGFA > 0 ? `${fmt0(y.towerTargetGFA)} m²` : "—"}
+          sub={
+            y.groundGFA + y.podiumGFA > 0
+              ? `residential − ground ${fmt0(y.groundGFA)} − podium ${fmt0(y.podiumFootprintM2 * Math.max(0, y.podiumCount - y.podiumOfficeLevels))} m²` +
+                (y.podiumOfficeLevels > 0 ? ` (${y.podiumOfficeLevels} office podium level${y.podiumOfficeLevels === 1 ? "" : "s"} left out)` : "")
+              : "residential (no ground/podium plates set)"
+          }
+        />
         <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
         <div className="border border-ink-200 bg-white p-3">
           <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>
@@ -338,9 +363,9 @@ function TowerYieldCard({
           <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">Leave empty for unlimited</div>
         </div>
         <Stat
-          label="Tower floors (final)"
+          label="Residential tower floors"
           value={y.towerFootprintM2 > 0 ? `${fmt0(y.towerFloors)}` : "—"}
-          sub={y.exceedsMax ? "clamped to the max" : "applied to the project"}
+          sub={y.exceedsMax ? "clamped to the max" : "floors of the Apartments matrix"}
         />
       </div>
 
@@ -455,6 +480,229 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
       <div className="eyebrow text-ink-500 text-[10px]">{label}</div>
       <div className="text-[18px] font-light text-ink-900 mt-0.5 tabular-nums">{value}</div>
       {sub && <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">{sub}</div>}
+    </div>
+  );
+}
+
+/** Where the offices go: podium levels, tower floors (bottom or top) and their
+ *  height — plus a floor-by-floor section of the whole building. */
+function OfficePlacementCard({
+  stack, podiumCount, podiumFootprintM2, towerFootprintM2, officeGFA,
+  residentialFloors, groundCount, basementCount, onPatch,
+}: {
+  stack: OfficeStackResult;
+  podiumCount: number;
+  podiumFootprintM2: number;
+  towerFootprintM2: number;
+  officeGFA: number;
+  residentialFloors: number;
+  groundCount: number;
+  basementCount: number;
+  onPatch: (next: Partial<OfficeStack>) => void;
+}) {
+  const levels = new Set(stack.podiumLevels);
+  function toggleLevel(l: number) {
+    const next = new Set(levels);
+    if (next.has(l)) next.delete(l);
+    else next.add(l);
+    onPatch({ podiumLevels: Array.from(next).sort((a, b) => a - b) });
+  }
+  const drift = stack.placementDrift;
+  return (
+    <div className="card">
+      <div className="mb-5">
+        <h2 className="section-title">Offices · where they go</h2>
+        <p className="section-sub">
+          Choose the podium levels and the tower floors that hold the offices. Office tower floors are
+          stacked on top of the residential ones (below or above them) — the Apartments matrix keeps
+          covering only the residential floors, and the 3D massing, heights and lifts follow.
+        </p>
+      </div>
+
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
+        <div className="grid gap-4">
+          <div className="border border-ink-200">
+            <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 eyebrow text-ink-600 text-[10px]">Podium levels</div>
+            <div className="p-3 grid gap-2">
+              {podiumCount <= 0 ? (
+                <p className="text-[12px] text-ink-500">No podium levels in Setup → Floor breakdown.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Podium levels used by offices">
+                    {Array.from({ length: podiumCount }, (_, i) => i + 1).map((l) => (
+                      <button
+                        key={l}
+                        type="button"
+                        aria-pressed={levels.has(l)}
+                        onClick={() => toggleLevel(l)}
+                        className={`h-8 min-w-[52px] px-2 text-[11px] font-medium uppercase tracking-[0.08em] border transition-colors ${
+                          levels.has(l)
+                            ? "bg-[#8e5bd0] border-[#8e5bd0] text-white"
+                            : "bg-white border-ink-200 text-ink-700 hover:border-ink-400"
+                        }`}
+                        title={levels.has(l) ? `P${l}: offices — click to give it back to the podium` : `P${l}: podium (parking / amenities) — click to make it offices`}
+                      >P{l}</button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-ink-500 leading-snug">
+                    {levels.size > 0
+                      ? podiumFootprintM2 > 0
+                        ? `${levels.size} level${levels.size === 1 ? "" : "s"} × ${fmt0(podiumFootprintM2)} m² podium footprint = ${fmt0(stack.podiumGFA)} m² of offices. These levels are no longer taken off the residential GFA.`
+                        : "Set the podium footprint in Tower floors above so these levels count towards the office GFA."
+                      : "Click a level to give it to offices (purple)."}
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="border border-ink-200">
+            <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 eyebrow text-ink-600 text-[10px]">Tower floors</div>
+            <div className="p-3 grid sm:grid-cols-3 gap-3">
+              <label className="grid gap-1 content-start">
+                <span className="eyebrow text-ink-500 text-[10px]">Office floors</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="cell-input text-right"
+                  value={stack.manualTowerFloors ? stack.towerFloors : ""}
+                  placeholder={`auto · ${stack.autoTowerFloors}`}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    const n = parseFloat(v);
+                    onPatch({ towerFloors: v === "" || !Number.isFinite(n) ? undefined : Math.max(0, Math.round(n)) });
+                  }}
+                />
+                <span className="text-[10.5px] text-ink-500 leading-snug">
+                  {stack.manualTowerFloors
+                    ? "Fixed — clear the field to go back to automatic."
+                    : towerFootprintM2 > 0
+                      ? `Auto: ${fmt0(stack.remainingGFA)} m² ÷ ${fmt0(towerFootprintM2)} m² plate, rounded up.`
+                      : "Auto needs the tower footprint (Tower floors above)."}
+                </span>
+              </label>
+              <div className="grid gap-1 content-start">
+                <span className="eyebrow text-ink-500 text-[10px]">Position</span>
+                <div className="seg w-full grid grid-cols-2">
+                  <button className="seg-btn" data-active={stack.towerPosition === "bottom"} onClick={() => onPatch({ towerPosition: "bottom" })}>Bottom</button>
+                  <button className="seg-btn" data-active={stack.towerPosition === "top"} onClick={() => onPatch({ towerPosition: "top" })}>Top</button>
+                </div>
+                <span className="text-[10.5px] text-ink-500 leading-snug">
+                  {stack.towerPosition === "bottom" ? "Right above the podium, apartments over them." : "Above the apartments, at the top of the tower."}
+                </span>
+              </div>
+              <label className="grid gap-1 content-start">
+                <span className="eyebrow text-ink-500 text-[10px]">Office floor height (m)</span>
+                <input
+                  type="number"
+                  min={2.5}
+                  step={0.1}
+                  className="cell-input text-right"
+                  value={Number(stack.heightM.toFixed(2))}
+                  onChange={(e) => {
+                    const n = parseFloat(e.target.value);
+                    if (Number.isFinite(n) && n > 0) onPatch({ heightM: n });
+                  }}
+                />
+                <span className="text-[10.5px] text-ink-500 leading-snug">Floor-to-floor; residential uses Setup&apos;s type-floor height.</span>
+              </label>
+            </div>
+          </div>
+
+          {stack.needsTowerFootprint ? (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12px] leading-snug">
+              {fmt0(stack.remainingGFA)} m² of offices still need tower floors — enter the tower footprint in
+              Tower floors above, or type the number of office floors.
+            </div>
+          ) : (
+            <div className={`border p-3 text-[12px] leading-snug ${Math.abs(drift) > Math.max(1, officeGFA * 0.05) ? "border-amber-200 bg-amber-50 text-amber-900" : "border-ink-200 bg-bone-50 text-ink-700"}`}>
+              Office GFA {fmt0(officeGFA)} m² → placed {fmt0(stack.podiumGFA + stack.towerGFA)} m²
+              {stack.podiumGFA > 0 ? ` (podium ${fmt0(stack.podiumGFA)} + tower ${fmt0(stack.towerGFA)})` : ` in ${stack.towerFloors} tower floor${stack.towerFloors === 1 ? "" : "s"}`}
+              {Math.abs(drift) > 1 && (
+                <strong> · {drift > 0 ? "+" : ""}{fmt0(drift)} m² {drift > 0 ? "spare" : "short"}</strong>
+              )}
+              .
+            </div>
+          )}
+        </div>
+
+        <FloorStack
+          basementCount={basementCount}
+          groundCount={groundCount}
+          podiumCount={podiumCount}
+          podiumOfficeLevels={levels}
+          residentialFloors={residentialFloors}
+          officeFloors={stack.towerFloors}
+          officeOnTop={stack.towerPosition === "top"}
+        />
+      </div>
+    </div>
+  );
+}
+
+const USE_COLORS = {
+  offices: "#8e5bd0",
+  residential: "#1baf7a",
+  podium: "#2a78d6",
+  ground: "#eb6834",
+  basement: "#9aa3b2",
+} as const;
+
+/** Section of the building, top to bottom, one band per run of floors with the same use. */
+function FloorStack({
+  basementCount, groundCount, podiumCount, podiumOfficeLevels, residentialFloors, officeFloors, officeOnTop,
+}: {
+  basementCount: number;
+  groundCount: number;
+  podiumCount: number;
+  podiumOfficeLevels: Set<number>;
+  residentialFloors: number;
+  officeFloors: number;
+  officeOnTop: boolean;
+}) {
+  type Band = { name: string; use: keyof typeof USE_COLORS; label: string; floors: number };
+  const bands: Band[] = [];
+  const range = (p: string, a: number, b: number) => (a === b ? `${p}${a}` : `${p}${a}–${p}${b}`);
+  // Tower, top first. L1 = first tower floor above the podium.
+  const res = Math.max(0, residentialFloors);
+  const off = Math.max(0, officeFloors);
+  if (officeOnTop) {
+    if (off > 0) bands.push({ name: range("L", res + 1, res + off), use: "offices", label: "Offices", floors: off });
+    if (res > 0) bands.push({ name: range("L", 1, res), use: "residential", label: "Apartments", floors: res });
+  } else {
+    if (res > 0) bands.push({ name: range("L", off + 1, off + res), use: "residential", label: "Apartments", floors: res });
+    if (off > 0) bands.push({ name: range("L", 1, off), use: "offices", label: "Offices", floors: off });
+  }
+  // Podium runs, top first.
+  for (let l = podiumCount; l >= 1; ) {
+    const office = podiumOfficeLevels.has(l);
+    let k = l;
+    while (k - 1 >= 1 && podiumOfficeLevels.has(k - 1) === office) k--;
+    bands.push({ name: range("P", k, l), use: office ? "offices" : "podium", label: office ? "Offices" : "Podium · parking / amenities", floors: l - k + 1 });
+    l = k - 1;
+  }
+  if (groundCount > 0) bands.push({ name: groundCount > 1 ? range("G", 1, groundCount) : "G", use: "ground", label: "Ground · lobby / retail", floors: groundCount });
+  if (basementCount > 0) bands.push({ name: range("B", 1, basementCount), use: "basement", label: "Basements · parking", floors: basementCount });
+
+  const total = bands.reduce((s, b) => s + b.floors, 0) || 1;
+  return (
+    <div className="border border-ink-200">
+      <div className="px-3 py-2 bg-bone-50 border-b border-ink-200 eyebrow text-ink-600 text-[10px]">Floor stack</div>
+      <div className="p-3 grid gap-px">
+        {bands.map((b, i) => (
+          <div key={i} className="flex items-stretch gap-2 text-[11.5px]">
+            <div
+              className="w-10 shrink-0"
+              style={{ background: USE_COLORS[b.use], opacity: b.use === "basement" ? 0.55 : 1, minHeight: 18, height: Math.max(18, (b.floors / total) * 300) }}
+            />
+            <div className="flex-1 min-w-0 flex items-center justify-between gap-2 border-b border-ink-100">
+              <span className="truncate"><strong className="font-medium text-ink-900 tabular-nums">{b.name}</strong> <span className="text-ink-600">{b.label}</span></span>
+              <span className="text-ink-500 tabular-nums shrink-0">{b.floors}F</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

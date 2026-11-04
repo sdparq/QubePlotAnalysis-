@@ -11,4 +11,10 @@ export interface Volume {
   kind?: "tower" | "ground" | "podium" | "basement";
   /** Storeys inside the volume — drives the floor lines of the façade. */
   floors?: number;
+  /** Programme of the volume when it isn't the tier's default — "office"
+   *  floors get a curtain wall (no balconies) and their own diagram colour. */
+  use?: "office";
+  /** How the top is finished: "full" = roof + crown (default for towers),
+   *  "slab" = plain roof slab, "none" = another volume stacks on top. */
+  roof?: "full" | "slab" | "none";
 }

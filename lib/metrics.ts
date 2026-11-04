@@ -1,5 +1,6 @@
 import type { Project } from "./types";
 import { computeAreas } from "./calc/areas";
+import { towerTotals } from "./calc/offices";
 import { computeProgram } from "./calc/program";
 import { computeParking } from "./calc/parking";
 
@@ -67,11 +68,13 @@ export function projectMetrics(project: Project): ProjectMetrics {
   const basements = Math.max(0, project.basements?.count ?? 0);
   const ground = Math.max(0, project.ground?.count ?? 1);
   const podium = Math.max(0, project.podium?.count ?? 0);
-  const tower = Math.max(0, project.typeFloors?.count ?? project.numFloors);
+  // Residential type floors + any office floors in the tower.
+  const towerT = towerTotals(project);
+  const tower = towerT.floors;
   const heightM =
     ground * (project.ground?.heightM ?? 4.5) +
     podium * (project.podium?.heightM ?? 4.0) +
-    tower * (project.typeFloors?.heightM ?? project.floorHeight);
+    towerT.heightM;
 
   const plotArea = project.plotArea > 0 ? project.plotArea : 0;
   const totalGFA = areas.totalGFA;

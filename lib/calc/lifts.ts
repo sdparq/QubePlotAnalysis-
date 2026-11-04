@@ -1,4 +1,5 @@
 import type { Project } from "../types";
+import { computeOfficeStack } from "./offices";
 
 /* -------------------------------------------------------------------------- */
 /*    Dubai Building Code D.8.8 — Passenger elevators in residential apts.   */
@@ -262,7 +263,9 @@ export function computeLifts(project: Project): LiftsResult {
   // D.8.8 "occupied floors" = every floor the lifts serve ABOVE ground level:
   // ground + podium + tower type floors. Counting only the tower under-read
   // the D.13 row on podium buildings and returned too few lifts.
-  const occupiedFloors = Math.max(1, project.numFloors + groundCount + podiumCount);
+  // Office floors in the tower are served by the same lifts.
+  const officeTowerFloors = computeOfficeStack(project).towerFloors;
+  const occupiedFloors = Math.max(1, project.numFloors + officeTowerFloors + groundCount + podiumCount);
   const defaultBoardingFloors = basementCount + groundCount + podiumCount;
   const boardingFloors = project.dbcBoardingFloors ?? Math.max(1, defaultBoardingFloors);
 

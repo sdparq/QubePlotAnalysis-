@@ -251,6 +251,9 @@ export interface Project {
   /** Office parking standard — m² of office GSA (net lettable) per required
    *  space. Default 50 (1 space per 50 m² of office GSA). Editable in Parking. */
   officeM2PerSpace?: number;
+  /** Where the offices sit in the building (mixed schemes). Drives the tower
+   *  height, the 3D massing and which floors the Apartments matrix covers. */
+  officeStack?: OfficeStack;
   /** Hierarchical breakdown of common areas with editable sub-percentages and
    *  GFA flags. When set it drives the flat `commonAreas` list automatically. */
   commonAreasBreakdown?: CommonAreasBreakdown;
@@ -433,4 +436,19 @@ export interface EconomicConfig {
   corporateTaxPct?: number;       // default 0.09
   /** UAE corporate tax exemption (AED) — first slice of profit not taxed. */
   corporateTaxExemption?: number; // default 0
+}
+
+/** Floors given to offices. The Apartments matrix only ever covers the
+ *  residential tower floors (numFloors); office tower floors come on top of
+ *  them, below or above as `towerPosition` says. */
+export interface OfficeStack {
+  /** Podium levels (1 = lowest) used by offices. */
+  podiumLevels?: number[];
+  /** Tower floors used by offices. Unset = automatic: the office GFA left
+   *  after the podium levels ÷ the tower footprint (Distribution), rounded up. */
+  towerFloors?: number;
+  /** Office floors at the bottom of the tower (default) or at the top. */
+  towerPosition?: "bottom" | "top";
+  /** Office floor-to-floor height (m). Default 4.0. */
+  heightM?: number;
 }

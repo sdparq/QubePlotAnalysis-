@@ -12,6 +12,7 @@ import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone } from "@/lib/zone-classes";
 import { computeAreas } from "@/lib/calc/areas";
 import { computeProgram } from "@/lib/calc/program";
+import { towerTotals } from "@/lib/calc/offices";
 
 const M2_TO_SQFT = 10.7639;
 const fmt0 = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—");
@@ -82,12 +83,13 @@ function ReportDocument() {
 
   const groundCount = project.ground?.count ?? 1;
   const podiumCount = project.podium?.count ?? 0;
-  const towerCount = project.typeFloors?.count ?? project.numFloors;
-  const towerHeight = project.typeFloors?.heightM ?? project.floorHeight;
+  // Residential type floors + office floors stacked in the tower.
+  const towerT = towerTotals(project);
+  const towerCount = towerT.floors;
   const totalHeightM =
     groundCount * (project.ground?.heightM ?? 4.5) +
     podiumCount * (project.podium?.heightM ?? 4.0) +
-    towerCount * towerHeight;
+    towerT.heightM;
   const far = project.plotArea > 0 ? totalGFA / project.plotArea : 0;
 
   const now = new Date();

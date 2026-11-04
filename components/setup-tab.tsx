@@ -9,6 +9,7 @@ import {
   type GfaUseCategory,
 } from "@/lib/types";
 import { useZoneLibrary } from "@/lib/use-zone-library";
+import { computeOfficeStack } from "@/lib/calc/offices";
 import {
   ALL_CLASS_LETTERS,
   TYPOLOGY_KEYS,
@@ -192,13 +193,17 @@ function FloorBreakdownCard({
     setSection("typeFloors", { count: typeFloorsSec.count, heightM });
   }
 
+  // Office floors in the tower (Distribution → Offices · where they go).
+  const officeStack = computeOfficeStack(project);
+  const officeFloors = officeStack.towerFloors;
+
   const nonTowerSections = FLOOR_SECTIONS.filter((s) => s.key !== "basements" && s.key !== "typeFloors");
-  const totalAboveGround = nonTowerSections.reduce((sum, s) => sum + get(s.key, s).count, 0) + typeFloorsSec.count;
+  const totalAboveGround = nonTowerSections.reduce((sum, s) => sum + get(s.key, s).count, 0) + typeFloorsSec.count + officeFloors;
   const totalHeightAbove =
     nonTowerSections.reduce((sum, s) => {
       const sec = get(s.key, s);
       return sum + sec.count * sec.heightM;
-    }, 0) + typeFloorsSec.count * typeFloorsSec.heightM;
+    }, 0) + typeFloorsSec.count * typeFloorsSec.heightM + officeFloors * officeStack.heightM;
   const basementSec = get("basements", FLOOR_SECTIONS[0]);
 
   return (
@@ -284,6 +289,19 @@ function FloorBreakdownCard({
               : "—"}
           </div>
         </div>
+        {officeFloors > 0 && (
+          <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums border-b border-ink-100">
+            <div>
+              <div className="text-ink-900">Office floors (tower) <span className="text-[#8e5bd0]">· {officeStack.towerPosition === "top" ? "above" : "below"} the apartments</span></div>
+              <div className="text-[10.5px] text-ink-500 leading-snug">
+                Set in <strong>Distribution → Offices · where they go</strong>.
+              </div>
+            </div>
+            <div className="text-right text-ink-900 font-medium">{officeFloors}</div>
+            <div className="text-right text-ink-700">{officeStack.heightM.toFixed(2)}</div>
+            <div className="text-right text-ink-900">{(officeFloors * officeStack.heightM).toFixed(1)} m</div>
+          </div>
+        )}
         <div className="grid grid-cols-[1fr_90px_110px_110px] gap-1 px-3 py-2 items-center text-[12px] tabular-nums bg-qube-50 font-medium">
           <div className="uppercase tracking-[0.08em] text-[10.5px] text-qube-800">
             Above ground (visible building)

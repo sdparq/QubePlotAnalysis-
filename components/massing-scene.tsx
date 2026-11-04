@@ -71,6 +71,8 @@ interface ScenePalette {
   plot: string;
   plotLine: string;
   tiers: Record<TierKind, TierLook>;
+  /** Office floors (mixed schemes), wherever they sit. */
+  office: TierLook;
   edgeOpacity: number;
   floorLine: string;
   floorLineOpacity: number;
@@ -116,6 +118,7 @@ export const PALETTES: Record<SceneStyle, ScenePalette> = {
       podium: { fill: "#f3f1ec", edge: "#b3bac5", opacity: 1, roughness: 0.85, metalness: 0 },
       tower: { fill: "#f8f7f4", edge: "#b3bac5", opacity: 1, roughness: 0.8, metalness: 0 },
     },
+    office: { fill: "#e9edf1", edge: "#a9b2bf", opacity: 1, roughness: 0.6, metalness: 0.05 },
     edgeOpacity: 0.7,
     floorLine: "#aeb6c2",
     floorLineOpacity: 0.55,
@@ -139,6 +142,7 @@ export const PALETTES: Record<SceneStyle, ScenePalette> = {
       podium: { fill: "#2a78d6", edge: "#16427a", opacity: 1, roughness: 0.75, metalness: 0 },
       tower: { fill: "#1baf7a", edge: "#0b5a3e", opacity: 1, roughness: 0.7, metalness: 0 },
     },
+    office: { fill: "#8e5bd0", edge: "#4b2a7a", opacity: 1, roughness: 0.7, metalness: 0 },
     edgeOpacity: 0.55,
     floorLine: "#ffffff",
     floorLineOpacity: 0.6,
@@ -171,6 +175,7 @@ export const PALETTES: Record<SceneStyle, ScenePalette> = {
       podium: { fill: "#e2dbcd", edge: "#a79f8e", opacity: 1, roughness: 0.7, metalness: 0.02 },
       tower: { fill: "#cfdbe1", edge: "#7f93a0", opacity: 1, roughness: 0.22, metalness: 0.35 },
     },
+    office: { fill: "#9fb4c4", edge: "#5f7686", opacity: 1, roughness: 0.18, metalness: 0.45 },
     edgeOpacity: 0.35,
     floorLine: "#5d6b73",
     floorLineOpacity: 0.35,
@@ -479,10 +484,13 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
 
   // The amenity deck is whichever tier sits directly below the tower: podium
   // when there is one, otherwise the ground floor (tower rises straight off it).
-  const deckVolume = useMemo(
-    () => volumes.find((v) => v.kind === "podium") ?? volumes.find((v) => v.kind === "ground"),
-    [volumes],
-  );
+  const deckVolume = useMemo(() => {
+    const top = (kind: Volume["kind"]) =>
+      volumes.filter((v) => v.kind === kind).reduce<Volume | undefined>((a, v) => (!a || v.toY > a.toY ? v : a), undefined);
+    return top("podium") ?? top("ground");
+  }, [volumes]);
+  // Office podium levels: a flat-cornered curtain wall, no crown.
+  const officePodiumParams = useMemo(() => (designed ? { ...designed, roundedCorners: false } : null), [designed]);
   const towerVolume = useMemo(() => volumes.find((v) => v.kind === "tower"), [volumes]);
   const wantPool = !!facade?.podiumPool;
   const wantLounge = !!facade?.podiumLoungeBbq;
@@ -677,6 +685,24 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
                 floors={v.floors}
                 params={designed}
                 kind={palette.facadeKind}
+                styleOverride={v.use === "office" ? "curtain" : undefined}
+                roof={v.roof}
+              />
+            );
+          }
+          if (v.kind === "podium" && v.use === "office" && officePodiumParams) {
+            return (
+              <TowerFacade
+                key={i}
+                polygon={v.polygon}
+                fromY={v.fromY}
+                toY={v.toY}
+                floorHeight={floorHeight}
+                floors={v.floors}
+                params={officePodiumParams}
+                kind={palette.facadeKind}
+                styleOverride="curtain"
+                roof={v.roof === "none" ? "none" : "slab"}
               />
             );
           }
@@ -706,7 +732,7 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
             />
           );
         }
-        const look = palette.tiers[v.kind ?? "tower"];
+        const look = v.use === "office" ? palette.office : palette.tiers[v.kind ?? "tower"];
         return (
           <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, v.fromY, 0]} castShadow receiveShadow>
             <extrudeGeometry args={[shape, { depth, bevelEnabled: false }]} />
@@ -769,7 +795,7 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
               style={{ pointerEvents: "none" }}
             >
               <div className="flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 bg-white/90 border border-[#dcd8d0] text-[10px] font-medium uppercase tracking-[0.08em] text-[#2a2a2a] whitespace-nowrap shadow-sm">
-                <span className="w-2 h-2 rounded-sm" style={{ background: PALETTES.diagram.tiers[v.kind ?? "tower"].fill }} />
+                <span className="w-2 h-2 rounded-sm" style={{ background: v.use === "office" ? PALETTES.diagram.office.fill : PALETTES.diagram.tiers[v.kind ?? "tower"].fill }} />
                 {label}
               </div>
             </Html>
