@@ -25,7 +25,8 @@ export default function ParkingTab() {
           <div>
             <h2 className="section-title">Parking parameters</h2>
             <p className="section-sub">
-              Retail comes from Setup → GFA breakdown ÷ <strong>m² per space</strong>.
+              Retail comes from Setup → GFA breakdown ÷ <strong>m² per space</strong>; offices from
+              the office GSA (net lettable, Distribution) ÷ <strong>m² per space</strong>.
               POD (People of Determination) follows Dubai DCD: 2% of the standard total up
               to 500 (min 1), then +1% on each additional space — added on top of the
               standard total, not carved out of it. The total parking surface is estimated
@@ -33,7 +34,22 @@ export default function ParkingTab() {
               <strong>m² / parking space</strong>.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 min-w-[320px]">
+          <div className="grid grid-cols-3 gap-3 min-w-[420px]">
+            <label className="grid gap-1">
+              <span className="eyebrow text-ink-500 text-[10.5px]">Offices · m² GSA / space</span>
+              <input
+                type="number"
+                step={5}
+                min={1}
+                className="cell-input text-right"
+                value={Number((project.officeM2PerSpace ?? 50).toFixed(0))}
+                onChange={(e) => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isFinite(n) && n > 0) patch({ officeM2PerSpace: n });
+                }}
+                title="m² of office GSA (net lettable) per required parking space (default 50 = 1 space per 50 m²)"
+              />
+            </label>
             <label className="grid gap-1">
               <span className="eyebrow text-ink-500 text-[10.5px]">Retail · m² per space</span>
               <input
@@ -73,9 +89,16 @@ export default function ParkingTab() {
           <div>
             <h2 className="section-title">Other uses (optional)</h2>
             <p className="section-sub">
-              F&amp;B, clinics, offices, etc. — either area × ratio per 100 m², or type an{" "}
+              F&amp;B, clinics, etc. — either area × ratio per 100 m², or type an{" "}
               <strong>exact number of spaces</strong> (it overrides the ratio for that row).
+              Offices entered as <em>Commercial / Office</em> in Setup are already counted above.
             </p>
+            {r.officeRequired > 0 && project.otherUses.some((u) => /office|oficina/i.test(u.name)) && (
+              <p className="text-[11.5px] text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 mt-2 leading-snug">
+                ⚠ Offices are now counted automatically from the office GSA ({fmt0(r.officeRequired)} spaces).
+                Remove the office row below so they are not counted twice.
+              </p>
+            )}
           </div>
           <button className="btn btn-secondary btn-xs" onClick={() => upsertU({ id: `ou-${Date.now()}`, name: "New use", netArea: 0, spacesPer100sqm: 0 })}>+ Add other use</button>
         </div>
@@ -212,6 +235,14 @@ export default function ParkingTab() {
                     Retail required ({fmt0(r.retailM2)} m² ÷ {fmt0(r.retailM2PerSpaceUsed)} m²/space)
                   </td>
                   <td className="text-right">{fmt0(r.retailRequired)}</td>
+                </tr>
+              )}
+              {r.officeRequired > 0 && (
+                <tr className="row-subtotal">
+                  <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">
+                    Offices required ({fmt0(r.officeGSA)} m² GSA ÷ {fmt0(r.officeM2PerSpaceUsed)} m²/space)
+                  </td>
+                  <td className="text-right">{fmt0(r.officeRequired)}</td>
                 </tr>
               )}
               {r.otherUsesTotal > 0 && (

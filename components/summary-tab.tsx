@@ -188,9 +188,20 @@ export default function SummaryTab() {
               m2={retailM2}
             />
           )}
+          {a.officeNet > 0 && (
+            <DerivRow
+              label="Offices (net lettable)"
+              formula={`Office GFA ${fmt0(a.commercialGFA)} m² × ${a.officeNetPct.toFixed(1)}% — after circulation ${fmt0(a.officeCirculation)} + services ${fmt0(a.officeServices)} m² (Distribution); no balconies`}
+              m2={a.officeNet}
+            />
+          )}
           <DerivRow
             label="GSA total"
-            formula={retailM2 > 0 ? "apartments interior + balconies + retail" : "apartments interior + balconies"}
+            formula={
+              ["apartments interior", "balconies", retailM2 > 0 ? "retail" : "", a.officeNet > 0 ? "offices net" : ""]
+                .filter(Boolean)
+                .join(" + ")
+            }
             m2={gsaTotal}
             total
           />

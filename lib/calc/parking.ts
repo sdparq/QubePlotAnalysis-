@@ -1,4 +1,5 @@
 import type { Project, Typology } from "../types";
+import { computeOffices } from "./offices";
 
 export interface ParkingResult {
   availableStandard: number;
@@ -22,7 +23,12 @@ export interface ParkingResult {
   retailRequired: number;
   retailM2PerSpaceUsed: number;
   retailM2: number;
-  /** Standard spaces required (residential + retail + other uses), before POD. */
+  /** Office parking auto-derived from the office GSA (net lettable, see
+   *  computeOffices) ÷ m²/space — default 1 per 50 m². */
+  officeRequired: number;
+  officeM2PerSpaceUsed: number;
+  officeGSA: number;
+  /** Standard spaces required (residential + retail + offices + other uses), before POD. */
   grandRequired: number;
   /** Final required space count: standard total + POD, summed. This is the
    *  figure balance / surface calculations should use. */
@@ -123,7 +129,10 @@ export function computeParking(project: Project): ParkingResult {
     ? Math.ceil(retailM2 / retailM2PerSpaceUsed)
     : 0;
 
-  const grandRequired = requiredTotal + otherUsesTotal + retailRequired;
+  const offices = computeOffices(project);
+  const officeRequired = offices.parkingRequired;
+
+  const grandRequired = requiredTotal + otherUsesTotal + retailRequired + officeRequired;
   // POD spaces are additional to the standard total, not a subset of it — the
   // tiered rule still uses the standard total as its basis, but the result gets
   // summed on top for every balance / surface calculation from here on.
@@ -149,6 +158,9 @@ export function computeParking(project: Project): ParkingResult {
     retailRequired,
     retailM2PerSpaceUsed,
     retailM2,
+    officeRequired,
+    officeM2PerSpaceUsed: offices.m2PerSpace,
+    officeGSA: offices.net,
     grandRequired,
     grandRequiredWithPOD,
     grandBalance: availableTotal - grandRequiredWithPOD,

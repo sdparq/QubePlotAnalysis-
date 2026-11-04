@@ -2,12 +2,14 @@ import type { GfaUseCategory, Project } from "../types";
 import { residentialGFATarget, residentialSubPct, residentialSubQuota } from "./gfa";
 import { computeProgram } from "./program";
 import { computeParking } from "./parking";
+import { computeOffices } from "./offices";
 
 /**
  * Project-wide area accounting — the single source of truth behind the Areas
  * Summary tab and the PDF report.
  *
- * GSA (sellable) = apartments interior + balconies + retail, where the
+ * GSA (sellable) = apartments interior + balconies + retail + net lettable
+ * offices (office GFA − its circulation and services, see offices.ts), where the
  * apartment figures come from the ACTUAL Apartments matrix once units are
  * placed (falling back to the Distribution quota while it is empty) — so this
  * always agrees with what the Apartments tab reports.
@@ -78,9 +80,14 @@ export interface AreasResult {
   basementsNet: number;
   parkingRequiredSurface: number;
 
+  /** Office GFA split (Distribution → Offices). officeNet is the office GSA. */
+  officeCirculation: number;
+  officeServices: number;
+  officeNet: number;
+  officeNetPct: number;
   /** Residential sellable only (apartments interior + balconies). */
   gsaResidential: number;
-  /** Sellable total — residential + retail. */
+  /** Sellable total — residential + retail + offices (net lettable). */
   gsaTotal: number;
   constructionBUA: number;
 }
@@ -142,8 +149,9 @@ export function computeAreas(project: Project): AreasResult {
   );
   const basementsNet = Math.max(0, basementSurface - parkingSurplus);
 
+  const offices = computeOffices(project);
   const gsaResidential = apartmentsInterior + balconies;
-  const gsaTotal = gsaResidential + retailGFA;
+  const gsaTotal = gsaResidential + retailGFA + offices.net;
 
   const constructionBUA =
     gsaResidential +
@@ -181,6 +189,10 @@ export function computeAreas(project: Project): AreasResult {
     parkingSurplus,
     basementsNet,
     parkingRequiredSurface,
+    officeCirculation: offices.circulation,
+    officeServices: offices.services,
+    officeNet: offices.net,
+    officeNetPct: offices.netPct,
     gsaResidential,
     gsaTotal,
     constructionBUA,

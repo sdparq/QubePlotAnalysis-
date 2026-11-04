@@ -243,6 +243,14 @@ export interface Project {
   /** Optional sub-breakdown of the Residential use (apartments / amenities /
    *  circulation / services), each with its own percentage and a GFA flag. */
   residentialBreakdown?: ResidentialBreakdown;
+  /** Split of the Commercial / Office GFA: circulation (cores, lobbies,
+   *  corridors) and services (MEP, shafts, toilets) as % of the office GFA.
+   *  What remains is the net lettable office area — the office GSA. Offices
+   *  carry no balconies. Defaults in DEFAULT_OFFICE_BREAKDOWN. */
+  officeBreakdown?: { circulationPct?: number; servicesPct?: number };
+  /** Office parking standard — m² of office GSA (net lettable) per required
+   *  space. Default 50 (1 space per 50 m² of office GSA). Editable in Parking. */
+  officeM2PerSpace?: number;
   /** Hierarchical breakdown of common areas with editable sub-percentages and
    *  GFA flags. When set it drives the flat `commonAreas` list automatically. */
   commonAreasBreakdown?: CommonAreasBreakdown;

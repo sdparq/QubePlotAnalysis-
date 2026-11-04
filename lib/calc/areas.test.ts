@@ -34,12 +34,14 @@ describe("computeAreas", () => {
     expect(r.services).toBeCloseTo(1500, 5);
   });
 
-  it("counts retail in the sellable GSA but not commercial", () => {
+  it("counts retail and the NET offices (not their cores) in the sellable GSA", () => {
     const p = baseProject();
     p.gfaBreakdown!.commercial = { mode: "absolute", value: 1000 };
+    p.officeBreakdown = { circulationPct: 15, servicesPct: 5 };
     const r = computeAreas(p);
     expect(r.gsaResidential).toBeCloseTo(13350, 5);
-    expect(r.gsaTotal).toBeCloseTo(15350, 5); // + retail 2,000
+    expect(r.officeNet).toBeCloseTo(800, 5); // 1,000 × (100 − 15 − 5) %
+    expect(r.gsaTotal).toBeCloseTo(13350 + 2000 + 800, 5);
     expect(r.totalGFA).toBeCloseTo(18000, 5); // 15,000 + 2,000 + 1,000
   });
 

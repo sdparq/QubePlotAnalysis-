@@ -186,6 +186,9 @@ function ReportDocument() {
                 fmt0(balconiesBUA * M2_TO_SQFT),
               ],
               ...(retailM2 > 0 ? [["Retail — leasable/sellable", fmt0(retailM2), fmt0(retailM2 * M2_TO_SQFT)]] : []),
+              ...(a.officeNet > 0
+                ? [[`Offices — net lettable (${pct(a.officeNetPct)} of office GFA)`, fmt0(a.officeNet), fmt0(a.officeNet * M2_TO_SQFT)]]
+                : []),
             ] as (string | number)[][]}
             foot={["Σ GSA (sellable)", fmt0(gsa), fmt0(gsa * M2_TO_SQFT)]}
           />

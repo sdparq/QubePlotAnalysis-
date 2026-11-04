@@ -7,6 +7,7 @@ import {
   residentialSubQuota,
 } from "@/lib/calc/gfa";
 import { computeTowerYield } from "@/lib/calc/tower-yield";
+import { computeOffices } from "@/lib/calc/offices";
 import {
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -70,6 +71,7 @@ export default function CommonAreasTab() {
   const totalCommonGFA = amenitiesGFA + circulationGFA;
 
   const yield_ = useMemo(() => computeTowerYield(project), [project]);
+  const offices = useMemo(() => computeOffices(project), [project]);
 
   // Keep the persisted tower floor count in sync so Program / Parking / Lifts
   // / Massing — which all read project.typeFloors.count / project.numFloors
@@ -161,6 +163,98 @@ export default function CommonAreasTab() {
           />
         </div>
       </div>
+
+      <OfficeDistributionCard
+        offices={offices}
+        onPatch={(next) =>
+          patch({ officeBreakdown: { ...project.officeBreakdown, ...next } })
+        }
+      />
+    </div>
+  );
+}
+
+/** Commercial / Office GFA → circulation + services + net lettable offices
+ *  (the office GSA). Mirrors the residential card; offices have no balconies. */
+function OfficeDistributionCard({
+  offices: o,
+  onPatch,
+}: {
+  offices: ReturnType<typeof computeOffices>;
+  onPatch: (next: { circulationPct?: number; servicesPct?: number }) => void;
+}) {
+  const over = o.circulationPct + o.servicesPct > 100;
+  return (
+    <div className="card">
+      <div className="mb-5">
+        <h2 className="section-title">Distribution · office GFA → offices / common areas</h2>
+        <p className="section-sub">
+          For mixed schemes. Splits the <strong>Commercial / Office</strong> GFA from Setup between{" "}
+          <strong>Circulation</strong> (cores, lobbies, corridors), <strong>Services</strong> (MEP,
+          shafts, toilets) and what remains for <strong>Offices</strong> — the net lettable area, which
+          is the office <strong>GSA</strong> (offices carry no balconies). All three sit inside the
+          office GFA. Office parking is then required at 1 space per {fmt0(o.m2PerSpace)} m² of office
+          GSA (editable in Parking).
+        </p>
+      </div>
+
+      {o.officeGFA <= 0 ? (
+        <div className="border border-ink-200 bg-bone-50 text-ink-700 p-3 text-[12.5px] leading-snug">
+          No office use in this project. Add <strong>Commercial / Office</strong> in Setup&apos;s GFA
+          breakdown to distribute it here.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <Stat label="Office GFA" value={`${fmt0(o.officeGFA)} m²`} sub={fmtSqft(o.officeGFA)} />
+            <Stat label="Offices GSA (net)" value={`${fmt0(o.net)} m²`} sub={`${o.netPct.toFixed(1)}% of office GFA`} />
+            <Stat label="Σ Cores" value={`${fmt0(o.circulation + o.services)} m²`} sub={`${(o.circulationPct + o.servicesPct).toFixed(1)}% of office GFA`} />
+            <Stat label="Office parking" value={`${fmt0(o.parkingRequired)} spaces`} sub={`GSA ÷ ${fmt0(o.m2PerSpace)} m²/space`} />
+          </div>
+
+          <div className="border border-ink-200">
+            <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+              <div>Group</div>
+              <div className="text-right">% of office</div>
+              <div className="text-right">m²</div>
+              <div className="text-right">≈ sqft</div>
+            </div>
+            <GroupRow
+              label="Circulation"
+              hint="Cores, lobbies, lift halls, corridors."
+              value={o.circulationPct}
+              m2={o.circulation}
+              kind="GFA"
+              onChange={(v) => onPatch({ circulationPct: Math.max(0, v) })}
+            />
+            <GroupRow
+              label="Services"
+              hint="MEP rooms, shafts, toilets, plant rooms — inside the office GFA."
+              value={o.servicesPct}
+              m2={o.services}
+              kind="GFA"
+              onChange={(v) => onPatch({ servicesPct: Math.max(0, v) })}
+            />
+            <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 items-center px-3 py-2.5 bg-qube-50/50">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-medium text-ink-900">Offices (net lettable)</span>
+                  <span className="px-1.5 py-0 text-[9.5px] uppercase tracking-[0.10em] border bg-qube-700 text-white border-qube-700">GSA</span>
+                </div>
+                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation − services. No balconies.</div>
+              </div>
+              <div className="text-right text-ink-700 tabular-nums">{o.netPct.toFixed(1)}%</div>
+              <div className="text-right font-medium text-qube-800 tabular-nums">{fmt0(o.net)} m²</div>
+              <div className="text-right text-[11px] text-ink-500 tabular-nums">{fmtSqft(o.net)}</div>
+            </div>
+          </div>
+          {over && (
+            <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug mt-3">
+              Circulation + services exceed 100 % of the office GFA — no net office area is left.
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -337,7 +431,7 @@ function GroupRow({
             type="number"
             step={0.5}
             min={0}
-            className="cell-input text-right !py-1 !pl-1 !pr-6.5 w-[110px]"
+            className="cell-input text-right !py-1 !pl-1 !pr-6 w-[110px]"
             value={Number(value.toFixed(2))}
             onChange={(e) => {
               const n = parseFloat(e.target.value);
