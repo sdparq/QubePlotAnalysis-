@@ -12,6 +12,7 @@ import {
 import { polygonArea, polygonCentroid, type Point } from "@/lib/geom";
 import { fmt2 } from "@/lib/format";
 import PlanTrace, { type TraceMode } from "./plan-trace";
+import { resolveTiers, tierOrigin, wouldLoop, type TierKey, type TierMode } from "@/lib/tier-geometry";
 
 type Phase = "idle" | "rendering" | "done" | "error";
 
@@ -197,7 +198,7 @@ export default function PlotTab() {
    *  metres). Applying it to a tier trace lands the tier footprint in exactly
    *  the same frame Massing works in — including area-anchored calibrations,
    *  which only differ by a uniform scale. */
-  function tierPxToLocal(px: Point[]): Point[] | null {
+  function pxLocalTransform(): { s: number; tx: number; ty: number } | null {
     const tracePx = parcel?.tracePolygonPx;
     const plotLocal = project.plotPolygon;
     if (!tracePx || !plotLocal || tracePx.length < 2 || tracePx.length !== plotLocal.length) return null;
@@ -216,9 +217,16 @@ export default function PlotTab() {
       tx += plotLocal[i].x - s * tracePx[i].x;
       ty += plotLocal[i].y + s * tracePx[i].y;
     }
-    tx /= tracePx.length;
-    ty /= tracePx.length;
-    return px.map((p) => ({ x: s * p.x + tx, y: -s * p.y + ty }));
+    return { s, tx: tx / tracePx.length, ty: ty / tracePx.length };
+  }
+  function tierPxToLocal(px: Point[]): Point[] | null {
+    const t = pxLocalTransform();
+    return t ? px.map((p) => ({ x: t.s * p.x + t.tx, y: -t.s * p.y + t.ty })) : null;
+  }
+  /** Plot-local metres → drawing pixels, to draw a footprint over the plan. */
+  function tierLocalToPx(local: Point[]): Point[] | null {
+    const t = pxLocalTransform();
+    return t ? local.map((p) => ({ x: (p.x - t.tx) / t.s, y: (t.ty - p.y) / t.s })) : null;
   }
 
   /* ---------------- Tier footprints — every tier is a LIST ----------------
@@ -266,8 +274,10 @@ export default function PlotTab() {
     tier: (typeof TIER_TARGETS)[number],
     polys: Point[][],
     traces: Point[][],
+    setMode?: TierMode,
   ) {
     patch({
+      ...(setMode ? { tierMode: { ...project.tierMode, [tier]: setMode } } : {}),
       [TIER_PLURAL_FIELD[tier]]: polys.length > 0 ? polys : undefined,
       // Retire the legacy singular field the moment we touch this tier.
       [TIER_POLY_FIELD[tier]]: undefined,
@@ -300,7 +310,8 @@ export default function PlotTab() {
     }
     if (!parcel) return;
     // Every tier accumulates: a new trace ADDS a block.
-    writeTier(tier, [...tierPolys[tier], local], [...tierTracesPx[tier], px]);
+    // A freshly traced block also switches the tier to "traced".
+    writeTier(tier, [...tierPolys[tier], local], [...tierTracesPx[tier], px], "traced");
   }
 
   function removeTierBlock(tier: (typeof TIER_TARGETS)[number], index: number) {
@@ -311,20 +322,50 @@ export default function PlotTab() {
     );
   }
 
-  /** Reuse the tower outlines for ground / podium — the common case where the
-   *  base repeats the tower footprint, so it needn't be traced twice. */
-  function copyTowersTo(tier: "ground" | "podium") {
-    if (tierPolys.tower.length === 0) return;
-    if (
-      tierPolys[tier].length > 0 &&
-      !confirm(
-        `Replace the ${tierPolys[tier].length} traced ${TIER_LABELS[tier].toLowerCase()} block(s) with the ${tierPolys.tower.length} tower footprint(s)?`,
-      )
-    ) {
-      return;
-    }
-    writeTier(tier, [...tierPolys.tower], [...tierTracesPx.tower]);
+  /* ---------------- How each tier gets its footprint ----------------
+   * Setbacks, traced blocks, or the same geometry as another tier (live).
+   * The resolver in lib/tier-geometry is the same one Massing uses. */
+  const resolvedTiers = useMemo(() => resolveTiers(project), [project]);
+
+  function setTierMode(tier: TierKey, mode: TierMode) {
+    patch({ tierMode: { ...project.tierMode, [tier]: mode } });
   }
+  /** What the selector highlights: the tier it follows, else setbacks / traced. */
+  function selectedMode(tier: TierKey): TierMode {
+    const stored = project.tierMode?.[tier];
+    if ((stored === "ground" || stored === "podium" || stored === "tower") && tierOrigin(project, tier) !== tier) return stored;
+    if (stored === "traced") return "traced";
+    return resolvedTiers[tier].source;
+  }
+  function setUniformSetback(tier: TierKey, v: number) {
+    const safe = Number.isFinite(v) && v >= 0 ? v : 0;
+    if (tier === "ground") patch({ groundSetbackM: safe, groundSetbackPerEdge: undefined });
+    else if (tier === "podium") patch({ podiumSetbackM: safe, podiumSetbackPerEdge: undefined });
+    else patch({ towerSetbackM: safe, towerSetbackPerEdge: undefined });
+  }
+
+  /** Effective footprints drawn over the plan. Tiers that share the exact
+   *  same outline get one shape with a joint label ("Ground + Podium"). */
+  const tierOverlays = (() => {
+    const groups = new Map<string, { tiers: TierKey[]; polys: Point[][] }>();
+    for (const t of TIER_TARGETS) {
+      const polys = resolvedTiers[t].polygons.filter((poly) => poly.length >= 3);
+      if (polys.length === 0) continue;
+      const key = JSON.stringify(polys.map((poly) => poly.map((q) => [Math.round(q.x * 100), Math.round(q.y * 100)])));
+      const g = groups.get(key);
+      if (g) g.tiers.push(t);
+      else groups.set(key, { tiers: [t], polys });
+    }
+    const out: { points: Point[]; color: string; label: string }[] = [];
+    for (const g of groups.values()) {
+      const name = g.tiers.map((t) => TIER_LABELS[t]).join(" + ");
+      g.polys.forEach((poly, i) => {
+        const px = tierLocalToPx(poly);
+        if (px) out.push({ points: px, color: TIER_COLORS[g.tiers[g.tiers.length - 1]], label: g.polys.length > 1 ? `${name} ${i + 1}` : name });
+      });
+    }
+    return out;
+  })();
 
   function finishTrace() {
     if (livePoints.length < 3) {
@@ -546,18 +587,7 @@ export default function PlotTab() {
                   hoverPoint={hoverPoint}
                   candidates={traceMode === "selecting" ? candidates : undefined}
                   onSelectCandidate={selectCandidate}
-                  extraPolygons={TIER_TARGETS.flatMap((t) =>
-                    tierTracesPx[t]
-                      .filter((pts) => pts.length >= 3)
-                      .map((pts, i) => ({
-                        points: pts,
-                        color: TIER_COLORS[t],
-                        label:
-                          tierTracesPx[t].length > 1
-                            ? `${TIER_LABELS[t]} ${i + 1}`
-                            : TIER_LABELS[t],
-                      })),
-                  )}
+                  extraPolygons={isCalibrated ? tierOverlays : []}
                   onPick={(p, meta) => {
                     if (traceMode === "tracing") onTraceClick(p, meta);
                     else if (traceMode === "calibrating") onCalibClick(p);
@@ -759,88 +789,150 @@ export default function PlotTab() {
                 <StepBlock
                   step="3"
                   title="Building footprints (optional)"
-                  done={TIER_TARGETS.some((t) => tierPolys[t].length > 0)}
-                  description="For plots where a tier's shape differs from a setback offset of the plot line: trace its footprint on the drawing. Massing uses a traced footprint verbatim instead of that tier's setbacks. Every tier accepts SEVERAL blocks — each becomes its own volume."
+                  done={TIER_TARGETS.some((t) => resolvedTiers[t].mode !== "setbacks")}
+                  description="How each tier gets its footprint: Setbacks (the plot line moved inward), Traced (draw it on the plan) or the same as another tier. All three are drawn on the plan and used by Massing."
                 >
                   <div className="grid gap-3">
                     {TIER_TARGETS.map((tier) => {
                       const blocks = tierPolys[tier];
+                      const r = resolvedTiers[tier];
+                      const sel = selectedMode(tier);
                       const tracingThis = traceMode === "tracing" && traceTarget === tier;
-                      const canCopy = tier !== "tower" && tierPolys.tower.length > 0;
+                      const area = r.polygons.reduce((sum, poly) => sum + polygonArea(poly), 0);
+                      const perEdge = r.setbacks;
+                      const mixed = perEdge.some((v) => Math.abs(v - perEdge[0]) > 1e-9);
+                      const others = TIER_TARGETS.filter((t) => t !== tier);
                       return (
-                        <div key={tier} className="grid gap-1">
-                          {blocks.map((poly, i) => (
-                            <div key={`${tier}-${i}`} className="flex items-center gap-2 text-[11.5px]">
-                              <span
-                                className="inline-block w-3 h-3 shrink-0 rounded-sm"
-                                style={{ backgroundColor: TIER_COLORS[tier] }}
-                              />
-                              <span className="w-[74px] text-ink-900">
-                                {blocks.length > 1 ? `${TIER_LABELS[tier]} ${i + 1}` : TIER_LABELS[tier]}
-                              </span>
-                              <span className="flex-1 text-ink-500 tabular-nums">
-                                {fmt2(polygonArea(poly))} m²
-                              </span>
+                        <div key={tier} className="border border-ink-200 bg-white">
+                          <div className="flex items-center gap-2 px-2.5 pt-2 text-[12px]">
+                            <span className="inline-block w-3 h-3 shrink-0" style={{ backgroundColor: TIER_COLORS[tier] }} />
+                            <span className="font-medium text-ink-900">{TIER_LABELS[tier]}</span>
+                            <span className="ml-auto text-ink-500 tabular-nums text-[11.5px]">{fmt2(area)} m²</span>
+                          </div>
+                          <div className="px-2.5 pt-1.5">
+                            <div className="seg w-full grid grid-cols-4" role="radiogroup" aria-label={`${TIER_LABELS[tier]} footprint`}>
                               <button
-                                className="btn btn-danger btn-xs"
-                                onClick={() => removeTierBlock(tier, i)}
-                                disabled={traceMode !== "idle"}
-                                title="Remove this block"
-                              >✕</button>
+                                className="seg-btn !px-1" role="radio" aria-checked={sel === "setbacks"} data-active={sel === "setbacks"}
+                                disabled={traceMode !== "idle"} onClick={() => setTierMode(tier, "setbacks")}
+                                title="The plot line moved inward by this tier's setback"
+                              >Setbacks</button>
+                              <button
+                                className="seg-btn !px-1" role="radio" aria-checked={sel === "traced"} data-active={sel === "traced"}
+                                disabled={traceMode !== "idle"} onClick={() => setTierMode(tier, "traced")}
+                                title="Draw this tier's footprint on the plan"
+                              >Traced</button>
+                              {others.map((o) => {
+                                const loop = wouldLoop(project, tier, o);
+                                return (
+                                  <button
+                                    key={o}
+                                    className="seg-btn !px-1" role="radio" aria-checked={sel === o} data-active={sel === o}
+                                    disabled={traceMode !== "idle" || loop}
+                                    onClick={() => setTierMode(tier, o)}
+                                    title={
+                                      loop
+                                        ? `The ${TIER_LABELS[o].toLowerCase()} already follows the ${TIER_LABELS[tier].toLowerCase()}`
+                                        : `Same geometry as the ${TIER_LABELS[o].toLowerCase()} — follows it when it changes`
+                                    }
+                                  >= {TIER_LABELS[o]}</button>
+                                );
+                              })}
                             </div>
-                          ))}
+                          </div>
 
-                          {tracingThis ? (
-                            <div className="flex items-center gap-2 text-[11.5px]">
-                              <span
-                                className="inline-block w-3 h-3 shrink-0 rounded-sm"
-                                style={{ backgroundColor: TIER_COLORS[tier] }}
-                              />
-                              <span className="w-[74px] text-ink-900">
-                                {TIER_LABELS[tier]} {blocks.length + 1}
+                          <div className="px-2.5 py-2 grid gap-1 text-[11.5px]">
+                            {sel === "setbacks" && (
+                              <label className="flex items-center gap-2">
+                                <span className="text-ink-600">Setback from the plot line</span>
+                                <span className="relative ml-auto">
+                                  <input
+                                    type="number" min={0} step={0.5}
+                                    className="cell-input text-right !py-1 !pl-1 !pr-6 !w-[84px]"
+                                    value={mixed ? "" : Number(perEdge[0]?.toFixed(2) ?? 0)}
+                                    placeholder={mixed ? "per edge" : "0"}
+                                    onChange={(e) => {
+                                      const n = parseFloat(e.target.value);
+                                      if (Number.isFinite(n)) setUniformSetback(tier, n);
+                                    }}
+                                    aria-label={`${TIER_LABELS[tier]} setback (m)`}
+                                  />
+                                  <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-ink-400 pointer-events-none">m</span>
+                                </span>
+                              </label>
+                            )}
+                            {sel === "setbacks" && mixed && (
+                              <span className="text-[10.5px] text-ink-500 leading-snug">
+                                Different per edge ({perEdge.map((v) => Number(v.toFixed(2))).join(" / ")} m, set in Massing → Site).
+                                Typing a value here applies it to every edge.
                               </span>
-                              <span className="flex-1 text-ink-500 tabular-nums">
-                                {livePoints.length} point{livePoints.length === 1 ? "" : "s"}…
+                            )}
+                            {sel === "setbacks" && blocks.length > 0 && (
+                              <span className="text-[10.5px] text-ink-500 leading-snug">
+                                {blocks.length} traced block{blocks.length === 1 ? " is" : "s are"} kept — pick Traced to use {blocks.length === 1 ? "it" : "them"} again.
                               </span>
-                              <button className="btn btn-primary btn-xs" onClick={finishTrace}>Done</button>
-                              <button className="btn btn-secondary btn-xs" onClick={cancelTrace}>Cancel</button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 text-[11.5px]">
-                              <span
-                                className="inline-block w-3 h-3 shrink-0 rounded-sm opacity-40"
-                                style={{ backgroundColor: TIER_COLORS[tier] }}
-                              />
-                              <span className="flex-1 text-ink-500">
-                                {blocks.length === 0
-                                  ? `${TIER_LABELS[tier]} — from setbacks`
-                                  : `${blocks.length} block${blocks.length === 1 ? "" : "s"} traced`}
+                            )}
+
+                            {sel !== "setbacks" && sel !== "traced" && (
+                              <span className="text-ink-600 leading-snug">
+                                Same geometry as the <strong>{TIER_LABELS[sel]}</strong>
+                                {r.origin !== sel ? ` (which follows the ${TIER_LABELS[r.origin].toLowerCase()})` : ""} —{" "}
+                                {r.source === "traced"
+                                  ? `${r.polygons.length} traced block${r.polygons.length === 1 ? "" : "s"}`
+                                  : "from its setbacks"}
+                                . It changes whenever the {TIER_LABELS[r.origin].toLowerCase()} does.
                               </span>
-                              {canCopy && (
-                                <button
-                                  className="btn btn-secondary btn-xs"
-                                  onClick={() => copyTowersTo(tier)}
-                                  disabled={traceMode !== "idle"}
-                                  title={`Reuse the ${tierPolys.tower.length} tower footprint(s) for the ${TIER_LABELS[tier].toLowerCase()}`}
-                                >⧉ Same as tower</button>
-                              )}
-                              <button
-                                className="btn btn-secondary btn-xs"
-                                onClick={() => startTierTrace(tier)}
-                                disabled={traceMode !== "idle"}
-                              >{blocks.length === 0 ? "Trace" : "+ Add block"}</button>
-                            </div>
-                          )}
+                            )}
+
+                            {sel === "traced" && (
+                              <>
+                                {blocks.map((poly, i) => (
+                                  <div key={`${tier}-${i}`} className="flex items-center gap-2">
+                                    <span className="text-ink-900">Block {i + 1}</span>
+                                    <span className="flex-1 text-ink-500 tabular-nums">{fmt2(polygonArea(poly))} m²</span>
+                                    <button
+                                      className="btn btn-danger btn-xs"
+                                      onClick={() => removeTierBlock(tier, i)}
+                                      disabled={traceMode !== "idle"}
+                                      title="Remove this block"
+                                    >✕</button>
+                                  </div>
+                                ))}
+                                {tracingThis ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-ink-900">Block {blocks.length + 1}</span>
+                                    <span className="flex-1 text-ink-500 tabular-nums">
+                                      {livePoints.length} point{livePoints.length === 1 ? "" : "s"}…
+                                    </span>
+                                    <button className="btn btn-primary btn-xs" onClick={finishTrace}>Done</button>
+                                    <button className="btn btn-secondary btn-xs" onClick={cancelTrace}>Cancel</button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className="flex-1 text-ink-500 leading-snug">
+                                      {blocks.length === 0
+                                        ? "Nothing traced yet — the setbacks are used until you trace a block."
+                                        : `${blocks.length} block${blocks.length === 1 ? "" : "s"} — each is its own volume.`}
+                                    </span>
+                                    <button
+                                      className="btn btn-secondary btn-xs shrink-0"
+                                      onClick={() => startTierTrace(tier)}
+                                      disabled={traceMode !== "idle"}
+                                    >{blocks.length === 0 ? "Trace" : "+ Add block"}</button>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                   <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
-                    Click each corner on the drawing; click the first point (or Done) to close.
-                    Every block becomes its own volume in Massing, sharing that tier&apos;s floor
-                    count and height. <strong>Same as tower</strong> copies the tower outlines onto
-                    the ground floor or podium when the base repeats them. The footprint must sit
-                    inside the plot for setbacks compliance — the app doesn&apos;t enforce it.
+                    <strong>= Ground / = Podium / = Tower</strong> makes a tier share another tier&apos;s
+                    geometry and follow it. Tracing: click each corner on the drawing, then the first
+                    point (or Done) to close. Per-edge setbacks are edited in Massing → Site. A traced
+                    footprint must sit inside the plot for setbacks compliance — the app doesn&apos;t
+                    enforce it.
                   </p>
                 </StepBlock>
               )}

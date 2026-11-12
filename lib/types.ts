@@ -180,6 +180,11 @@ export interface Project {
   /** MULTIPLE tower footprints in plot-local metres. Massing builds one tower
    *  volume per polygon (same floor count/height for all). */
   towerPolygons?: { x: number; y: number }[][];
+  /** How each tier gets its footprint: "setbacks" (plot line offset inward),
+   *  "traced" (the blocks traced in Plot) or another tier's name — the same
+   *  geometry as that tier, live. Unset = traced blocks when there are any,
+   *  else setbacks. See lib/tier-geometry.ts. */
+  tierMode?: Partial<Record<"ground" | "podium" | "tower", "setbacks" | "traced" | "ground" | "podium" | "tower">>;
   /** Uniform fallback setback (m) for the ground-floor footprint. Used when
    *  `groundSetbackPerEdge` is not set or has a different length than the plot
    *  polygon. Basements always use 0 (full plot polygon). */

@@ -24,16 +24,15 @@ import PlanTrace from "./plan-trace";
 import {
   type Point,
   edgeLengths,
-  offsetPolygon,
   polygonArea,
   polygonCentroid,
   polygonPerimeter,
   rectanglePlotPolygon,
-  translatePolygon,
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import { computeOfficeStack } from "@/lib/calc/offices";
 import { retailGFA } from "@/lib/calc/retail";
+import { resolveTiers, type TierKey } from "@/lib/tier-geometry";
 import type { Volume } from "@/lib/massing";
 import type { FacadeConfig, TowerFacadeStyle } from "@/lib/types";
 import type { CaptureFn, SceneStyle, ViewPresetKind } from "./massing-scene";
@@ -84,22 +83,6 @@ function QubeMark({ className = "" }: { className?: string }) {
 }
 
 
-/** Resolve a per-edge setback array for a tier:
- *   - if the persisted perEdge array matches the plot polygon length, use it
- *   - otherwise fall back to the uniform value on every edge */
-function resolvePerEdge(plot: Point[], uniform: number, perEdge: number[] | undefined): number[] {
-  if (perEdge && perEdge.length === plot.length) {
-    return perEdge.map((v) => Math.max(0, v));
-  }
-  return plot.map(() => Math.max(0, uniform));
-}
-
-function tierPolygon(plot: Point[], setbacks: number[]): Point[] {
-  if (plot.length < 3) return plot;
-  if (setbacks.every((s) => s <= 0)) return plot;
-  return offsetPolygon(plot, setbacks);
-}
-
 export default function MassingTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
@@ -117,72 +100,32 @@ export default function MassingTab() {
     return rectanglePlotPolygon(frontage, depth);
   }, [mode, project.plotPolygon, frontage, depth]);
 
-  // Per-tier setbacks. Each tier has a uniform fallback and an optional per-edge
-  // override. The user edits the per-edge values in the table below.
+  // Footprint of every tier — setbacks, traced blocks or "same as" another
+  // tier — resolved in one place (lib/tier-geometry), shared with Plot.
   const groundUni = project.groundSetbackM ?? 3;
   const podiumUni = project.podiumSetbackM ?? 3;
   const towerUni = project.towerSetbackM ?? 6;
-
-  const groundEdges = useMemo(
-    () => resolvePerEdge(plotPoly, groundUni, project.groundSetbackPerEdge),
-    [plotPoly, groundUni, project.groundSetbackPerEdge],
-  );
-  const podiumEdges = useMemo(
-    () => resolvePerEdge(plotPoly, podiumUni, project.podiumSetbackPerEdge),
-    [plotPoly, podiumUni, project.podiumSetbackPerEdge],
-  );
-  const towerEdges = useMemo(
-    () => resolvePerEdge(plotPoly, towerUni, project.towerSetbackPerEdge),
-    [plotPoly, towerUni, project.towerSetbackPerEdge],
-  );
-
-  // Custom tier footprints traced in the Plot tab win over setback-derived
-  // outlines — for plots where the tower/podium shape differs from the plot line.
-  // Every tier is a LIST of traced blocks; the legacy singular fields count
-  // as block #1 so existing projects keep rendering unchanged.
-  const customGrounds = useMemo(() => {
-    const list = project.groundPolygons ?? (project.groundPolygon ? [project.groundPolygon] : []);
-    const valid = list.filter((poly) => (poly?.length ?? 0) >= 3);
-    return valid.length > 0 ? valid : null;
-  }, [project.groundPolygons, project.groundPolygon]);
-  const customPodiums = useMemo(() => {
-    const list = project.podiumPolygons ?? (project.podiumPolygon ? [project.podiumPolygon] : []);
-    const valid = list.filter((poly) => (poly?.length ?? 0) >= 3);
-    return valid.length > 0 ? valid : null;
-  }, [project.podiumPolygons, project.podiumPolygon]);
-  // Multiple towers: towerPolygons wins; the legacy singular field counts as
-  // one tower. Empty/short polygons are dropped.
-  const customTowers = useMemo(() => {
-    const list = project.towerPolygons ?? (project.towerPolygon ? [project.towerPolygon] : []);
-    const valid = list.filter((poly) => (poly?.length ?? 0) >= 3);
-    return valid.length > 0 ? valid : null;
-  }, [project.towerPolygons, project.towerPolygon]);
-
-  const groundPolys = useMemo(
-    () => customGrounds ?? [tierPolygon(plotPoly, groundEdges)],
-    [customGrounds, plotPoly, groundEdges],
-  );
-  const podiumPolys = useMemo(
-    () => customPodiums ?? [tierPolygon(plotPoly, podiumEdges)],
-    [customPodiums, plotPoly, podiumEdges],
-  );
-  /** First block of each tier — anchor for amenity clearances and legacy props. */
-  const groundPoly = groundPolys[0] ?? [];
-  const podiumPoly = podiumPolys[0] ?? [];
-  const towerPolysCentered = useMemo(
-    () => customTowers ?? [tierPolygon(plotPoly, towerEdges)],
-    [customTowers, plotPoly, towerEdges],
-  );
-
   const towerDx = project.towerOffsetXM ?? 0;
   const towerDy = project.towerOffsetYM ?? 0;
-  const towerPolys = useMemo(
-    () =>
-      towerDx === 0 && towerDy === 0
-        ? towerPolysCentered
-        : towerPolysCentered.map((poly) => translatePolygon(poly, towerDx, towerDy)),
-    [towerPolysCentered, towerDx, towerDy],
+  const tiers = useMemo(
+    () => resolveTiers(project, plotPoly),
+    // Only the geometry inputs: a façade or sun change must not rebuild the volumes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      plotPoly, project.tierMode,
+      project.groundPolygons, project.groundPolygon, project.podiumPolygons, project.podiumPolygon,
+      project.towerPolygons, project.towerPolygon,
+      project.groundSetbackM, project.podiumSetbackM, project.towerSetbackM,
+      project.groundSetbackPerEdge, project.podiumSetbackPerEdge, project.towerSetbackPerEdge,
+      towerDx, towerDy,
+    ],
   );
+  const groundEdges = tiers.ground.setbacks;
+  const podiumEdges = tiers.podium.setbacks;
+  const towerEdges = tiers.tower.setbacks;
+  const groundPolys = tiers.ground.polygons;
+  const podiumPolys = tiers.podium.polygons;
+  const towerPolys = tiers.tower.polygons;
   /** First tower — anchor for the height dimension and amenity clearances. */
   const towerPoly = towerPolys[0] ?? [];
 
@@ -686,50 +629,31 @@ export default function MassingTab() {
                     officeHeightM={officeFloorH}
                     officePodiumLevels={officeStack.podiumLevels.length}
                   />
-                  {(customGrounds || customPodiums || customTowers) && (
+                  {(["ground", "podium", "tower"] as TierKey[]).some((k) => tiers[k].mode !== "setbacks") && (
                     <div className="border border-qube-200 bg-qube-50 p-3 text-[11.5px] text-ink-800 leading-snug">
-                      <div className="eyebrow text-qube-800 text-[10px] mb-1">Custom footprints from Plot</div>
-                      {([
-                        ["Ground", customGrounds, "ground"],
-                        ["Podium", customPodiums, "podium"],
-                        ["Tower", customTowers, "tower"],
-                      ] as const).map(([label, blocks, tier]) =>
-                        blocks ? (
+                      <div className="eyebrow text-qube-800 text-[10px] mb-1">Footprints set in Plot</div>
+                      {(["ground", "podium", "tower"] as TierKey[]).map((tier) => {
+                        const t = tiers[tier];
+                        if (t.mode === "setbacks") return null;
+                        const label = tier[0].toUpperCase() + tier.slice(1);
+                        const areas = t.polygons.map((poly) => fmt2(polygonArea(poly))).join(" + ");
+                        return (
                           <div key={tier} className="flex items-center justify-between gap-2 py-0.5">
                             <span>
-                              <strong>
-                                {blocks.length === 1 ? label : `${blocks.length} ${label.toLowerCase()} blocks`}
-                              </strong>{" "}
-                              use{blocks.length === 1 ? "s" : ""} traced footprint{blocks.length === 1 ? "" : "s"}{" "}
-                              ({blocks.map((poly) => fmt2(polygonArea(poly))).join(" + ")} m²) — the{" "}
-                              {label.toLowerCase()} setbacks are ignored. Add or remove blocks in the Plot tab.
+                              <strong>{label}</strong>{" "}
+                              {t.mode === "traced"
+                                ? `uses ${t.polygons.length === 1 ? "its traced footprint" : `${t.polygons.length} traced blocks`}`
+                                : `is the same as the ${t.origin}`}{" "}
+                              ({areas} m²) — the {tier} setbacks are ignored. Change it in the Plot tab.
                             </span>
                             <button
-                              className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-red-700 underline shrink-0"
-                              onClick={() => {
-                                const singular = { ground: "groundPolygon", podium: "podiumPolygon", tower: "towerPolygon" } as const;
-                                const plural = { ground: "groundPolygons", podium: "podiumPolygons", tower: "towerPolygons" } as const;
-                                const traceKey = { ground: "grounds", podium: "podiums", tower: "towers" } as const;
-                                patch({
-                                  [singular[tier]]: undefined,
-                                  [plural[tier]]: undefined,
-                                  parcel: project.parcel
-                                    ? {
-                                        ...project.parcel,
-                                        tierTracesPx: {
-                                          ...project.parcel.tierTracesPx,
-                                          [tier]: undefined,
-                                          [traceKey[tier]]: undefined,
-                                        },
-                                      }
-                                    : project.parcel,
-                                });
-                              }}
-                              title={`Remove every traced ${label.toLowerCase()} block and fall back to setbacks`}
-                            >clear</button>
+                              className="text-[10px] uppercase tracking-[0.10em] text-ink-500 hover:text-ink-900 underline shrink-0"
+                              onClick={() => patch({ tierMode: { ...project.tierMode, [tier]: "setbacks" } })}
+                              title={`Use the ${tier} setbacks instead (traced blocks are kept in Plot)`}
+                            >use setbacks</button>
                           </div>
-                        ) : null,
-                      )}
+                        );
+                      })}
                     </div>
                   )}
                   <TowerOffset dx={towerDx} dy={towerDy} onPatch={patch} />
