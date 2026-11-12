@@ -17,6 +17,7 @@ import {
   typologyUnitShare,
 } from "@/lib/calc/program-autofill";
 import { residentialSubGFA } from "@/lib/calc/gfa";
+import { isNonResidential } from "@/lib/calc/scheme";
 
 const CATEGORIES: UnitCategory[] = ["Studio", "1BR", "2BR", "3BR", "4BR", "Penthouse"];
 
@@ -98,6 +99,7 @@ export default function TypologiesTab() {
     [project.zone, library],
   );
   const apartmentsGFA = useMemo(() => residentialSubGFA(project, "apartments"), [project]);
+  const nonResidential = isNonResidential(project);
 
   function addNew() {
     upsert({
@@ -326,7 +328,17 @@ export default function TypologiesTab() {
 
   return (
     <div className="grid gap-6">
-      {detectedClass && apartmentsGFA <= 0 && (
+      {nonResidential && (
+        <div className="card">
+          <h2 className="section-title">No apartments in this scheme</h2>
+          <p className="section-sub">
+            Setup has no residential GFA — this is an office / retail building, so typologies and the
+            unit mix are not used. Offices and retail are distributed in <strong>Distribution</strong>.
+          </p>
+        </div>
+      )}
+
+      {detectedClass && apartmentsGFA <= 0 && !nonResidential && (
         <div className="card bg-amber-50 border-amber-200">
           <div className="eyebrow text-amber-800 text-[10px]">No Residential GFA set</div>
           <p className="text-[12.5px] text-ink-800 mt-1 leading-snug">

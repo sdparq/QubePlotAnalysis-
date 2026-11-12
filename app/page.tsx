@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useProject } from "@/lib/store";
+import { useTowerFloorsSync } from "@/lib/use-tower-floors-sync";
 import PlotTab from "@/components/plot-tab";
 import SetupTab from "@/components/setup-tab";
 import TypologiesTab from "@/components/typologies-tab";
@@ -47,6 +48,7 @@ export default function Page() {
   const [hydrated, setHydrated] = useState(false);
   const [libraryUnlocked, setLibraryUnlocked] = useState(false);
   const project = useProject();
+  useTowerFloorsSync();
 
   useEffect(() => {
     setLibraryUnlocked(window.sessionStorage.getItem(LIBRARY_UNLOCK_KEY) === "1");

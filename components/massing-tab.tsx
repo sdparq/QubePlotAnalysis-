@@ -33,6 +33,7 @@ import {
 } from "@/lib/geom";
 import { edgeColor } from "@/lib/edge-colors";
 import { computeOfficeStack } from "@/lib/calc/offices";
+import { retailGFA } from "@/lib/calc/retail";
 import type { Volume } from "@/lib/massing";
 import type { FacadeConfig, TowerFacadeStyle } from "@/lib/types";
 import type { CaptureFn, SceneStyle, ViewPresetKind } from "./massing-scene";
@@ -222,6 +223,7 @@ export default function MassingTab() {
   const officeH = officeFloors * officeFloorH;
   const officeOnTop = officeStack.towerPosition === "top";
   const podiumOfficeKey = officeStack.podiumLevels.join(",");
+  const hasRetail = retailGFA(project) > 0;
 
   const totalH = groundH + podiumH + towerH + officeH;
 
@@ -239,7 +241,8 @@ export default function MassingTab() {
       groundPolys.forEach((poly, i) => {
         if (poly.length < 3) return;
         out.push({ polygon: poly, fromY: y, toY: y + groundH, kind: "ground", floors: groundCount });
-        labels.push(groundPolys.length > 1 ? `Ground ${i + 1}${gSuffix}` : `Ground${gSuffix}`);
+        const gName = hasRetail ? "Ground · Retail" : "Ground";
+        labels.push(groundPolys.length > 1 ? `${gName} ${i + 1}${gSuffix}` : `${gName}${gSuffix}`);
       });
       y += groundH;
     }
@@ -289,7 +292,7 @@ export default function MassingTab() {
             polygon: poly, fromY: offFrom, toY: offFrom + officeH, kind: "tower", floors: officeFloors,
             use: "office", roof: officeOnTop || towerH <= 0 ? "full" : "none",
           });
-          labels.push(`${name} · Offices ${officeFloors}F`);
+          labels.push(towerH > 0 ? `${name} · Offices ${officeFloors}F` : `${name} · Offices · ${officeFloors}F`);
         }
         if (towerH > 0) {
           out.push({
@@ -301,7 +304,7 @@ export default function MassingTab() {
       });
     }
     return { sceneVolumes: out, volumeLabels: labels };
-  }, [plotPoly, groundPolys, podiumPolys, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, podiumHeightM, towerCount, officeH, officeFloors, officeOnTop, podiumOfficeKey]);
+  }, [plotPoly, groundPolys, podiumPolys, towerPolys, basementH, groundH, podiumH, towerH, basementCount, groundCount, podiumCount, podiumHeightM, towerCount, officeH, officeFloors, officeOnTop, podiumOfficeKey, hasRetail]);
 
   const totalVolumeGFA = groundArea * groundCount + podiumArea * podiumCount + towerArea * (towerCount + officeFloors);
   const computedFar = plotPolyArea > 0 ? totalVolumeGFA / plotPolyArea : 0;
@@ -417,9 +420,17 @@ export default function MassingTab() {
     if (groundPolys.length > 1 || podiumPolys.length > 1) {
       lines.push(`- The base is made of separate blocks (${groundPolys.length} ground, ${podiumPolys.length} podium) — keep them as distinct volumes, do not merge them into one slab.`);
     }
-    lines.push(`- Tower (residential): ${towerCount} typical floor(s) × ${towerHeightM.toFixed(1)} m. Draw exactly ${towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
+    if (towerCount > 0) {
+      lines.push(`- Tower (residential): ${towerCount} typical floor(s) × ${towerHeightM.toFixed(1)} m. Draw exactly ${towerCount} horizontal slab lines / window bands on the tower facade so the viewer can count them.`);
+    } else if (officeFloors > 0) {
+      lines.push("- This is an OFFICE building: there are no residential floors and no balconies anywhere on the tower.");
+    }
     if (officeFloors > 0) {
-      lines.push(`- Offices: ${officeFloors} floor(s) × ${officeFloorH.toFixed(1)} m at the ${officeOnTop ? "TOP" : "BOTTOM"} of the tower, with a glass curtain wall and NO balconies — keep that band distinct from the residential floors.`);
+      lines.push(
+        towerCount > 0
+          ? `- Offices: ${officeFloors} floor(s) × ${officeFloorH.toFixed(1)} m at the ${officeOnTop ? "TOP" : "BOTTOM"} of the tower, with a glass curtain wall and NO balconies — keep that band distinct from the residential floors.`
+          : `- Offices: the whole tower, ${officeFloors} floor(s) × ${officeFloorH.toFixed(1)} m. Draw exactly ${officeFloors} floor bands.`,
+      );
     }
     if (officeStack.podiumLevels.length > 0) {
       lines.push(`- Podium level(s) ${officeStack.podiumLevels.map((l) => `P${l}`).join(", ")} are offices (glazed).`);
@@ -624,6 +635,14 @@ export default function MassingTab() {
                     hasGround={groundH > 0}
                     hasPodium={podiumH > 0}
                     towers={towerPolys.length}
+                    officeOnly={officeFloors > 0 && towerCount <= 0}
+                    officeNote={
+                      officeFloors <= 0
+                        ? undefined
+                        : towerCount > 0
+                          ? "The office floors always get a glass curtain wall (no balconies); the concept above applies to the residential floors."
+                          : "Office tower: Resort balconies doesn't apply — it renders as a glass curtain wall. Vertical fins and Framed grid apply as chosen."
+                    }
                   />
                   <PodiumAmenitiesPanel
                     hasDeck={podiumH > 0 || groundH > 0}
@@ -1717,8 +1736,11 @@ function ToggleRow({
 }
 
 function TowerDesignPanel({
-  params, onPatch, hasGround, hasPodium, towers,
+  params, onPatch, hasGround, hasPodium, towers, officeNote, officeOnly,
 }: {
+  officeNote?: string;
+  /** The tower holds offices only — no balconies, no sky pool. */
+  officeOnly?: boolean;
   params: FacadeParams;
   onPatch: (p: Partial<FacadeConfig>) => void;
   hasGround: boolean;
@@ -1811,8 +1833,12 @@ function TowerDesignPanel({
             onChange={(v) => onPatch({ roundedCorners: v })}
           />
           <ToggleRow
-            label="Crown & sky pool"
-            hint={towers > 1 ? "Crown screen over a rooftop pool and lounge on each tower" : "Crown screen over a rooftop pool and lounge"}
+            label={officeOnly ? "Crown" : "Crown & sky pool"}
+            hint={
+              officeOnly
+                ? "Crown screen hiding the roof plant, with a rooftop lounge"
+                : towers > 1 ? "Crown screen over a rooftop pool and lounge on each tower" : "Crown screen over a rooftop pool and lounge"
+            }
             checked={params.crown}
             onChange={(v) => onPatch({ crown: v })}
           />
@@ -1833,6 +1859,9 @@ function TowerDesignPanel({
         </div>
       </div>
 
+      {officeNote && (
+        <p className="text-[11px] text-ink-700 leading-snug border border-ink-200 bg-bone-50 px-2.5 py-2">{officeNote}</p>
+      )}
       <p className="text-[11px] text-ink-500 leading-snug">
         Visual only — areas and ratios never change. The Diagram style shows plain tier colours.
       </p>
@@ -1870,7 +1899,9 @@ function TierSummary({
     ...(officeTowerFloors > 0
       ? [{ label: "Tower · offices", floors: officeTowerFloors, heightM: officeHeightM, footprint: towerArea, kind: "office" as const }]
       : []),
-    { label: officeTowerFloors > 0 ? "Tower · residential" : "Tower (type floors)", floors: towerCount, heightM: towerHeightM, footprint: towerArea, kind: "tower" },
+    ...(towerCount > 0 || officeTowerFloors <= 0
+      ? [{ label: officeTowerFloors > 0 ? "Tower · residential" : "Tower (type floors)", floors: towerCount, heightM: towerHeightM, footprint: towerArea, kind: "tower" as const }]
+      : []),
   ];
   const swatch: Record<typeof rows[number]["kind"], string> = {
     basement: "#bdb9ad",

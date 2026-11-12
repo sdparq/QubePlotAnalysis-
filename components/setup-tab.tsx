@@ -10,6 +10,7 @@ import {
 } from "@/lib/types";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { computeOfficeStack } from "@/lib/calc/offices";
+import { isNonResidential } from "@/lib/calc/scheme";
 import {
   ALL_CLASS_LETTERS,
   TYPOLOGY_KEYS,
@@ -196,6 +197,7 @@ function FloorBreakdownCard({
   // Office floors in the tower (Distribution → Offices · where they go).
   const officeStack = computeOfficeStack(project);
   const officeFloors = officeStack.towerFloors;
+  const nonResidential = isNonResidential(project);
 
   const nonTowerSections = FLOOR_SECTIONS.filter((s) => s.key !== "basements" && s.key !== "typeFloors");
   const totalAboveGround = nonTowerSections.reduce((sum, s) => sum + get(s.key, s).count, 0) + typeFloorsSec.count + officeFloors;
@@ -268,7 +270,9 @@ function FloorBreakdownCard({
           <div>
             <div className="text-ink-900">Type floors <span className="text-qube-700">· derived</span></div>
             <div className="text-[10.5px] text-ink-500 leading-snug">
-              Set the tower floor-plate area in <strong>Distribution</strong> to compute this.
+              {nonResidential
+                ? "No residential GFA below — the tower holds no apartment floors."
+                : <>Set the tower floor-plate area in <strong>Distribution</strong> to compute this.</>}
             </div>
           </div>
           <div className="text-right text-ink-900 font-medium">{typeFloorsSec.count}</div>

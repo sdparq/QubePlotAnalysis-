@@ -489,6 +489,11 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
       volumes.filter((v) => v.kind === kind).reduce<Volume | undefined>((a, v) => (!a || v.toY > a.toY ? v : a), undefined);
     return top("podium") ?? top("ground");
   }, [volumes]);
+  // Office floors under/over apartments read as a distinct curtain-wall band.
+  // An all-office tower takes the chosen concept instead — except balconies,
+  // which offices don't have.
+  const mixedTower = volumes.some((v) => v.kind === "tower" && v.use !== "office");
+  const officeTowerStyle = mixedTower || !designed || designed.style === "balconies" ? "curtain" : designed.style;
   // Office podium levels: a flat-cornered curtain wall, no crown.
   const officePodiumParams = useMemo(() => (designed ? { ...designed, roundedCorners: false } : null), [designed]);
   const towerVolume = useMemo(() => volumes.find((v) => v.kind === "tower"), [volumes]);
@@ -685,8 +690,9 @@ const SiteAndBuilding = memo(function SiteAndBuilding({
                 floors={v.floors}
                 params={designed}
                 kind={palette.facadeKind}
-                styleOverride={v.use === "office" ? "curtain" : undefined}
+                styleOverride={v.use === "office" ? officeTowerStyle : undefined}
                 roof={v.roof}
+                skyPool={v.use !== "office"}
               />
             );
           }

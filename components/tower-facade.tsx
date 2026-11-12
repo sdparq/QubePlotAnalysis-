@@ -183,15 +183,17 @@ interface TowerProps {
   styleOverride?: TowerFacadeStyle;
   /** "none" when another volume stacks on top; "slab" for a plain roof. */
   roof?: "full" | "slab" | "none";
+  /** Rooftop pool and loungers under the crown (residential towers). Default true. */
+  skyPool?: boolean;
 }
 
-export function TowerFacade({ polygon, fromY, toY, floorHeight, floors: floorsIn, params, kind, styleOverride, roof = "full" }: TowerProps) {
+export function TowerFacade({ polygon, fromY, toY, floorHeight, floors: floorsIn, params, kind, styleOverride, roof = "full", skyPool = true }: TowerProps) {
   const { roundedCorners, balconyDepthM } = params;
   const style = styleOverride ?? params.style;
   const crown = params.crown && roof === "full";
   const layers = useLayers(
-    () => buildTower({ polygon, fromY, toY, floorHeight, floors: floorsIn, style, roundedCorners, crown, balconyDepthM, roof }),
-    [polygon, fromY, toY, floorHeight, floorsIn, style, roundedCorners, crown, balconyDepthM, roof],
+    () => buildTower({ polygon, fromY, toY, floorHeight, floors: floorsIn, style, roundedCorners, crown, balconyDepthM, roof, skyPool }),
+    [polygon, fromY, toY, floorHeight, floorsIn, style, roundedCorners, crown, balconyDepthM, roof, skyPool],
   );
   const mats = useMemo(() => facadeMaterials(params, kind), [params, kind]);
   return <RenderLayers layers={layers} mats={mats} />;
@@ -209,6 +211,8 @@ export function buildTower(o: {
   balconyDepthM: number;
   /** "none": another tower volume continues above — no roof, deck or crown. */
   roof?: "full" | "slab" | "none";
+  /** false: crown without the rooftop pool (office towers). */
+  skyPool?: boolean;
 }): Layers {
   const L = new Layers();
   const { fromY, toY, style } = o;
@@ -319,7 +323,7 @@ export function buildTower(o: {
     L.boxes("accent", blades);
     L.at("accent", bandGeometry(outline, 0.5, -0.6, 0.5), [toY + cH - 0.5]);
     L.at("rail", bandGeometry(outline, -0.95, -1.01, RAIL_H), [deckY]);
-    if (roof.pool) {
+    if (roof.pool && o.skyPool !== false) {
       const p = roof.pool;
       L.boxes("slab", [boxAt(p.x, p.y, deckY + 0.2, p.yaw, p.len + 0.9, 0.4, p.wid + 0.9)]);
       L.boxes("water", [boxAt(p.x, p.y, deckY + 0.42, p.yaw, p.len, 0.05, p.wid)]);

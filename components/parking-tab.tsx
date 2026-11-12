@@ -25,7 +25,7 @@ export default function ParkingTab() {
           <div>
             <h2 className="section-title">Parking parameters</h2>
             <p className="section-sub">
-              Retail comes from Setup → GFA breakdown ÷ <strong>m² per space</strong>; offices from
+              Retail comes from its GFA (or its GSA — switch on the right) ÷ <strong>m² per space</strong>; offices from
               the office GSA (net lettable, Distribution) ÷ <strong>m² per space</strong>.
               POD (People of Determination) follows Dubai DCD: 2% of the standard total up
               to 500 (min 1), then +1% on each additional space — added on top of the
@@ -51,7 +51,21 @@ export default function ParkingTab() {
               />
             </label>
             <label className="grid gap-1">
-              <span className="eyebrow text-ink-500 text-[10.5px]">Retail · m² per space</span>
+              <span className="eyebrow text-ink-500 text-[10.5px] flex items-center justify-between gap-1">
+                <span>Retail · m² {r.retailBasis === "gsa" ? "GSA" : "GFA"} / space</span>
+                <span className="inline-flex border border-ink-200" role="group" aria-label="Retail parking basis">
+                  {(["gfa", "gsa"] as const).map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      aria-pressed={r.retailBasis === b}
+                      onClick={(e) => { e.preventDefault(); patch({ retailParkingBasis: b }); }}
+                      className={`px-1.5 text-[9.5px] leading-[16px] tracking-[0.06em] ${r.retailBasis === b ? "bg-ink-900 text-bone-100" : "bg-white text-ink-600 hover:bg-bone-100"}`}
+                      title={b === "gfa" ? "Apply the ratio to the whole retail GFA" : "Apply the ratio to the retail GSA (net lettable, Distribution)"}
+                    >{b.toUpperCase()}</button>
+                  ))}
+                </span>
+              </span>
               <input
                 type="number"
                 step={5}
@@ -62,7 +76,7 @@ export default function ParkingTab() {
                   const n = parseFloat(e.target.value);
                   if (Number.isFinite(n) && n > 0) patch({ retailM2PerSpace: n });
                 }}
-                title="m² of retail GFA per required parking space (default 70 = 1 space per 70 m² of retail)"
+                title="m² of retail per required parking space (default 70 = 1 space per 70 m²) — on its GFA or its GSA, per the switch"
               />
             </label>
             <label className="grid gap-1">
@@ -232,7 +246,7 @@ export default function ParkingTab() {
               {r.retailRequired > 0 && (
                 <tr className="row-subtotal">
                   <td colSpan={4} className="text-right uppercase tracking-[0.10em] text-[11px]">
-                    Retail required ({fmt0(r.retailM2)} m² ÷ {fmt0(r.retailM2PerSpaceUsed)} m²/space)
+                    Retail required ({fmt0(r.retailM2)} m² {r.retailBasis === "gsa" ? "GSA" : "GFA"} ÷ {fmt0(r.retailM2PerSpaceUsed)} m²/space)
                   </td>
                   <td className="text-right">{fmt0(r.retailRequired)}</td>
                 </tr>

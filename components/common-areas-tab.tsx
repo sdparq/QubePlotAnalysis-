@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { fmt0 } from "@/lib/format";
 import {
@@ -9,6 +9,8 @@ import {
 import { computeTowerYield } from "@/lib/calc/tower-yield";
 import { computeOffices, computeOfficeStack, type OfficeStackResult } from "@/lib/calc/offices";
 import type { OfficeStack } from "@/lib/types";
+import { computeRetail } from "@/lib/calc/retail";
+import { activeUnits, isNonResidential } from "@/lib/calc/scheme";
 import {
   DEFAULT_RESIDENTIAL_BREAKDOWN,
   type CommonArea,
@@ -74,23 +76,12 @@ export default function CommonAreasTab() {
   const yield_ = useMemo(() => computeTowerYield(project), [project]);
   const offices = useMemo(() => computeOffices(project), [project]);
   const officeStack = useMemo(() => computeOfficeStack(project), [project]);
+  const retail = useMemo(() => computeRetail(project), [project]);
+  const nonResidential = isNonResidential(project);
+  const strandedUnits = nonResidential ? activeUnits(project) : 0;
 
-  // Keep the persisted tower floor count in sync so Program / Parking / Lifts
-  // / Massing — which all read project.typeFloors.count / project.numFloors
-  // directly — pick up the derived value without their own copy of this calc.
-  useEffect(() => {
-    if (yield_.towerFootprintM2 <= 0 || yield_.towerTargetGFA <= 0) return;
-    const nextCount = Math.max(1, yield_.towerFloors);
-    const curHeight = project.typeFloors?.heightM ?? project.floorHeight;
-    if ((project.typeFloors?.count ?? project.numFloors) === nextCount) return;
-    patch({
-      typeFloors: { count: nextCount, heightM: curHeight },
-      numFloors: nextCount,
-      floorHeight: curHeight > 0 ? curHeight : project.floorHeight,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yield_.towerFloors, yield_.towerFootprintM2, yield_.towerTargetGFA]);
-
+  // The residential tower floor count is persisted by useTowerFloorsSync
+  // (mounted at page level) from the same computeTowerYield result.
   function setFootprint(field: "groundFootprintM2" | "podiumFootprintM2" | "towerFootprintM2", v: number) {
     patch({ [field]: v > 0 ? v : undefined });
   }
@@ -99,11 +90,45 @@ export default function CommonAreasTab() {
     <div className="grid gap-6">
       <TowerYieldCard
         yield_={yield_}
+        officeFloors={officeStack.towerFloors}
+        nonResidential={nonResidential}
         maxTowerFloors={project.maxTowerFloors}
         onSetFootprint={setFootprint}
         onSetMaxTowerFloors={(v) => patch({ maxTowerFloors: v > 0 ? v : undefined })}
       />
 
+      {nonResidential && (
+        <div className="card">
+          <h2 className="section-title">Residential · not in this scheme</h2>
+          <p className="section-sub">
+            Setup has no residential GFA, so the tower holds no apartment floors — Typologies and
+            Apartments stay empty and the building is made of the uses below. Add{" "}
+            <strong>Residential</strong> in Setup&apos;s GFA breakdown to bring them back.
+          </p>
+          {strandedUnits > 0 && (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] leading-snug mt-4 flex items-center justify-between gap-4 flex-wrap">
+              <span>
+                The Apartments matrix still holds <strong>{fmt0(strandedUnits)} units</strong> on{" "}
+                {project.numFloors} tower floor{project.numFloors === 1 ? "" : "s"} from when this project had
+                residential. They still count in the 3D, GSA, parking and lifts.
+              </span>
+              <button
+                className="btn btn-secondary btn-xs shrink-0"
+                onClick={() => {
+                  if (!confirm(`Remove the ${strandedUnits} units and the ${project.numFloors} residential tower floors?`)) return;
+                  patch({
+                    program: [],
+                    numFloors: 0,
+                    typeFloors: { count: 0, heightM: project.typeFloors?.heightM ?? project.floorHeight },
+                  });
+                }}
+              >Remove residential floors</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!nonResidential && (
       <div className="card">
         <div className="mb-5">
           <h2 className="section-title">Distribution · residential GFA → apartments / common areas</h2>
@@ -165,6 +190,14 @@ export default function CommonAreasTab() {
           />
         </div>
       </div>
+      )}
+
+      <RetailDistributionCard
+        retail={retail}
+        groundPlate={yield_.groundGFA}
+        parkingBasis={project.retailParkingBasis === "gsa" ? "gsa" : "gfa"}
+        onPatch={(next) => patch({ retailBreakdown: { ...project.retailBreakdown, ...next } })}
+      />
 
       <OfficeDistributionCard
         offices={offices}
@@ -183,8 +216,111 @@ export default function CommonAreasTab() {
           residentialFloors={project.typeFloors?.count ?? project.numFloors}
           groundCount={project.ground?.count ?? 1}
           basementCount={project.basements?.count ?? 0}
+          hasRetail={retail.retailGFA > 0}
           onPatch={(next) => patch({ officeStack: { ...project.officeStack, ...next } })}
         />
+      )}
+    </div>
+  );
+}
+
+/** Retail GFA → circulation + services + net lettable shops (the retail GSA). */
+function RetailDistributionCard({
+  retail: r, groundPlate, parkingBasis, onPatch,
+}: {
+  retail: ReturnType<typeof computeRetail>;
+  /** Ground footprint × ground levels (Floor plates), 0 when not entered. */
+  groundPlate: number;
+  parkingBasis: "gfa" | "gsa";
+  onPatch: (next: { circulationPct?: number; servicesPct?: number }) => void;
+}) {
+  const over = r.circulationPct + r.servicesPct > 100;
+  const spare = groundPlate - r.retailGFA;
+  return (
+    <div className="card">
+      <div className="mb-5">
+        <h2 className="section-title">Distribution · retail GFA → shops / common areas</h2>
+        <p className="section-sub">
+          Splits the <strong>Retail</strong> GFA from Setup between <strong>Circulation</strong>{" "}
+          (arcades, shared lobbies), <strong>Services</strong> (loading bay, refuse, MEP, toilets,
+          back of house) and what remains for <strong>Shops</strong> — the net lettable area, which is
+          the retail <strong>GSA</strong>. Leave both at 0 % to sell the whole retail GFA. Retail
+          parking uses the retail {parkingBasis === "gsa" ? "GSA" : "GFA"} (set in Parking).
+        </p>
+      </div>
+
+      {r.retailGFA <= 0 ? (
+        <div className="border border-ink-200 bg-bone-50 text-ink-700 p-3 text-[12.5px] leading-snug">
+          No retail in this project. Add <strong>Retail</strong> in Setup&apos;s GFA breakdown to
+          distribute it here.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <Stat label="Retail GFA" value={`${fmt0(r.retailGFA)} m²`} sub={fmtSqft(r.retailGFA)} />
+            <Stat label="Shops GSA (net)" value={`${fmt0(r.net)} m²`} sub={`${r.netPct.toFixed(1)}% of retail GFA`} />
+            <Stat label="Σ Common" value={`${fmt0(r.circulation + r.services)} m²`} sub={`${(r.circulationPct + r.servicesPct).toFixed(1)}% of retail GFA`} />
+            <Stat
+              label="Ground plate"
+              value={groundPlate > 0 ? `${fmt0(groundPlate)} m²` : "—"}
+              sub={
+                groundPlate <= 0
+                  ? "enter the ground footprint above"
+                  : spare >= 0
+                    ? `${fmt0(spare)} m² left for lobbies / other`
+                    : `retail is ${fmt0(-spare)} m² larger`
+              }
+            />
+          </div>
+
+          <div className="border border-ink-200">
+            <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.08em] text-ink-500 bg-bone-50 border-b border-ink-200">
+              <div>Group</div>
+              <div className="text-right">% of retail</div>
+              <div className="text-right">m²</div>
+              <div className="text-right">≈ sqft</div>
+            </div>
+            <GroupRow
+              label="Circulation"
+              hint="Arcades, mall, shared entrance lobbies."
+              value={r.circulationPct}
+              m2={r.circulation}
+              kind="GFA"
+              onChange={(v) => onPatch({ circulationPct: Math.max(0, v) })}
+            />
+            <GroupRow
+              label="Services"
+              hint="Loading bay, refuse rooms, MEP, toilets, back of house — inside the retail GFA."
+              value={r.servicesPct}
+              m2={r.services}
+              kind="GFA"
+              onChange={(v) => onPatch({ servicesPct: Math.max(0, v) })}
+            />
+            <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 items-center px-3 py-2.5 bg-qube-50/50">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-medium text-ink-900">Shops (net lettable)</span>
+                  <span className="px-1.5 py-0 text-[9.5px] uppercase tracking-[0.10em] border bg-qube-700 text-white border-qube-700">GSA</span>
+                </div>
+                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation − services.</div>
+              </div>
+              <div className="text-right text-ink-700 tabular-nums">{r.netPct.toFixed(1)}%</div>
+              <div className="text-right font-medium text-qube-800 tabular-nums">{fmt0(r.net)} m²</div>
+              <div className="text-right text-[11px] text-ink-500 tabular-nums">{fmtSqft(r.net)}</div>
+            </div>
+          </div>
+          {over && (
+            <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug mt-3">
+              Circulation + services exceed 100 % of the retail GFA — no net retail area is left.
+            </div>
+          )}
+          {groundPlate > 0 && spare < 0 && (
+            <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12px] leading-snug mt-3">
+              The retail GFA ({fmt0(r.retailGFA)} m²) doesn&apos;t fit on the ground plate ({fmt0(groundPlate)} m²) —{" "}
+              {fmt0(-spare)} m² would have to go on a podium level, or the ground footprint is larger than entered.
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -205,7 +341,7 @@ function OfficeDistributionCard({
       <div className="mb-5">
         <h2 className="section-title">Distribution · office GFA → offices / common areas</h2>
         <p className="section-sub">
-          For mixed schemes. Splits the <strong>Commercial / Office</strong> GFA from Setup between{" "}
+          Splits the <strong>Commercial / Office</strong> GFA from Setup between{" "}
           <strong>Circulation</strong> (cores, lobbies, corridors), <strong>Services</strong> (MEP,
           shafts, toilets) and what remains for <strong>Offices</strong> — the net lettable area, which
           is the office <strong>GSA</strong> (offices carry no balconies). All three sit inside the
@@ -276,9 +412,12 @@ function OfficeDistributionCard({
 }
 
 function TowerYieldCard({
-  yield_, maxTowerFloors, onSetFootprint, onSetMaxTowerFloors,
+  yield_, officeFloors, nonResidential, maxTowerFloors, onSetFootprint, onSetMaxTowerFloors,
 }: {
   yield_: ReturnType<typeof computeTowerYield>;
+  /** Office floors stacked in the tower (Offices · where they go). */
+  officeFloors: number;
+  nonResidential: boolean;
   maxTowerFloors: number | undefined;
   onSetFootprint: (field: "groundFootprintM2" | "podiumFootprintM2" | "towerFootprintM2", v: number) => void;
   onSetMaxTowerFloors: (v: number) => void;
@@ -288,15 +427,26 @@ function TowerYieldCard({
   return (
     <div className="card">
       <div className="mb-4">
-        <h2 className="section-title">Tower floors · residential GFA − ground − podium</h2>
-        <p className="section-sub">
-          Enter each tier's footprint as you know it from your own zoning study —
-          it is not derived from the Massing plot (to avoid dragging tracing errors along). The
-          tower floor count comes from dividing the residential GFA <strong>minus the ground-floor
-          and podium surfaces</strong> by the <strong>tower footprint</strong> — what the base
-          absorbs doesn&apos;t need tower floors; Ground and Podium are informative, to cross-check
-          against Setup's retail/commercial.
-        </p>
+        <h2 className="section-title">
+          {nonResidential ? "Floor plates · ground, podium and tower" : "Tower floors · residential GFA − ground − podium"}
+        </h2>
+        {nonResidential ? (
+          <p className="section-sub">
+            Enter each tier&apos;s footprint as you know it from your own zoning study — it is not
+            derived from the Massing plot. With no residential use, the <strong>tower footprint</strong>{" "}
+            drives how many <strong>office floors</strong> the office GFA needs (Offices · where they
+            go, below); the ground plate is where the retail sits.
+          </p>
+        ) : (
+          <p className="section-sub">
+            Enter each tier&apos;s footprint as you know it from your own zoning study —
+            it is not derived from the Massing plot (to avoid dragging tracing errors along). The
+            tower floor count comes from dividing the residential GFA <strong>minus the ground-floor
+            and podium surfaces</strong> by the <strong>tower footprint</strong> — what the base
+            absorbs doesn&apos;t need tower floors; Ground and Podium are informative, to cross-check
+            against Setup&apos;s retail/commercial.
+          </p>
+        )}
       </div>
 
       <div className="border border-ink-200 mb-4">
@@ -325,16 +475,31 @@ function TowerYieldCard({
         />
         <FootprintRow
           label="Tower (per floor)"
-          hint="Drives the tower floor count — see below."
+          hint={
+            officeFloors > 0
+              ? nonResidential
+                ? `${officeFloors} office floor${officeFloors === 1 ? "" : "s"} — set in Offices · where they go.`
+                : `${y.towerFloors} residential + ${officeFloors} office floor${officeFloors === 1 ? "" : "s"}.`
+              : nonResidential
+                ? "Drives the office floor count — see Offices · where they go."
+                : "Drives the tower floor count — see below."
+          }
           value={y.towerFootprintM2}
-          floors={y.towerFloors}
-          gfa={y.towerGFA}
+          floors={y.towerFloors + officeFloors}
+          gfa={y.towerFootprintM2 * (y.towerFloors + officeFloors)}
           highlight
           onChange={(v) => onSetFootprint("towerFootprintM2", v)}
         />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        {nonResidential ? (
+          <>
+            <Stat label="Residential floors" value="0" sub="no residential GFA in Setup" />
+            <Stat label="Office tower floors" value={officeFloors > 0 ? fmt0(officeFloors) : "—"} sub="see Offices · where they go" />
+          </>
+        ) : (
+          <>
         <Stat
           label="GFA to tower"
           value={y.towerTargetGFA > 0 ? `${fmt0(y.towerTargetGFA)} m²` : "—"}
@@ -346,6 +511,8 @@ function TowerYieldCard({
           }
         />
         <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
+          </>
+        )}
         <div className="border border-ink-200 bg-white p-3">
           <div className="eyebrow text-ink-500 text-[10px]">Max tower floors (zoning cap)</div>
           <input
@@ -362,16 +529,33 @@ function TowerYieldCard({
           />
           <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">Leave empty for unlimited</div>
         </div>
-        <Stat
-          label="Residential tower floors"
-          value={y.towerFootprintM2 > 0 ? `${fmt0(y.towerFloors)}` : "—"}
-          sub={y.exceedsMax ? "clamped to the max" : "floors of the Apartments matrix"}
-        />
+        {nonResidential ? (
+          <Stat
+            label="Tower floors (total)"
+            value={officeFloors > 0 ? fmt0(officeFloors) : "—"}
+            sub="all offices"
+          />
+        ) : (
+          <Stat
+            label="Residential tower floors"
+            value={y.towerFootprintM2 > 0 ? `${fmt0(y.towerFloors)}` : "—"}
+            sub={y.exceedsMax ? "clamped to the max" : "floors of the Apartments matrix"}
+          />
+        )}
       </div>
 
       {y.towerFootprintM2 <= 0 && (
         <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 text-[12.5px] leading-snug">
           Enter the tower footprint per floor to compute how many floors are needed.
+        </div>
+      )}
+
+      {y.maxTowerFloors !== null && officeFloors > 0 && y.towerFloors + officeFloors > y.maxTowerFloors && (
+        <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug mb-3">
+          The tower has <strong>{y.towerFloors + officeFloors} floors</strong>
+          {y.towerFloors > 0 ? ` (${y.towerFloors} residential + ${officeFloors} office)` : " of offices"} — above the{" "}
+          <strong>{y.maxTowerFloors}</strong>-floor cap. Enlarge the tower footprint, move offices into the
+          podium, or reduce the GFA in Setup.
         </div>
       )}
 
@@ -488,8 +672,9 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
  *  height — plus a floor-by-floor section of the whole building. */
 function OfficePlacementCard({
   stack, podiumCount, podiumFootprintM2, towerFootprintM2, officeGFA,
-  residentialFloors, groundCount, basementCount, onPatch,
+  residentialFloors, groundCount, basementCount, hasRetail, onPatch,
 }: {
+  hasRetail: boolean;
   stack: OfficeStackResult;
   podiumCount: number;
   podiumFootprintM2: number;
@@ -513,9 +698,10 @@ function OfficePlacementCard({
       <div className="mb-5">
         <h2 className="section-title">Offices · where they go</h2>
         <p className="section-sub">
-          Choose the podium levels and the tower floors that hold the offices. Office tower floors are
-          stacked on top of the residential ones (below or above them) — the Apartments matrix keeps
-          covering only the residential floors, and the 3D massing, heights and lifts follow.
+          Choose the podium levels and the tower floors that hold the offices.{" "}
+          {residentialFloors > 0
+            ? "Office tower floors are stacked with the residential ones (below or above them) — the Apartments matrix keeps covering only the residential floors, and the 3D massing, heights and lifts follow."
+            : "With no residential use the whole tower is offices; the 3D massing, heights and lifts follow."}
         </p>
       </div>
 
@@ -582,14 +768,16 @@ function OfficePlacementCard({
                       : "Auto needs the tower footprint (Tower floors above)."}
                 </span>
               </label>
-              <div className="grid gap-1 content-start">
+              <div className={`grid gap-1 content-start ${residentialFloors > 0 ? "" : "opacity-40 pointer-events-none"}`} aria-disabled={residentialFloors <= 0}>
                 <span className="eyebrow text-ink-500 text-[10px]">Position</span>
                 <div className="seg w-full grid grid-cols-2">
                   <button className="seg-btn" data-active={stack.towerPosition === "bottom"} onClick={() => onPatch({ towerPosition: "bottom" })}>Bottom</button>
                   <button className="seg-btn" data-active={stack.towerPosition === "top"} onClick={() => onPatch({ towerPosition: "top" })}>Top</button>
                 </div>
                 <span className="text-[10.5px] text-ink-500 leading-snug">
-                  {stack.towerPosition === "bottom" ? "Right above the podium, apartments over them." : "Above the apartments, at the top of the tower."}
+                  {residentialFloors <= 0
+                    ? "Only matters when the tower also has apartments."
+                    : stack.towerPosition === "bottom" ? "Right above the podium, apartments over them." : "Above the apartments, at the top of the tower."}
                 </span>
               </div>
               <label className="grid gap-1 content-start">
@@ -635,6 +823,7 @@ function OfficePlacementCard({
           residentialFloors={residentialFloors}
           officeFloors={stack.towerFloors}
           officeOnTop={stack.towerPosition === "top"}
+          hasRetail={hasRetail}
         />
       </div>
     </div>
@@ -651,8 +840,9 @@ const USE_COLORS = {
 
 /** Section of the building, top to bottom, one band per run of floors with the same use. */
 function FloorStack({
-  basementCount, groundCount, podiumCount, podiumOfficeLevels, residentialFloors, officeFloors, officeOnTop,
+  basementCount, groundCount, podiumCount, podiumOfficeLevels, residentialFloors, officeFloors, officeOnTop, hasRetail,
 }: {
+  hasRetail: boolean;
   basementCount: number;
   groundCount: number;
   podiumCount: number;
@@ -682,7 +872,7 @@ function FloorStack({
     bands.push({ name: range("P", k, l), use: office ? "offices" : "podium", label: office ? "Offices" : "Podium · parking / amenities", floors: l - k + 1 });
     l = k - 1;
   }
-  if (groundCount > 0) bands.push({ name: groundCount > 1 ? range("G", 1, groundCount) : "G", use: "ground", label: "Ground · lobby / retail", floors: groundCount });
+  if (groundCount > 0) bands.push({ name: groundCount > 1 ? range("G", 1, groundCount) : "G", use: "ground", label: hasRetail ? "Ground · retail / lobby" : "Ground · lobby", floors: groundCount });
   if (basementCount > 0) bands.push({ name: range("B", 1, basementCount), use: "basement", label: "Basements · parking", floors: basementCount });
 
   const total = bands.reduce((s, b) => s + b.floors, 0) || 1;

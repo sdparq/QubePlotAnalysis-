@@ -1,5 +1,6 @@
 import type { Project, Typology } from "../types";
 import { computeOffices } from "./offices";
+import { computeRetail } from "./retail";
 
 export interface ParkingResult {
   availableStandard: number;
@@ -22,7 +23,9 @@ export interface ParkingResult {
   /** Retail parking auto-derived from Setup's GFA breakdown (retail m² / rate). */
   retailRequired: number;
   retailM2PerSpaceUsed: number;
+  /** Retail area the ratio was applied to — GFA or GSA per `retailBasis`. */
   retailM2: number;
+  retailBasis: "gfa" | "gsa";
   /** Office parking auto-derived from the office GSA (net lettable, see
    *  computeOffices) ÷ m²/space — default 1 per 50 m². */
   officeRequired: number;
@@ -52,15 +55,6 @@ export function requiredPOD(totalRequired: number): number {
   if (totalRequired < 25) return 0;
   if (totalRequired <= 500) return Math.max(1, Math.ceil(totalRequired * 0.02));
   return Math.ceil(500 * 0.02) + Math.ceil((totalRequired - 500) * 0.01);
-}
-
-/** Retail GFA (m²) drawn from Setup's GFA breakdown — the single source of
- *  truth for retail area. */
-function retailGFA(project: Project): number {
-  const item = project.gfaBreakdown?.retail;
-  if (!item) return 0;
-  const target = project.targetGFA ?? 0;
-  return item.mode === "absolute" ? item.value : (item.value / 100) * target;
 }
 
 export function computeParking(project: Project): ParkingResult {
@@ -123,7 +117,11 @@ export function computeParking(project: Project): ParkingResult {
   }));
   const otherUsesTotal = otherUsesRequired.reduce((s, r) => s + r.required, 0);
 
-  const retailM2 = retailGFA(project);
+  // Retail parking applies to the retail GFA (default) or, when the project
+  // says so, to the retail GSA (net lettable, Distribution).
+  const retail = computeRetail(project);
+  const retailBasis = project.retailParkingBasis === "gsa" ? "gsa" : "gfa";
+  const retailM2 = retailBasis === "gsa" ? retail.net : retail.retailGFA;
   const retailM2PerSpaceUsed = project.retailM2PerSpace ?? 70;
   const retailRequired = retailM2PerSpaceUsed > 0
     ? Math.ceil(retailM2 / retailM2PerSpaceUsed)
@@ -158,6 +156,7 @@ export function computeParking(project: Project): ParkingResult {
     retailRequired,
     retailM2PerSpaceUsed,
     retailM2,
+    retailBasis,
     officeRequired,
     officeM2PerSpaceUsed: offices.m2PerSpace,
     officeGSA: offices.net,

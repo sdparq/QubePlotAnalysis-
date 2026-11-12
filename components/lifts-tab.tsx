@@ -1,12 +1,16 @@
 "use client";
 import { useStore, useProject } from "@/lib/store";
 import { computeLifts } from "@/lib/calc/lifts";
+import { computeOfficeStack } from "@/lib/calc/offices";
 import { fmt0, fmt2 } from "@/lib/format";
 
 export default function LiftsTab() {
   const project = useProject();
   const patch = useStore((s) => s.patch);
   const r = computeLifts(project);
+  const officeStack = computeOfficeStack(project);
+  const officeFloors = officeStack.towerFloors;
+  const officePodium = officeStack.podiumLevels.length;
 
   const basementCount = project.basements?.count ?? 0;
   const groundCount = project.ground?.count ?? 1;
@@ -15,6 +19,20 @@ export default function LiftsTab() {
 
   return (
     <div className="grid gap-6">
+      {officeFloors + officePodium > 0 && (
+        <div className="card border-amber-200 bg-amber-50/60">
+          <h2 className="section-title">Offices are not sized here</h2>
+          <p className="section-sub !text-ink-700">
+            This tab follows Dubai Building Code D.8.8, which sizes passenger lifts for{" "}
+            <strong>residential apartments</strong> from their population.{" "}
+            {r.totalUnits > 0
+              ? `The ${officeFloors + officePodium} office floor${officeFloors + officePodium === 1 ? "" : "s"} count in the floors served, but the office population is not in the figures below.`
+              : "This scheme has no apartments, so the figures below are empty."}{" "}
+            Office lifts need a traffic analysis by the VT consultant (handling capacity and waiting
+            interval) and are not estimated by this app.
+          </p>
+        </div>
+      )}
       {/* DBC D.8.8 — primary recommendation */}
       <div className="card">
         <div className="mb-5">

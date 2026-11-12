@@ -56,6 +56,9 @@ export default function SummaryTab() {
     formula: useFormula(u.key),
   })).filter((u) => u.gfa > 0);
 
+  // Office / retail schemes have no residential rows to show.
+  const hasResidential = a.residentialGFA > 0 || a.matrixUnits > 0;
+
   const gfaOverTarget = target > 0 && totalGFA > target + 1;
 
   // ── Efficiency ratios ───────────────────────────────────────────────────
@@ -132,6 +135,7 @@ export default function SummaryTab() {
 
         {/* GFA derivation */}
         <DerivBlock title="GFA total — how it's built">
+          {hasResidential && (
           <DerivRow
             label={hospitalityM2 > 0 ? "Residential GFA (incl. Hospitality)" : "Residential GFA"}
             formula={
@@ -146,6 +150,7 @@ export default function SummaryTab() {
             }
             m2={residentialGfaTotal}
           />
+          )}
           {otherUses.map((u) => (
             <DerivRow key={u.key} label={`${u.label} GFA`} formula={u.formula} m2={u.gfa} />
           ))}
@@ -163,6 +168,8 @@ export default function SummaryTab() {
 
         {/* GSA derivation */}
         <DerivBlock title="GSA total (sellable) — how it's built">
+          {hasResidential && (
+          <>
           <DerivRow
             label="Apartments interior"
             formula={
@@ -181,11 +188,17 @@ export default function SummaryTab() {
             }
             m2={balconiesBUA}
           />
+          </>
+          )}
           {retailM2 > 0 && (
             <DerivRow
-              label="Retail (sellable)"
-              formula="Retail GFA from Setup — leasable/sellable stock"
-              m2={retailM2}
+              label="Retail (net lettable)"
+              formula={
+                a.retailNetPct >= 100
+                  ? `Retail GFA ${fmt0(retailM2)} m² — all of it lettable (no circulation / services set in Distribution)`
+                  : `Retail GFA ${fmt0(retailM2)} m² × ${a.retailNetPct.toFixed(1)}% — after circulation ${fmt0(a.retailCirculation)} + services ${fmt0(a.retailServices)} m² (Distribution)`
+              }
+              m2={a.retailNet}
             />
           )}
           {a.officeNet > 0 && (
@@ -198,7 +211,7 @@ export default function SummaryTab() {
           <DerivRow
             label="GSA total"
             formula={
-              ["apartments interior", "balconies", retailM2 > 0 ? "retail" : "", a.officeNet > 0 ? "offices net" : ""]
+              [hasResidential ? "apartments interior" : "", hasResidential ? "balconies" : "", retailM2 > 0 ? "retail net" : "", a.officeNet > 0 ? "offices net" : ""]
                 .filter(Boolean)
                 .join(" + ")
             }
@@ -246,15 +259,16 @@ export default function SummaryTab() {
           <DerivRow
             label="Σ BUA total (construction)"
             formula={
-              "residential sellable " +
-              fmt0(a.gsaResidential) +
-              (a.retailGFA > 0 ? " + retail " + fmt0(a.retailGFA) : "") +
-              (a.commercialGFA > 0 ? " + commercial " + fmt0(a.commercialGFA) : "") +
-              " + amenities " + fmt0(a.amenities) +
-              " + circulation " + fmt0(a.circulation) +
-              " + services " + fmt0(a.services) +
-              " + ground/podium parking " + fmt0(a.groundPodiumParking) +
-              " + basements " + fmt0(a.basementsNet) +
+              [
+                hasResidential ? "residential sellable " + fmt0(a.gsaResidential) : "",
+                a.retailGFA > 0 ? "retail GFA " + fmt0(a.retailGFA) : "",
+                a.commercialGFA > 0 ? "office GFA " + fmt0(a.commercialGFA) : "",
+                hasResidential ? "amenities " + fmt0(a.amenities) : "",
+                hasResidential ? "circulation " + fmt0(a.circulation) : "",
+                hasResidential ? "services " + fmt0(a.services) : "",
+                "ground/podium parking " + fmt0(a.groundPodiumParking),
+                "basements " + fmt0(a.basementsNet),
+              ].filter(Boolean).join(" + ") +
               (a.parkingSurplus > 0
                 ? " (" + fmt0(a.basementSurface) + " built − " + fmt0(a.parkingSurplus) + " surplus parking)"
                 : "") +

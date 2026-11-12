@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useStore, useProject } from "@/lib/store";
 import { computeProgram } from "@/lib/calc/program";
 import { computeOfficeStack } from "@/lib/calc/offices";
+import { isNonResidential } from "@/lib/calc/scheme";
 import { fmt0, fmt2 } from "@/lib/format";
 import { useZoneLibrary } from "@/lib/use-zone-library";
 import { classForZone, TYPOLOGY_KEYS, type TypologyKey } from "@/lib/zone-classes";
@@ -38,6 +39,7 @@ export default function ProgramTab() {
   const program = computeProgram(project);
   // Office floors at the bottom of the tower push apartment floor N up to
   // tower level L(N + office floors) — shown next to each row.
+  const nonResidential = isNonResidential(project);
   const officeStack = computeOfficeStack(project);
   const officeBelow = officeStack.towerPosition === "bottom" ? officeStack.towerFloors : 0;
   const gfaColLabel =
@@ -58,6 +60,19 @@ export default function ProgramTab() {
       .replace(/\bPenthouse\b/i, "PH")
       .replace(/\s+/g, " ")
       .trim();
+
+  if (nonResidential && program.totalUnits === 0) {
+    return (
+      <div className="card">
+        <h2 className="section-title">No apartments in this scheme</h2>
+        <p className="section-sub">
+          Setup has no residential GFA — this is an office / retail building, so there is nothing to
+          place here. Offices and retail are distributed in <strong>Distribution</strong>. Add{" "}
+          <strong>Residential</strong> in Setup&apos;s GFA breakdown to use this tab.
+        </p>
+      </div>
+    );
+  }
 
   if (project.typologies.length === 0) {
     return (

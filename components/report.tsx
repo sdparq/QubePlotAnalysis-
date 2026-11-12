@@ -78,6 +78,7 @@ function ReportDocument() {
   const balconiesBUA = a.balconies;
   const constructionBUA = a.constructionBUA;
   const gsa = a.gsaTotal;
+  const hasResidential = a.residentialGFA > 0 || a.matrixUnits > 0;
   const basementCount = project.basements?.count ?? 0;
   const basementFootprint = project.basementFootprintM2 ?? project.plotArea ?? 0;
 
@@ -134,11 +135,15 @@ function ReportDocument() {
           {[
             ["Plot area", m2(project.plotArea)],
             ["Target GFA", m2(target)],
-            ["Units", program.totalUnits > 0 ? fmt0(program.totalUnits) : "—"],
+            hasResidential
+              ? ["Units", program.totalUnits > 0 ? fmt0(program.totalUnits) : "—"]
+              : ["Offices GSA", a.officeNet > 0 ? m2(a.officeNet) : "—"],
             ["FAR", far > 0 ? far.toFixed(2) : "—"],
             ["Floors above ground", fmt0(groundCount + podiumCount + towerCount)],
             ["Height", totalHeightM > 0 ? `${fmt1(totalHeightM)} m` : "—"],
-            ["Sellable (matrix)", program.totalSellable > 0 ? m2(program.totalSellable) : "—"],
+            hasResidential
+              ? ["Sellable (matrix)", program.totalSellable > 0 ? m2(program.totalSellable) : "—"]
+              : ["Sellable (GSA)", gsa > 0 ? m2(gsa) : "—"],
             ["Basements", basementCount > 0 ? `${fmt0(basementCount)} × ${fmt0(basementFootprint)} m²` : "—"],
           ].map(([l, v]) => (
             <div key={l} className="bg-ink-900 px-3 py-3">
@@ -160,7 +165,9 @@ function ReportDocument() {
             head={["GFA total", "m²", "sqft"]}
             right={[1, 2]}
             rows={[
-              [hospM2 > 0 ? "Residential (incl. hospitality)" : "Residential", fmt0(resGFA), fmt0(resGFA * M2_TO_SQFT)],
+              ...(hasResidential
+                ? [[hospM2 > 0 ? "Residential (incl. hospitality)" : "Residential", fmt0(resGFA), fmt0(resGFA * M2_TO_SQFT)]]
+                : []),
               ...(retailM2 > 0 ? [["Retail", fmt0(retailM2), fmt0(retailM2 * M2_TO_SQFT)]] : []),
               ...(commercialM2 > 0 ? [["Commercial / office", fmt0(commercialM2), fmt0(commercialM2 * M2_TO_SQFT)]] : []),
             ] as (string | number)[][]}
@@ -174,20 +181,30 @@ function ReportDocument() {
             head={["GSA (sellable)", "m²", "sqft"]}
             right={[1, 2]}
             rows={[
-              [
-                a.usesMatrix
-                  ? `Apartments interior — ${fmt0(a.matrixUnits)} units placed`
-                  : `Apartments interior — residential × ${pct(aptPct)}`,
-                fmt0(aptInterior),
-                fmt0(aptInterior * M2_TO_SQFT),
-              ],
-              [
-                `Balconies — ${pct(balconyShare * 100)} of interior` +
-                  (a.balconyGfaFactor > 0 ? ` (${Math.round(a.balconyGfaFactor * 100)} % counted as GFA)` : " (GFA-exempt)"),
-                fmt0(balconiesBUA),
-                fmt0(balconiesBUA * M2_TO_SQFT),
-              ],
-              ...(retailM2 > 0 ? [["Retail — leasable/sellable", fmt0(retailM2), fmt0(retailM2 * M2_TO_SQFT)]] : []),
+              ...(hasResidential
+                ? [
+                    [
+                      a.usesMatrix
+                        ? `Apartments interior — ${fmt0(a.matrixUnits)} units placed`
+                        : `Apartments interior — residential × ${pct(aptPct)}`,
+                      fmt0(aptInterior),
+                      fmt0(aptInterior * M2_TO_SQFT),
+                    ],
+                    [
+                      `Balconies — ${pct(balconyShare * 100)} of interior` +
+                        (a.balconyGfaFactor > 0 ? ` (${Math.round(a.balconyGfaFactor * 100)} % counted as GFA)` : " (GFA-exempt)"),
+                      fmt0(balconiesBUA),
+                      fmt0(balconiesBUA * M2_TO_SQFT),
+                    ],
+                  ]
+                : []),
+              ...(retailM2 > 0
+                ? [[
+                    a.retailNetPct >= 100 ? "Retail — net lettable (whole retail GFA)" : `Retail — net lettable (${pct(a.retailNetPct)} of retail GFA)`,
+                    fmt0(a.retailNet),
+                    fmt0(a.retailNet * M2_TO_SQFT),
+                  ]]
+                : []),
               ...(a.officeNet > 0
                 ? [[`Offices — net lettable (${pct(a.officeNetPct)} of office GFA)`, fmt0(a.officeNet), fmt0(a.officeNet * M2_TO_SQFT)]]
                 : []),
@@ -200,9 +217,13 @@ function ReportDocument() {
           head={["Construction BUA", "m²", "sqft"]}
           right={[1, 2]}
           rows={[[
-            "Residential sellable + retail" +
-              (a.commercialGFA > 0 ? " + commercial" : "") +
-              " + amenities + circulation + services + ground/podium parking + basements" +
+            [
+              hasResidential ? "Residential sellable" : "",
+              a.retailGFA > 0 ? "retail GFA" : "",
+              a.commercialGFA > 0 ? "office GFA" : "",
+              hasResidential ? "amenities + circulation + services" : "",
+              "ground/podium parking + basements",
+            ].filter(Boolean).join(" + ") +
               (a.parkingSurplus > 0 ? " (less surplus parking)" : ""),
             fmt0(constructionBUA),
             fmt0(constructionBUA * M2_TO_SQFT),

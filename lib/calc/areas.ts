@@ -3,13 +3,15 @@ import { residentialGFATarget, residentialSubPct, residentialSubQuota } from "./
 import { computeProgram } from "./program";
 import { computeParking } from "./parking";
 import { computeOffices } from "./offices";
+import { computeRetail } from "./retail";
 
 /**
  * Project-wide area accounting — the single source of truth behind the Areas
  * Summary tab and the PDF report.
  *
- * GSA (sellable) = apartments interior + balconies + retail + net lettable
- * offices (office GFA − its circulation and services, see offices.ts), where the
+ * GSA (sellable) = apartments interior + balconies + net lettable retail +
+ * net lettable offices (each use's GFA − its circulation and services, see
+ * retail.ts / offices.ts), where the
  * apartment figures come from the ACTUAL Apartments matrix once units are
  * placed (falling back to the Distribution quota while it is empty) — so this
  * always agrees with what the Apartments tab reports.
@@ -80,6 +82,11 @@ export interface AreasResult {
   basementsNet: number;
   parkingRequiredSurface: number;
 
+  /** Retail GFA split (Distribution → Retail). retailNet is the retail GSA. */
+  retailCirculation: number;
+  retailServices: number;
+  retailNet: number;
+  retailNetPct: number;
   /** Office GFA split (Distribution → Offices). officeNet is the office GSA. */
   officeCirculation: number;
   officeServices: number;
@@ -87,7 +94,7 @@ export interface AreasResult {
   officeNetPct: number;
   /** Residential sellable only (apartments interior + balconies). */
   gsaResidential: number;
-  /** Sellable total — residential + retail + offices (net lettable). */
+  /** Sellable total — residential + retail and offices (both net lettable). */
   gsaTotal: number;
   constructionBUA: number;
 }
@@ -151,7 +158,8 @@ export function computeAreas(project: Project): AreasResult {
 
   const offices = computeOffices(project);
   const gsaResidential = apartmentsInterior + balconies;
-  const gsaTotal = gsaResidential + retailGFA + offices.net;
+  const retail = computeRetail(project);
+  const gsaTotal = gsaResidential + retail.net + offices.net;
 
   const constructionBUA =
     gsaResidential +
@@ -189,6 +197,10 @@ export function computeAreas(project: Project): AreasResult {
     parkingSurplus,
     basementsNet,
     parkingRequiredSurface,
+    retailCirculation: retail.circulation,
+    retailServices: retail.services,
+    retailNet: retail.net,
+    retailNetPct: retail.netPct,
     officeCirculation: offices.circulation,
     officeServices: offices.services,
     officeNet: offices.net,
