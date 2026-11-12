@@ -225,7 +225,7 @@ export default function CommonAreasTab() {
   );
 }
 
-/** Retail GFA → circulation + services + net lettable shops (the retail GSA). */
+/** Retail GFA → circulation + net lettable shops (the retail GSA); MEP services are BUA only. */
 function RetailDistributionCard({
   retail: r, groundPlate, parkingBasis, onPatch,
 }: {
@@ -235,7 +235,7 @@ function RetailDistributionCard({
   parkingBasis: "gfa" | "gsa";
   onPatch: (next: { circulationPct?: number; servicesPct?: number }) => void;
 }) {
-  const over = r.circulationPct + r.servicesPct > 100;
+  const over = r.circulationPct > 100;
   const spare = groundPlate - r.retailGFA;
   return (
     <div className="card">
@@ -243,10 +243,12 @@ function RetailDistributionCard({
         <h2 className="section-title">Distribution · retail GFA → shops / common areas</h2>
         <p className="section-sub">
           Splits the <strong>Retail</strong> GFA from Setup between <strong>Circulation</strong>{" "}
-          (arcades, shared lobbies), <strong>Services</strong> (loading bay, refuse, MEP, toilets,
-          back of house) and what remains for <strong>Shops</strong> — the net lettable area, which is
-          the retail <strong>GSA</strong>. Leave both at 0 % to sell the whole retail GFA. Retail
-          parking uses the retail {parkingBasis === "gsa" ? "GSA" : "GFA"} (set in Parking).
+          (arcades, shared lobbies, toilets, back of house) and what remains for{" "}
+          <strong>Shops</strong> — the net lettable area, which is the retail <strong>GSA</strong>.{" "}
+          <strong>Services</strong> (MEP rooms, shafts, plant) is also entered as a % of the retail
+          GFA but only counts as <strong>BUA</strong> (not GFA) and does not reduce the shops. Leave
+          circulation at 0 % to sell the whole retail GFA. Retail parking uses the retail{" "}
+          {parkingBasis === "gsa" ? "GSA" : "GFA"} (set in Parking).
         </p>
       </div>
 
@@ -260,7 +262,7 @@ function RetailDistributionCard({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <Stat label="Retail GFA" value={`${fmt0(r.retailGFA)} m²`} sub={fmtSqft(r.retailGFA)} />
             <Stat label="Shops GSA (net)" value={`${fmt0(r.net)} m²`} sub={`${r.netPct.toFixed(1)}% of retail GFA`} />
-            <Stat label="Σ Common" value={`${fmt0(r.circulation + r.services)} m²`} sub={`${(r.circulationPct + r.servicesPct).toFixed(1)}% of retail GFA`} />
+            <Stat label="MEP (BUA only)" value={`${fmt0(r.services)} m²`} sub={`${r.servicesPct.toFixed(1)}% of retail GFA, on top of it`} />
             <Stat
               label="Ground plate"
               value={groundPlate > 0 ? `${fmt0(groundPlate)} m²` : "—"}
@@ -283,7 +285,7 @@ function RetailDistributionCard({
             </div>
             <GroupRow
               label="Circulation"
-              hint="Arcades, mall, shared entrance lobbies."
+              hint="Arcades, mall, shared entrance lobbies, toilets, back of house."
               value={r.circulationPct}
               m2={r.circulation}
               kind="GFA"
@@ -291,10 +293,10 @@ function RetailDistributionCard({
             />
             <GroupRow
               label="Services"
-              hint="Loading bay, refuse rooms, MEP, toilets, back of house — inside the retail GFA."
+              hint="MEP rooms, shafts, plant rooms. % of retail GFA but only counts as BUA — does not reduce the shops."
               value={r.servicesPct}
               m2={r.services}
-              kind="GFA"
+              kind="BUA"
               onChange={(v) => onPatch({ servicesPct: Math.max(0, v) })}
             />
             <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 items-center px-3 py-2.5 bg-qube-50/50">
@@ -303,7 +305,7 @@ function RetailDistributionCard({
                   <span className="text-[14px] font-medium text-ink-900">Shops (net lettable)</span>
                   <span className="px-1.5 py-0 text-[9.5px] uppercase tracking-[0.10em] border bg-qube-700 text-white border-qube-700">GSA</span>
                 </div>
-                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation − services.</div>
+                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation.</div>
               </div>
               <div className="text-right text-ink-700 tabular-nums">{r.netPct.toFixed(1)}%</div>
               <div className="text-right font-medium text-qube-800 tabular-nums">{fmt0(r.net)} m²</div>
@@ -312,7 +314,7 @@ function RetailDistributionCard({
           </div>
           {over && (
             <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug mt-3">
-              Circulation + services exceed 100 % of the retail GFA — no net retail area is left.
+              Circulation exceeds 100 % of the retail GFA — no net retail area is left.
             </div>
           )}
           {groundPlate > 0 && spare < 0 && (
@@ -336,18 +338,19 @@ function OfficeDistributionCard({
   offices: ReturnType<typeof computeOffices>;
   onPatch: (next: { circulationPct?: number; servicesPct?: number }) => void;
 }) {
-  const over = o.circulationPct + o.servicesPct > 100;
+  const over = o.circulationPct > 100;
   return (
     <div className="card">
       <div className="mb-5">
         <h2 className="section-title">Distribution · office GFA → offices / common areas</h2>
         <p className="section-sub">
           Splits the <strong>Commercial / Office</strong> GFA from Setup between{" "}
-          <strong>Circulation</strong> (cores, lobbies, corridors), <strong>Services</strong> (MEP,
-          shafts, toilets) and what remains for <strong>Offices</strong> — the net lettable area, which
-          is the office <strong>GSA</strong> (offices carry no balconies). All three sit inside the
-          office GFA. Office parking is then required at 1 space per {fmt0(o.m2PerSpace)} m² of office
-          GSA (editable in Parking).
+          <strong>Circulation</strong> (cores, lobbies, corridors, toilets) and what remains for{" "}
+          <strong>Offices</strong> — the net lettable area, which is the office <strong>GSA</strong>{" "}
+          (offices carry no balconies). <strong>Services</strong> (MEP rooms, shafts, plant) is also
+          entered as a % of the office GFA but only counts as <strong>BUA</strong> (not GFA) and does
+          not reduce the offices. Office parking is then required at 1 space per {fmt0(o.m2PerSpace)} m²
+          of office GSA (editable in Parking).
         </p>
       </div>
 
@@ -361,7 +364,7 @@ function OfficeDistributionCard({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <Stat label="Office GFA" value={`${fmt0(o.officeGFA)} m²`} sub={fmtSqft(o.officeGFA)} />
             <Stat label="Offices GSA (net)" value={`${fmt0(o.net)} m²`} sub={`${o.netPct.toFixed(1)}% of office GFA`} />
-            <Stat label="Σ Cores" value={`${fmt0(o.circulation + o.services)} m²`} sub={`${(o.circulationPct + o.servicesPct).toFixed(1)}% of office GFA`} />
+            <Stat label="MEP (BUA only)" value={`${fmt0(o.services)} m²`} sub={`${o.servicesPct.toFixed(1)}% of office GFA, on top of it`} />
             <Stat label="Office parking" value={`${fmt0(o.parkingRequired)} spaces`} sub={`GSA ÷ ${fmt0(o.m2PerSpace)} m²/space`} />
           </div>
 
@@ -374,7 +377,7 @@ function OfficeDistributionCard({
             </div>
             <GroupRow
               label="Circulation"
-              hint="Cores, lobbies, lift halls, corridors."
+              hint="Cores, lobbies, lift halls, corridors, toilets."
               value={o.circulationPct}
               m2={o.circulation}
               kind="GFA"
@@ -382,10 +385,10 @@ function OfficeDistributionCard({
             />
             <GroupRow
               label="Services"
-              hint="MEP rooms, shafts, toilets, plant rooms — inside the office GFA."
+              hint="MEP rooms, shafts, plant rooms. % of office GFA but only counts as BUA — does not reduce the offices."
               value={o.servicesPct}
               m2={o.services}
-              kind="GFA"
+              kind="BUA"
               onChange={(v) => onPatch({ servicesPct: Math.max(0, v) })}
             />
             <div className="grid grid-cols-[1fr_140px_120px_140px] gap-2 items-center px-3 py-2.5 bg-qube-50/50">
@@ -394,7 +397,7 @@ function OfficeDistributionCard({
                   <span className="text-[14px] font-medium text-ink-900">Offices (net lettable)</span>
                   <span className="px-1.5 py-0 text-[9.5px] uppercase tracking-[0.10em] border bg-qube-700 text-white border-qube-700">GSA</span>
                 </div>
-                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation − services. No balconies.</div>
+                <div className="text-[10.5px] text-ink-500 leading-snug mt-0.5">100 − circulation. No balconies.</div>
               </div>
               <div className="text-right text-ink-700 tabular-nums">{o.netPct.toFixed(1)}%</div>
               <div className="text-right font-medium text-qube-800 tabular-nums">{fmt0(o.net)} m²</div>
@@ -403,7 +406,7 @@ function OfficeDistributionCard({
           </div>
           {over && (
             <div className="border border-red-200 bg-red-50 text-red-700 p-3 text-[12px] leading-snug mt-3">
-              Circulation + services exceed 100 % of the office GFA — no net office area is left.
+              Circulation exceeds 100 % of the office GFA — no net office area is left.
             </div>
           )}
         </>

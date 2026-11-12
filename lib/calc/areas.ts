@@ -25,7 +25,8 @@ import { computeRetail } from "./retail";
  * BUA (construction) = what actually gets built:
  *     residential sellable (apartments interior + balconies)
  *   + retail GFA  + commercial GFA
- *   + amenities + circulation + services
+ *   + amenities + circulation + services (MEP — BUA only)
+ *   + the MEP rooms of offices and retail (BUA only, on top of their GFA)
  *   + the parking surface placed in the GROUND floor, PODIUM and TOWER floors
  *   + the basements, MINUS any surplus parking surface
  *
@@ -171,6 +172,9 @@ export function computeAreas(project: Project): AreasResult {
     amenities +
     circulation +
     services +
+    // MEP rooms of offices and retail: BUA only, on top of their GFA.
+    offices.services +
+    retail.services +
     groundPodiumParking +
     towerParkingM2 +
     basementsNet;

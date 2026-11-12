@@ -4,13 +4,14 @@ import type { Project } from "../types";
  * Commercial / Office use, distributed like the residential GFA:
  *
  *   office GFA (Setup → GFA breakdown → Commercial / Office)
- *     − circulation  (cores, lobbies, corridors)      % of office GFA
- *     − services     (MEP, shafts, toilets, plant)    % of office GFA
+ *     − circulation  (cores, lobbies, corridors, toilets)   % of office GFA
  *     = net lettable offices  →  office GSA (no balconies)
  *
- * Circulation and services both sit inside the office GFA here, so the
- * office BUA equals its GFA. Parking: 1 space per `officeM2PerSpace` m² of
- * office GSA (default 50).
+ *   services (MEP rooms, shafts, plant) — % of office GFA, but BUA ONLY:
+ *   MEP rooms don't count as GFA, so they don't reduce the offices; they are
+ *   built area on top of the office GFA (same rule as residential services).
+ *
+ * Parking: 1 space per `officeM2PerSpace` m² of office GSA (default 50).
  */
 export const DEFAULT_OFFICE_BREAKDOWN = { circulationPct: 12, servicesPct: 6 } as const;
 export const DEFAULT_OFFICE_M2_PER_SPACE = 50;
@@ -19,9 +20,10 @@ export interface OfficeResult {
   officeGFA: number;
   circulationPct: number;
   servicesPct: number;
-  /** 100 − circulation − services, floored at 0. */
+  /** 100 − circulation, floored at 0 (services are BUA only). */
   netPct: number;
   circulation: number;
+  /** MEP rooms / shafts / plant — BUA only, on top of the office GFA. */
   services: number;
   /** Net lettable office area — the office GSA. */
   net: number;
@@ -42,7 +44,7 @@ export function computeOffices(project: Project): OfficeResult {
   const ob = project.officeBreakdown ?? {};
   const circulationPct = Math.max(0, ob.circulationPct ?? DEFAULT_OFFICE_BREAKDOWN.circulationPct);
   const servicesPct = Math.max(0, ob.servicesPct ?? DEFAULT_OFFICE_BREAKDOWN.servicesPct);
-  const netPct = Math.max(0, 100 - circulationPct - servicesPct);
+  const netPct = Math.max(0, 100 - circulationPct);
   const net = (gfa * netPct) / 100;
   const m2PerSpace = project.officeM2PerSpace ?? DEFAULT_OFFICE_M2_PER_SPACE;
   return {

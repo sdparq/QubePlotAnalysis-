@@ -254,18 +254,19 @@ export interface Project {
   /** Optional sub-breakdown of the Residential use (apartments / amenities /
    *  circulation / services), each with its own percentage and a GFA flag. */
   residentialBreakdown?: ResidentialBreakdown;
-  /** Split of the Retail GFA: circulation (arcades, shared lobbies) and
-   *  services (loading, refuse, MEP, back of house) as % of the retail GFA.
-   *  What remains is the net lettable retail — the retail GSA. Both default
-   *  to 0 (the whole retail GFA is sellable). */
+  /** Split of the Retail GFA, both as % of it: circulation (arcades, shared
+   *  lobbies, back of house) comes off the GFA — what remains is the net
+   *  lettable retail, the retail GSA; services (MEP rooms) are BUA only and
+   *  come on top. Both default to 0. */
   retailBreakdown?: { circulationPct?: number; servicesPct?: number };
   /** Area the retail parking ratio applies to: the retail GFA (default,
    *  QUBE convention) or the retail GSA (net lettable). */
   retailParkingBasis?: "gfa" | "gsa";
-  /** Split of the Commercial / Office GFA: circulation (cores, lobbies,
-   *  corridors) and services (MEP, shafts, toilets) as % of the office GFA.
-   *  What remains is the net lettable office area — the office GSA. Offices
-   *  carry no balconies. Defaults in DEFAULT_OFFICE_BREAKDOWN. */
+  /** Split of the Commercial / Office GFA, both as % of it: circulation
+   *  (cores, lobbies, corridors, toilets) comes off the GFA — what remains is
+   *  the net lettable office area, the office GSA (no balconies); services
+   *  (MEP rooms, shafts) are BUA only and come on top. Defaults in
+   *  DEFAULT_OFFICE_BREAKDOWN. */
   officeBreakdown?: { circulationPct?: number; servicesPct?: number };
   /** Office parking standard — m² of office GSA (net lettable) per required
    *  space. Default 50 (1 space per 50 m² of office GSA). Editable in Parking. */

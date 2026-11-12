@@ -19,15 +19,15 @@ function mixed(): Project {
 }
 
 describe("offices", () => {
-  it("splits the office GFA into circulation, services and net lettable offices", () => {
+  it("takes circulation off the office GFA; MEP services are BUA only", () => {
     const p = mixed();
     p.officeBreakdown = { circulationPct: 15, servicesPct: 5 };
     const o = computeOffices(p);
     expect(o.officeGFA).toBe(10000);
     expect(o.circulation).toBeCloseTo(1500, 5);
-    expect(o.services).toBeCloseTo(500, 5);
-    expect(o.netPct).toBe(80);
-    expect(o.net).toBeCloseTo(8000, 5);
+    expect(o.services).toBeCloseTo(500, 5); // on top of the GFA, not part of it
+    expect(o.netPct).toBe(85);
+    expect(o.net).toBeCloseTo(8500, 5);
   });
 
   it("uses sensible defaults and also reads a % of Target GFA", () => {
@@ -35,31 +35,34 @@ describe("offices", () => {
     p.gfaBreakdown!.commercial = { mode: "percent", value: 20 }; // 20 % × 30,000
     const o = computeOffices(p);
     expect(o.officeGFA).toBeCloseTo(6000, 5);
-    const net = 100 - DEFAULT_OFFICE_BREAKDOWN.circulationPct - DEFAULT_OFFICE_BREAKDOWN.servicesPct;
+    const net = 100 - DEFAULT_OFFICE_BREAKDOWN.circulationPct;
     expect(o.net).toBeCloseTo(6000 * net / 100, 5);
   });
 
   it("requires 1 parking space per 50 m² of office GSA (editable), on top of the rest", () => {
     const p = mixed();
-    p.officeBreakdown = { circulationPct: 15, servicesPct: 5 }; // GSA 8,000
+    p.officeBreakdown = { circulationPct: 15, servicesPct: 5 }; // GSA 8,500
     const r = computeParking(p);
-    expect(r.officeGSA).toBeCloseTo(8000, 5);
-    expect(r.officeRequired).toBe(160); // 8,000 / 50
-    expect(r.grandRequired).toBe(160); // no units, no retail
+    expect(r.officeGSA).toBeCloseTo(8500, 5);
+    expect(r.officeRequired).toBe(170); // 8,500 / 50
+    expect(r.grandRequired).toBe(170); // no units, no retail
     p.officeM2PerSpace = 40;
-    expect(computeParking(p).officeRequired).toBe(200);
+    expect(computeParking(p).officeRequired).toBe(213); // ceil(8,500 / 40)
   });
 
-  it("feeds the GSA total but leaves GFA and BUA whole", () => {
+  it("feeds the GSA total, leaves the GFA whole and adds the MEP rooms to the BUA", () => {
     const p = mixed();
     p.officeBreakdown = { circulationPct: 15, servicesPct: 5 };
     const a = computeAreas(p);
     expect(a.totalGFA).toBeCloseTo(30000, 5);
-    expect(a.officeNet).toBeCloseTo(8000, 5);
+    expect(a.officeNet).toBeCloseTo(8500, 5);
     // GSA = residential (quota, empty matrix) + offices net
-    expect(a.gsaTotal).toBeCloseTo(a.gsaResidential + 8000, 5);
-    // Office circulation + services stay inside the office GFA → BUA counts all 10,000.
-    expect(a.constructionBUA).toBeGreaterThanOrEqual(10000);
+    expect(a.gsaTotal).toBeCloseTo(a.gsaResidential + 8500, 5);
+    // MEP rooms (5 % = 500 m²) are not GFA: they are built on top of the office GFA.
+    p.officeBreakdown = { circulationPct: 15, servicesPct: 0 };
+    const noMep = computeAreas(p);
+    expect(a.constructionBUA).toBeCloseTo(noMep.constructionBUA + 500, 5);
+    expect(a.gsaTotal).toBeCloseTo(noMep.gsaTotal, 5);
   });
 
   it("is zero without an office use", () => {

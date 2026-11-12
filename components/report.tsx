@@ -221,6 +221,7 @@ function ReportDocument() {
               hasResidential ? "Residential sellable" : "",
               a.retailGFA > 0 ? "retail GFA" : "",
               a.commercialGFA > 0 ? "office GFA" : "",
+              a.officeServices + a.retailServices > 0 ? "office/retail MEP rooms" : "",
               hasResidential ? "amenities + circulation + services" : "",
               a.towerParking > 0 ? "ground/podium/tower parking + basements" : "ground/podium parking + basements",
             ].filter(Boolean).join(" + ") +

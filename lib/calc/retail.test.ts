@@ -30,19 +30,20 @@ describe("retail distribution", () => {
     expect(r.net).toBe(2000);
   });
 
-  it("takes circulation and services off the retail GSA", () => {
+  it("takes circulation off the retail GSA; MEP services are BUA only", () => {
     const p = officesOverRetail();
     p.retailBreakdown = { circulationPct: 10, servicesPct: 8 };
     const r = computeRetail(p);
     expect(r.circulation).toBeCloseTo(200, 5);
-    expect(r.services).toBeCloseTo(160, 5);
-    expect(r.net).toBeCloseTo(1640, 5);
+    expect(r.services).toBeCloseTo(160, 5); // MEP rooms: not GFA
+    expect(r.net).toBeCloseTo(1800, 5);
     const a = computeAreas(p);
-    expect(a.retailNet).toBeCloseTo(1640, 5);
-    // GSA = offices net 9,600 + retail net 1,640; GFA and BUA keep the whole retail.
-    expect(a.gsaTotal).toBeCloseTo(9600 + 1640, 5);
+    expect(a.retailNet).toBeCloseTo(1800, 5);
+    // GSA = offices net 10,200 (12,000 − 15 %) + retail net 1,800.
+    expect(a.gsaTotal).toBeCloseTo(10200 + 1800, 5);
     expect(a.totalGFA).toBeCloseTo(14000, 5);
-    expect(a.constructionBUA).toBeGreaterThanOrEqual(14000);
+    // BUA = both GFAs + their MEP rooms (offices 5 % = 600, retail 8 % = 160) + parking/basements.
+    expect(a.constructionBUA).toBeCloseTo(14000 + 600 + 160 + a.groundPodiumParking + a.towerParking + a.basementsNet, 5);
   });
 
   it("parks retail on its GFA by default, or on its GSA when asked", () => {
@@ -52,10 +53,10 @@ describe("retail distribution", () => {
     p.retailParkingBasis = "gsa";
     const r = computeParking(p);
     expect(r.retailBasis).toBe("gsa");
-    expect(r.retailRequired).toBe(Math.ceil(1640 / 70)); // 24
-    // Offices: 9,600 m² GSA / 50 = 192; total standard = 192 + 24.
-    expect(r.officeRequired).toBe(192);
-    expect(r.grandRequired).toBe(216);
+    expect(r.retailRequired).toBe(Math.ceil(1800 / 70)); // 26
+    // Offices: 10,200 m² GSA / 50 = 204; total standard = 204 + 26.
+    expect(r.officeRequired).toBe(204);
+    expect(r.grandRequired).toBe(230);
   });
 });
 

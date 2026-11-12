@@ -195,8 +195,8 @@ export default function SummaryTab() {
               label="Retail (net lettable)"
               formula={
                 a.retailNetPct >= 100
-                  ? `Retail GFA ${fmt0(retailM2)} m² — all of it lettable (no circulation / services set in Distribution)`
-                  : `Retail GFA ${fmt0(retailM2)} m² × ${a.retailNetPct.toFixed(1)}% — after circulation ${fmt0(a.retailCirculation)} + services ${fmt0(a.retailServices)} m² (Distribution)`
+                  ? `Retail GFA ${fmt0(retailM2)} m² — all of it lettable (no circulation set in Distribution)`
+                  : `Retail GFA ${fmt0(retailM2)} m² × ${a.retailNetPct.toFixed(1)}% — after circulation ${fmt0(a.retailCirculation)} m² (Distribution)`
               }
               m2={a.retailNet}
             />
@@ -204,7 +204,7 @@ export default function SummaryTab() {
           {a.officeNet > 0 && (
             <DerivRow
               label="Offices (net lettable)"
-              formula={`Office GFA ${fmt0(a.commercialGFA)} m² × ${a.officeNetPct.toFixed(1)}% — after circulation ${fmt0(a.officeCirculation)} + services ${fmt0(a.officeServices)} m² (Distribution); no balconies`}
+              formula={`Office GFA ${fmt0(a.commercialGFA)} m² × ${a.officeNetPct.toFixed(1)}% — after circulation ${fmt0(a.officeCirculation)} m² (Distribution); no balconies`}
               m2={a.officeNet}
             />
           )}
@@ -263,6 +263,9 @@ export default function SummaryTab() {
                 hasResidential ? "residential sellable " + fmt0(a.gsaResidential) : "",
                 a.retailGFA > 0 ? "retail GFA " + fmt0(a.retailGFA) : "",
                 a.commercialGFA > 0 ? "office GFA " + fmt0(a.commercialGFA) : "",
+                a.officeServices + a.retailServices > 0
+                  ? "office/retail MEP (BUA only) " + fmt0(a.officeServices + a.retailServices)
+                  : "",
                 hasResidential ? "amenities " + fmt0(a.amenities) : "",
                 hasResidential ? "circulation " + fmt0(a.circulation) : "",
                 hasResidential ? "services " + fmt0(a.services) : "",

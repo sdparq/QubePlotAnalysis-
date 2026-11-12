@@ -40,8 +40,8 @@ describe("computeAreas", () => {
     p.officeBreakdown = { circulationPct: 15, servicesPct: 5 };
     const r = computeAreas(p);
     expect(r.gsaResidential).toBeCloseTo(13350, 5);
-    expect(r.officeNet).toBeCloseTo(800, 5); // 1,000 × (100 − 15 − 5) %
-    expect(r.gsaTotal).toBeCloseTo(13350 + 2000 + 800, 5);
+    expect(r.officeNet).toBeCloseTo(850, 5); // 1,000 × (100 − 15) % — MEP (5 %) is BUA only
+    expect(r.gsaTotal).toBeCloseTo(13350 + 2000 + 850, 5);
     expect(r.totalGFA).toBeCloseTo(18000, 5); // 15,000 + 2,000 + 1,000
   });
 
