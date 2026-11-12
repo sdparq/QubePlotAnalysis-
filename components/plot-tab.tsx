@@ -13,6 +13,7 @@ import { polygonArea, polygonCentroid, type Point } from "@/lib/geom";
 import { fmt2 } from "@/lib/format";
 import PlanTrace, { type TraceMode } from "./plan-trace";
 import { resolveTiers, tierOrigin, wouldLoop, type TierKey, type TierMode } from "@/lib/tier-geometry";
+import { distributionFootprints, footprintsPatch, plotFootprints, tierFloors, unmodelledTiers } from "@/lib/tier-status";
 
 type Phase = "idle" | "rendering" | "done" | "error";
 
@@ -327,6 +328,18 @@ export default function PlotTab() {
    * The resolver in lib/tier-geometry is the same one Massing uses. */
   const resolvedTiers = useMemo(() => resolveTiers(project), [project]);
 
+  // Floors per tier (Setup / Distribution) — a tier with none is not modelled.
+  const floors = useMemo(() => tierFloors(project), [project]);
+  const tierIssues = useMemo(() => unmodelledTiers(project), [project]);
+  const plotFp = useMemo(() => plotFootprints(project), [project]);
+  const distFp = distributionFootprints(project);
+  const footprintsDiffer = TIER_TARGETS.some((t) => Math.abs(plotFp[t] - distFp[t]) > 1);
+  function setTierLevels(tier: "ground" | "podium", n: number) {
+    const count = Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+    if (tier === "ground") patch({ ground: { count, heightM: project.ground?.heightM ?? 4.5 } });
+    else patch({ podium: { count, heightM: project.podium?.heightM ?? 4.0 } });
+  }
+
   function setTierMode(tier: TierKey, mode: TierMode) {
     patch({ tierMode: { ...project.tierMode, [tier]: mode } });
   }
@@ -356,13 +369,17 @@ export default function PlotTab() {
       if (g) g.tiers.push(t);
       else groups.set(key, { tiers: [t], polys });
     }
-    const out: { points: Point[]; color: string; label: string }[] = [];
+    const out: { points: Point[]; color: string; label: string; labelDy: number }[] = [];
+    let gi = 0;
     for (const g of groups.values()) {
       const name = g.tiers.map((t) => TIER_LABELS[t]).join(" + ");
+      // Nested footprints share a centroid: stack their labels 18 px apart.
+      const labelDy = (gi - (groups.size - 1) / 2) * 18;
       g.polys.forEach((poly, i) => {
         const px = tierLocalToPx(poly);
-        if (px) out.push({ points: px, color: TIER_COLORS[g.tiers[g.tiers.length - 1]], label: g.polys.length > 1 ? `${name} ${i + 1}` : name });
+        if (px) out.push({ points: px, color: TIER_COLORS[g.tiers[g.tiers.length - 1]], label: g.polys.length > 1 ? `${name} ${i + 1}` : name, labelDy });
       });
+      gi++;
     }
     return out;
   })();
@@ -802,6 +819,7 @@ export default function PlotTab() {
                       const perEdge = r.setbacks;
                       const mixed = perEdge.some((v) => Math.abs(v - perEdge[0]) > 1e-9);
                       const others = TIER_TARGETS.filter((t) => t !== tier);
+                      const issue = tierIssues.find((i) => i.tier === tier);
                       return (
                         <div key={tier} className="border border-ink-200 bg-white">
                           <div className="flex items-center gap-2 px-2.5 pt-2 text-[12px]">
@@ -923,10 +941,74 @@ export default function PlotTab() {
                               </>
                             )}
                           </div>
+
+                          {/* Floors — a tier with none is not modelled in Massing */}
+                          <div className={`px-2.5 py-1.5 border-t text-[11.5px] flex items-center gap-2 ${issue ? "border-amber-200 bg-amber-50" : "border-ink-100 bg-bone-50/60"}`}>
+                            {tier === "tower" ? (
+                              <span className={issue ? "text-amber-900 leading-snug" : "text-ink-600"}>
+                                {issue
+                                  ? "0 floors — not modelled in Massing yet."
+                                  : `${floors.tower} floor${floors.tower === 1 ? "" : "s"}` +
+                                    (floors.towerOffice > 0 && floors.towerResidential > 0
+                                      ? ` (${floors.towerResidential} residential + ${floors.towerOffice} office)`
+                                      : floors.towerOffice > 0 ? " of offices" : "") +
+                                    " — counted in Distribution"}
+                              </span>
+                            ) : (
+                              <>
+                                <span className={issue ? "text-amber-900" : "text-ink-600"}>
+                                  {tier === "ground" ? "Levels" : "Podium levels"}
+                                </span>
+                                <input
+                                  type="number" min={0} step={1}
+                                  className="cell-input text-right !py-0.5 !px-1.5 !w-[56px]"
+                                  value={tier === "ground" ? floors.ground : floors.podium}
+                                  onChange={(e) => setTierLevels(tier, parseFloat(e.target.value))}
+                                  aria-label={`${TIER_LABELS[tier]} levels`}
+                                />
+                                <span className={`leading-snug ${issue ? "text-amber-900" : "text-ink-500"}`}>
+                                  {issue ? "0 levels — not modelled in Massing." : "same as Setup → Floor breakdown"}
+                                </span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
+
+                  {(footprintsDiffer || tierIssues.some((i) => i.tier === "tower")) && (
+                    <div className="border border-amber-200 bg-amber-50 text-amber-900 p-2.5 mt-3 text-[11.5px] leading-snug grid gap-2">
+                      <span>
+                        <strong>Tower floors are counted in Distribution</strong> from its own footprint
+                        figures, which differ from this geometry:
+                      </span>
+                      <table className="w-full tabular-nums text-[11px]">
+                        <thead>
+                          <tr className="text-amber-900/70">
+                            <th className="text-left font-normal"></th>
+                            <th className="text-right font-normal">Plot</th>
+                            <th className="text-right font-normal">Distribution</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {TIER_TARGETS.map((t) => (
+                            <tr key={t}>
+                              <td>{TIER_LABELS[t]}</td>
+                              <td className="text-right">{fmt2(plotFp[t])} m²</td>
+                              <td className="text-right">{distFp[t] > 0 ? `${fmt2(distFp[t])} m²` : "— not set"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <button
+                        className="btn btn-primary btn-xs justify-self-start"
+                        onClick={() => patch(footprintsPatch(project))}
+                        disabled={traceMode !== "idle"}
+                        title="Copy these three footprints into Distribution so floors, heights and the 3D follow this geometry"
+                      >Use these footprints in Distribution</button>
+                    </div>
+                  )}
                   <p className="text-[10.5px] text-ink-500 mt-2 leading-snug">
                     <strong>= Ground / = Podium / = Tower</strong> makes a tier share another tier&apos;s
                     geometry and follow it. Tracing: click each corner on the drawing, then the first

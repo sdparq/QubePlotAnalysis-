@@ -33,6 +33,7 @@ import { edgeColor } from "@/lib/edge-colors";
 import { computeOfficeStack } from "@/lib/calc/offices";
 import { retailGFA } from "@/lib/calc/retail";
 import { resolveTiers, type TierKey } from "@/lib/tier-geometry";
+import { unmodelledTiers } from "@/lib/tier-status";
 import type { Volume } from "@/lib/massing";
 import type { FacadeConfig, TowerFacadeStyle } from "@/lib/types";
 import type { CaptureFn, SceneStyle, ViewPresetKind } from "./massing-scene";
@@ -282,6 +283,9 @@ export default function MassingTab() {
     patch({ facade: { ...project.facade, ...partial } });
   }
 
+  // Tiers with a footprint but no floors can't be drawn — say why, offer the fix.
+  const tierIssues = useMemo(() => unmodelledTiers(project), [project]);
+
   const [amenityFit, setAmenityFit] = useState({ pool: true, lounge: true });
   const [immersive, setImmersive] = useState(false);
   const [panel, setPanel] = useState<"design" | "scheme" | "site" | "render">("design");
@@ -479,6 +483,22 @@ export default function MassingTab() {
             </button>
           </div>
         </div>
+
+        {tierIssues.length > 0 && (
+          <div className="border border-amber-200 bg-amber-50 text-amber-900 p-3 mb-4 text-[12px] leading-snug grid gap-2">
+            <strong>Not modelled yet</strong>
+            {tierIssues.map((i) => (
+              <div key={i.tier} className="flex items-center justify-between gap-3 flex-wrap">
+                <span>{i.reason}</span>
+                {i.fix && (
+                  <button className="btn btn-secondary btn-xs shrink-0" onClick={() => patch(i.fix!.patch)}>
+                    {i.fix.label}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
           <div className="grid gap-4 content-start min-w-0">

@@ -29,7 +29,7 @@ export interface PlanTraceProps {
   /** Optional per-edge colors for the trace polygon outline. Length should match tracePolygonPx.length. */
   edgeColors?: string[];
   /** Extra display-only polygons (px coords) — e.g. traced tier footprints. */
-  extraPolygons?: { points: { x: number; y: number }[]; color: string; label?: string }[];
+  extraPolygons?: { points: { x: number; y: number }[]; color: string; label?: string; /** Label shift in screen px, to un-stack labels that share a centroid. */ labelDy?: number }[];
 }
 
 const MAX_ZOOM = 8;
@@ -397,7 +397,7 @@ export default function PlanTrace({
                   {ep.label && (
                     <text
                       x={ep.points.reduce((s, p) => s + p.x, 0) / ep.points.length}
-                      y={ep.points.reduce((s, p) => s + p.y, 0) / ep.points.length}
+                      y={ep.points.reduce((s, p) => s + p.y, 0) / ep.points.length + px(ep.labelDy ?? 0)}
                       textAnchor="middle"
                       fontSize={px(14)}
                       fontWeight="700"
