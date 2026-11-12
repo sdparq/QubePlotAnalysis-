@@ -7,7 +7,7 @@ import {
   residentialSubQuota,
 } from "@/lib/calc/gfa";
 import { computeTowerYield } from "@/lib/calc/tower-yield";
-import { computeOffices, computeOfficeStack, type OfficeStackResult } from "@/lib/calc/offices";
+import { computeOffices, computeOfficeStack, towerParking, type OfficeStackResult } from "@/lib/calc/offices";
 import type { OfficeStack } from "@/lib/types";
 import { computeRetail } from "@/lib/calc/retail";
 import { activeUnits, isNonResidential } from "@/lib/calc/scheme";
@@ -217,6 +217,7 @@ export default function CommonAreasTab() {
           groundCount={project.ground?.count ?? 1}
           basementCount={project.basements?.count ?? 0}
           hasRetail={retail.retailGFA > 0}
+          towerParkingFloors={towerParking(project).surface > 0 ? towerParking(project).floors : 0}
           onPatch={(next) => patch({ officeStack: { ...project.officeStack, ...next } })}
         />
       )}
@@ -510,7 +511,11 @@ function TowerYieldCard({
               : "residential (no ground/podium plates set)"
           }
         />
-        <Stat label="Tower floors needed" value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"} sub="uncapped" />
+        <Stat
+          label="Tower floors needed"
+          value={y.towerFootprintM2 > 0 ? `${fmt0(y.requiredTowerFloors)}` : "—"}
+          sub={y.towerParkingM2 > 0 ? `uncapped · incl. ${fmt0(y.towerParkingM2)} m² of tower parking` : "uncapped"}
+        />
           </>
         )}
         <div className="border border-ink-200 bg-white p-3">
@@ -672,9 +677,11 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
  *  height — plus a floor-by-floor section of the whole building. */
 function OfficePlacementCard({
   stack, podiumCount, podiumFootprintM2, towerFootprintM2, officeGFA,
-  residentialFloors, groundCount, basementCount, hasRetail, onPatch,
+  residentialFloors, groundCount, basementCount, hasRetail, towerParkingFloors, onPatch,
 }: {
   hasRetail: boolean;
+  /** Lowest tower floors that hold some parking (Parking tab). */
+  towerParkingFloors: number;
   stack: OfficeStackResult;
   podiumCount: number;
   podiumFootprintM2: number;
@@ -764,7 +771,7 @@ function OfficePlacementCard({
                   {stack.manualTowerFloors
                     ? "Fixed — clear the field to go back to automatic."
                     : towerFootprintM2 > 0
-                      ? `Auto: ${fmt0(stack.remainingGFA)} m² ÷ ${fmt0(towerFootprintM2)} m² plate, rounded up.`
+                      ? `Auto: ${fmt0(stack.remainingGFA)} m²${stack.parkingOnOffices > 0 ? ` + ${fmt0(stack.parkingOnOffices)} m² tower parking` : ""} ÷ ${fmt0(towerFootprintM2)} m² plate, rounded up.`
                       : "Auto needs the tower footprint (Tower floors above)."}
                 </span>
               </label>
@@ -824,6 +831,7 @@ function OfficePlacementCard({
           officeFloors={stack.towerFloors}
           officeOnTop={stack.towerPosition === "top"}
           hasRetail={hasRetail}
+          towerParkingFloors={towerParkingFloors}
         />
       </div>
     </div>
@@ -840,9 +848,10 @@ const USE_COLORS = {
 
 /** Section of the building, top to bottom, one band per run of floors with the same use. */
 function FloorStack({
-  basementCount, groundCount, podiumCount, podiumOfficeLevels, residentialFloors, officeFloors, officeOnTop, hasRetail,
+  basementCount, groundCount, podiumCount, podiumOfficeLevels, residentialFloors, officeFloors, officeOnTop, hasRetail, towerParkingFloors,
 }: {
   hasRetail: boolean;
+  towerParkingFloors: number;
   basementCount: number;
   groundCount: number;
   podiumCount: number;
@@ -892,6 +901,11 @@ function FloorStack({
             </div>
           </div>
         ))}
+        {towerParkingFloors > 0 && (
+          <p className="text-[10.5px] text-ink-500 leading-snug mt-2">
+            {towerParkingFloors === 1 ? "L1 also holds" : `L1–L${towerParkingFloors} also hold`} some parking (Parking tab).
+          </p>
+        )}
       </div>
     </div>
   );

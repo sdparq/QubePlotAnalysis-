@@ -266,7 +266,7 @@ export default function SummaryTab() {
                 hasResidential ? "amenities " + fmt0(a.amenities) : "",
                 hasResidential ? "circulation " + fmt0(a.circulation) : "",
                 hasResidential ? "services " + fmt0(a.services) : "",
-                "ground/podium parking " + fmt0(a.groundPodiumParking),
+                (a.towerParking > 0 ? "ground/podium/tower parking " : "ground/podium parking ") + fmt0(a.groundPodiumParking + a.towerParking),
                 "basements " + fmt0(a.basementsNet),
               ].filter(Boolean).join(" + ") +
               (a.parkingSurplus > 0

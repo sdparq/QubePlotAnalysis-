@@ -1,6 +1,6 @@
 import type { Project } from "./types";
 import { computeAreas } from "./calc/areas";
-import { towerTotals } from "./calc/offices";
+import { towerParking, towerTotals } from "./calc/offices";
 import { computeProgram } from "./calc/program";
 import { computeParking } from "./calc/parking";
 
@@ -83,7 +83,8 @@ export function projectMetrics(project: Project): ProjectMetrics {
   const parkingSurface =
     Math.max(0, basementFootprint) * basements +
     Math.max(0, project.groundParkingM2 ?? 0) +
-    Math.max(0, project.podiumParkingPerFloorM2 ?? 0) * podium;
+    Math.max(0, project.podiumParkingPerFloorM2 ?? 0) * podium +
+    towerParking(project).surface;
   const m2PerSpace = parking.m2PerParkingSpaceUsed > 0 ? parking.m2PerParkingSpaceUsed : 25;
   const units = program.totalUnits;
 

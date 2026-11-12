@@ -233,6 +233,12 @@ export interface Project {
   /** Parking surface per podium floor (m²), if any. Multiplied by Setup →
    *  Floor breakdown's `podium.count` to get the total podium parking surface. */
   podiumParkingPerFloorM2?: number;
+  /** Parking surface per tower floor (m²) on the tower floors that hold some
+   *  parking — × `towerParkingFloors`. It takes plate area away from the
+   *  tower's GFA, so the tower needs more floors for the same GFA. */
+  towerParkingPerFloorM2?: number;
+  /** Number of tower floors (the lowest ones) that hold `towerParkingPerFloorM2`. */
+  towerParkingFloors?: number;
   /** Override for the basement footprint (m²) used per basement level, when
    *  it covers less than the full plot (e.g. setbacks, a shared party wall).
    *  When unset, falls back to Setup's plot area (the historical assumption

@@ -2,7 +2,7 @@ import type { GfaUseCategory, Project } from "../types";
 import { residentialGFATarget, residentialSubPct, residentialSubQuota } from "./gfa";
 import { computeProgram } from "./program";
 import { computeParking } from "./parking";
-import { computeOffices } from "./offices";
+import { computeOffices, towerParking } from "./offices";
 import { computeRetail } from "./retail";
 
 /**
@@ -26,7 +26,7 @@ import { computeRetail } from "./retail";
  *     residential sellable (apartments interior + balconies)
  *   + retail GFA  + commercial GFA
  *   + amenities + circulation + services
- *   + the parking surface placed in the GROUND floor and PODIUM
+ *   + the parking surface placed in the GROUND floor, PODIUM and TOWER floors
  *   + the basements, MINUS any surplus parking surface
  *
  * The basement deduction matters: basements are sized as levels × footprint,
@@ -74,6 +74,8 @@ export interface AreasResult {
 
   /** Parking surface planned in the ground floor + podium levels. */
   groundPodiumParking: number;
+  /** Parking surface planned on tower floors (per floor × floors). */
+  towerParking: number;
   /** Basement levels × footprint, before the surplus deduction. */
   basementSurface: number;
   /** Planned parking surface beyond what the requirement needs. */
@@ -147,12 +149,13 @@ export function computeAreas(project: Project): AreasResult {
   const groundPodiumParking =
     Math.max(0, project.groundParkingM2 ?? 0) +
     Math.max(0, project.podiumParkingPerFloorM2 ?? 0) * podiumCount;
+  const towerParkingM2 = towerParking(project).surface;
   const basementCount = project.basements?.count ?? 0;
   const basementFootprint = project.basementFootprintM2 ?? project.plotArea ?? 0;
   const basementSurface = Math.max(0, basementCount * basementFootprint);
   const parkingSurplus = Math.max(
     0,
-    groundPodiumParking + basementSurface - parkingRequiredSurface,
+    groundPodiumParking + towerParkingM2 + basementSurface - parkingRequiredSurface,
   );
   const basementsNet = Math.max(0, basementSurface - parkingSurplus);
 
@@ -169,6 +172,7 @@ export function computeAreas(project: Project): AreasResult {
     circulation +
     services +
     groundPodiumParking +
+    towerParkingM2 +
     basementsNet;
 
   return {
@@ -193,6 +197,7 @@ export function computeAreas(project: Project): AreasResult {
     circulation,
     services,
     groundPodiumParking,
+    towerParking: towerParkingM2,
     basementSurface,
     parkingSurplus,
     basementsNet,

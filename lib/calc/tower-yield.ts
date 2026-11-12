@@ -1,6 +1,6 @@
 import type { Project } from "../types";
 import { residentialGFATarget } from "./gfa";
-import { computeOfficeStack } from "./offices";
+import { computeOfficeStack, towerParking } from "./offices";
 
 export interface TowerYieldResult {
   groundFootprintM2: number;
@@ -17,7 +17,10 @@ export interface TowerYieldResult {
    *  the ground-floor AND (non-office) podium surfaces (whatever the base
    *  absorbs doesn't need tower floors). */
   towerTargetGFA: number;
-  /** Floors that towerTargetGFA needs on this tower footprint, unclamped. */
+  /** Tower parking surface hosted by the residential floors (0 when the
+   *  office floors host it, or there is none). */
+  towerParkingM2: number;
+  /** Floors that towerTargetGFA (+ that parking) needs on this tower footprint, unclamped. */
   requiredTowerFloors: number;
   /** Optional zoning cap on tower floor count. */
   maxTowerFloors: number | null;
@@ -50,10 +53,15 @@ export function computeTowerYield(project: Project): TowerYieldResult {
   const podiumResidentialGFA = podiumFootprintM2 * Math.max(0, podiumCount - podiumOfficeLevels);
   const towerTargetGFA = Math.max(0, residentialGFATarget(project) - groundGFA - podiumResidentialGFA);
 
-  const requiredTowerFloors = towerFootprintM2 > 0 ? Math.floor(towerTargetGFA / towerFootprintM2) : 0;
+  // Parking on the residential tower floors uses plate area the apartments
+  // can't: the same GFA then needs more floors.
+  const tp = towerParking(project);
+  const towerParkingM2 = tp.host === "residential" && towerTargetGFA > 0 ? tp.surface : 0;
+  const requiredTowerFloors =
+    towerFootprintM2 > 0 ? Math.floor((towerTargetGFA + towerParkingM2) / towerFootprintM2) : 0;
   const maxTowerFloors = project.maxTowerFloors && project.maxTowerFloors > 0 ? project.maxTowerFloors : null;
   const towerFloors = maxTowerFloors !== null ? Math.min(requiredTowerFloors, maxTowerFloors) : requiredTowerFloors;
-  const towerGFA = towerFootprintM2 * towerFloors;
+  const towerGFA = Math.max(0, towerFootprintM2 * towerFloors - towerParkingM2);
   const exceedsMax = maxTowerFloors !== null && requiredTowerFloors > maxTowerFloors;
 
   return {
@@ -66,6 +74,7 @@ export function computeTowerYield(project: Project): TowerYieldResult {
     podiumGFA,
     podiumOfficeLevels,
     towerTargetGFA,
+    towerParkingM2,
     requiredTowerFloors,
     maxTowerFloors,
     towerFloors,

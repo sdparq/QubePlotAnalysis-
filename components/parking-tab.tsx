@@ -1,5 +1,7 @@
 "use client";
 import { useStore, useProject } from "@/lib/store";
+import { towerParking as computeTowerParking } from "@/lib/calc/offices";
+import { tierFloors } from "@/lib/tier-status";
 import { computeParking } from "@/lib/calc/parking";
 import { fmt0 } from "@/lib/format";
 import type { OtherUse } from "@/lib/types";
@@ -324,7 +326,11 @@ export default function ParkingTab() {
           const podiumParkingPerFloor = Math.max(0, project.podiumParkingPerFloorM2 ?? 0);
           const podiumCount = project.podium?.count ?? 0;
           const podiumParkingSurface = podiumParkingPerFloor * podiumCount;
-          const aboveGroundSurface = groundParking + podiumParkingSurface;
+          // Tower: a surface per floor on the lowest N tower floors.
+          const tp = computeTowerParking(project);
+          const towerFloorsTotal = tierFloors(project).tower;
+          const towerPlate = Math.max(0, project.towerFootprintM2 ?? 0);
+          const aboveGroundSurface = groundParking + podiumParkingSurface + tp.surface;
           const basementSurface = basementFootprint * basementCount;
           const availTotal = basementSurface + aboveGroundSurface;
           const required = r.totalParkingSurfaceM2;
@@ -356,7 +362,7 @@ export default function ParkingTab() {
                     </div>
                     <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">
                       {basementFootprint > 0
-                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(basementFootprint)} m² basement footprint, after ${fmt0(aboveGroundSurface)} m² already planned in ground/podium.`
+                        ? `${fmt0(remainingForBasements)} m² left to cover ÷ ${fmt0(basementFootprint)} m² basement footprint, after ${fmt0(aboveGroundSurface)} m² already planned in ground/podium/tower.`
                         : "Set Plot area in Setup to compute this."}
                     </div>
                   </div>
@@ -375,7 +381,7 @@ export default function ParkingTab() {
                   </div>
                 </div>
                 {/* Inputs row */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
                   <div className="border border-ink-200 bg-white p-3">
                     <div className="eyebrow text-ink-500 text-[10px]">Plot area (basement)</div>
                     <div className="text-[18px] font-light tabular-nums text-ink-900 mt-0.5">
@@ -447,7 +453,66 @@ export default function ParkingTab() {
                       × {podiumCount} podium level{podiumCount === 1 ? "" : "s"} (Setup)
                     </div>
                   </div>
+                  <div className="border border-ink-200 bg-white p-3">
+                    <div className="eyebrow text-ink-500 text-[10px]">Tower parking per floor (m²)</div>
+                    <input
+                      type="number"
+                      step={10}
+                      min={0}
+                      className="cell-input text-right !text-[18px] font-light tabular-nums mt-0.5 w-full"
+                      value={project.towerParkingPerFloorM2 || ""}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const n = parseFloat(e.target.value);
+                        patch({ towerParkingPerFloorM2: Number.isFinite(n) && n > 0 ? n : undefined });
+                      }}
+                      title="Surface dedicated to parking on each of the tower floors that hold some. It uses tower plate area, so the tower needs more floors for the same GFA."
+                    />
+                    <label className="flex items-center gap-2 mt-2 pt-2 border-t border-ink-100">
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-ink-500">on</span>
+                      <input
+                        type="number"
+                        step={1}
+                        min={0}
+                        className="cell-input text-right !text-[14px] tabular-nums !py-1 !w-[64px]"
+                        value={project.towerParkingFloors || ""}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value);
+                          patch({ towerParkingFloors: Number.isFinite(n) && n > 0 ? Math.round(n) : undefined });
+                        }}
+                        aria-label="Tower floors with parking"
+                      />
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-ink-500">tower floor{(project.towerParkingFloors ?? 0) === 1 ? "" : "s"}</span>
+                    </label>
+                    <div className="text-[11px] text-ink-500 mt-1 leading-snug">
+                      {tp.surface > 0
+                        ? `= ${fmt0(tp.surface)} m² on the lowest ${tp.floors} tower floor${tp.floors === 1 ? "" : "s"}`
+                        : "Leave 0 if none"}
+                    </div>
+                  </div>
                 </div>
+                {tp.surface > 0 && (
+                  <div className="border border-ink-200 bg-bone-50 text-ink-700 px-3 py-2 text-[11.5px] leading-snug">
+                    Tower parking uses plate area the {tp.host === "office" ? "offices" : "apartments"} can&apos;t:
+                    the tower gets about{" "}
+                    <strong>
+                      {towerPlate > 0 ? `${(tp.surface / towerPlate).toFixed(1)} more floor${tp.surface / towerPlate === 1 ? "" : "s"}` : "more floors"}
+                    </strong>{" "}
+                    for the same GFA ({fmt0(tp.surface)} m² ÷ {towerPlate > 0 ? `${fmt0(towerPlate)} m² plate` : "the tower plate — set it in Distribution"}).
+                    It now has {towerFloorsTotal} floor{towerFloorsTotal === 1 ? "" : "s"}.
+                  </div>
+                )}
+                {tp.surface > 0 && towerPlate > 0 && tp.perFloorM2 > towerPlate && (
+                  <div className="border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-[11.5px] leading-snug">
+                    {fmt0(tp.perFloorM2)} m² of parking per floor is more than the tower plate ({fmt0(towerPlate)} m², Distribution).
+                  </div>
+                )}
+                {tp.floors > towerFloorsTotal && towerFloorsTotal > 0 && (
+                  <div className="border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-[11.5px] leading-snug">
+                    Parking is set on {tp.floors} tower floors but the tower only has {towerFloorsTotal}.
+                  </div>
+                )}
                 {/* Surface availability row */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <Stat
@@ -456,9 +521,13 @@ export default function ParkingTab() {
                     sub={basementSurface > 0 ? `${fmt0(basementFootprint)} × ${basementCount}` : ""}
                   />
                   <Stat
-                    label="Avail. in ground + podium"
+                    label="Avail. above ground"
                     value={aboveGroundSurface > 0 ? `${fmt0(aboveGroundSurface)} m²` : "—"}
-                    sub={aboveGroundSurface > 0 ? `${fmt0(groundParking)} ground + ${fmt0(podiumParkingSurface)} podium` : ""}
+                    sub={
+                      aboveGroundSurface > 0
+                        ? `${fmt0(groundParking)} ground + ${fmt0(podiumParkingSurface)} podium` + (tp.surface > 0 ? ` + ${fmt0(tp.surface)} tower` : "")
+                        : ""
+                    }
                   />
                   <Stat
                     label="Total available"
@@ -473,19 +542,19 @@ export default function ParkingTab() {
                 <div className={`text-[12px] mt-3 leading-snug ${enough ? "text-emerald-700" : "text-amber-900"}`}>
                   {availTotal === 0 ? (
                     <>
-                      No basements, ground or podium parking set yet. To fit the{" "}
+                      No basements, ground, podium or tower parking set yet. To fit the{" "}
                       {fmt0(required)} m² of parking you could:
                       <ul className="list-disc ml-5 mt-1">
                         {basementFootprint > 0 && <li><strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"} alone (basement footprint of {fmt0(basementFootprint)} m²) — use the <strong>Apply</strong> button above</li>}
-                        <li>or some combination of ground floor parking and podium parking (per floor) above</li>
+                        <li>or some combination of ground floor, podium and tower parking (per floor) above</li>
                         <li>or any mix of the two.</li>
                       </ul>
                     </>
                   ) : enough ? (
                     <>
-                      ✓ Total available <strong>{fmt0(availTotal)} m²</strong> ({basementCount} basement{basementCount === 1 ? "" : "s"} + {fmt0(aboveGroundSurface)} m² ground/podium) covers the {fmt0(required)} m² required with a <strong>{fmt0(balance)} m²</strong> margin.
+                      ✓ Total available <strong>{fmt0(availTotal)} m²</strong> ({basementCount} basement{basementCount === 1 ? "" : "s"} + {fmt0(aboveGroundSurface)} m² above ground) covers the {fmt0(required)} m² required with a <strong>{fmt0(balance)} m²</strong> margin.
                       {basementSurface >= required && aboveGroundSurface > 0 && (
-                        <> · You could fit it all in the basements alone ({fmt0(basementSurface)} m²) and free ground/podium for amenities or retail.</>
+                        <> · You could fit it all in the basements alone ({fmt0(basementSurface)} m²) and free the ground / podium / tower floors for other uses.</>
                       )}
                     </>
                   ) : (
@@ -493,7 +562,7 @@ export default function ParkingTab() {
                       Available <strong>{fmt0(availTotal)} m²</strong> falls{" "}
                       <strong>{fmt0(-balance)} m² short</strong> of {fmt0(required)} m² required.{" "}
                       You&apos;d need either <strong>{basementsNeededAlone}</strong> basement{basementsNeededAlone === 1 ? "" : "s"}{" "}
-                      alone (full plot), more ground/podium parking surface, or a mix that adds up to {fmt0(required)} m².
+                      alone (full plot), more ground / podium / tower parking surface, or a mix that adds up to {fmt0(required)} m².
                     </>
                   )}
                 </div>

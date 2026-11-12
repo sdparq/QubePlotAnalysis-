@@ -58,11 +58,46 @@ export function computeOffices(project: Project): OfficeResult {
   };
 }
 
+/**
+ * Parking placed on tower floors: a surface per floor on the lowest N tower
+ * floors. It is parking supply (and BUA), and it uses plate area the tower's
+ * GFA can no longer take — so whichever stack sits at the bottom of the tower
+ * ("host") needs more floors: the offices when they are in the tower and at
+ * its bottom (or there is no residential), otherwise the apartments.
+ */
+export interface TowerParking {
+  perFloorM2: number;
+  floors: number;
+  /** perFloorM2 × floors. */
+  surface: number;
+  host: "office" | "residential";
+}
+
+export function towerParking(project: Project): TowerParking {
+  const perFloorM2 = Math.max(0, project.towerParkingPerFloorM2 ?? 0);
+  const floors = perFloorM2 > 0 ? Math.max(0, Math.round(project.towerParkingFloors ?? 0)) : 0;
+  const s = project.officeStack ?? {};
+  const gfa = officeGFA(project);
+  const podiumCount = Math.max(0, project.podium?.count ?? 0);
+  const officePodiumLevels = new Set((s.podiumLevels ?? []).filter((l) => Number.isInteger(l) && l >= 1 && l <= podiumCount)).size;
+  const officeInTower =
+    gfa > 0 &&
+    (s.towerFloors !== undefined ? s.towerFloors > 0 : gfa - Math.max(0, project.podiumFootprintM2 ?? 0) * officePodiumLevels > 0);
+  const item = project.gfaBreakdown?.residential;
+  const hosp = project.gfaBreakdown?.hospitality;
+  const hasResidential = (item?.value ?? 0) > 0 || (hosp?.value ?? 0) > 0;
+  const host = officeInTower && ((s.towerPosition ?? "bottom") === "bottom" || !hasResidential) ? "office" : "residential";
+  return { perFloorM2, floors, surface: perFloorM2 * floors, host };
+}
+
 export const DEFAULT_OFFICE_FLOOR_HEIGHT = 4.0;
 
 export interface OfficeStackResult {
   /** Podium levels (1-based, sorted) given to offices, within the podium count. */
   podiumLevels: number[];
+  /** Tower parking surface sitting on the office floors (0 when the
+   *  apartments host it) — already taken off `towerGFA`. */
+  parkingOnOffices: number;
   /** Office GFA on those podium levels = podium footprint × levels. */
   podiumGFA: number;
   /** Office GFA still to place in the tower. */
@@ -74,6 +109,7 @@ export interface OfficeStackResult {
   manualTowerFloors: boolean;
   towerPosition: "bottom" | "top";
   heightM: number;
+  /** Office GFA the office tower floors can hold (plate × floors − parking). */
   towerGFA: number;
   /** Office GFA placed in podium + tower minus the office GFA (− short, + spare). */
   placementDrift: number;
@@ -92,12 +128,16 @@ export function computeOfficeStack(project: Project): OfficeStackResult {
   const towerFootprint = Math.max(0, project.towerFootprintM2 ?? 0);
   const podiumGFA = gfa > 0 ? podiumFootprint * podiumLevels.length : 0;
   const remainingGFA = Math.max(0, gfa - podiumGFA);
+  // Tower parking hosted by the office floors takes plate area away from them.
+  const tp = towerParking(project);
+  const parkingOnOffices = tp.host === "office" ? tp.surface : 0;
   const autoTowerFloors =
-    gfa > 0 && towerFootprint > 0 ? Math.ceil(remainingGFA / towerFootprint - 1e-9) : 0;
+    gfa > 0 && towerFootprint > 0 ? Math.ceil((remainingGFA + parkingOnOffices) / towerFootprint - 1e-9) : 0;
   const manualTowerFloors = s.towerFloors !== undefined && Number.isFinite(s.towerFloors) && s.towerFloors >= 0;
   const towerFloors = gfa > 0 ? (manualTowerFloors ? Math.round(s.towerFloors as number) : autoTowerFloors) : 0;
-  const towerGFA = towerFootprint * towerFloors;
+  const towerGFA = Math.max(0, towerFootprint * towerFloors - parkingOnOffices);
   return {
+    parkingOnOffices,
     podiumLevels: gfa > 0 ? podiumLevels : [],
     podiumGFA,
     remainingGFA,

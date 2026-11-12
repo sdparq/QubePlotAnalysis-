@@ -222,7 +222,7 @@ function ReportDocument() {
               a.retailGFA > 0 ? "retail GFA" : "",
               a.commercialGFA > 0 ? "office GFA" : "",
               hasResidential ? "amenities + circulation + services" : "",
-              "ground/podium parking + basements",
+              a.towerParking > 0 ? "ground/podium/tower parking + basements" : "ground/podium parking + basements",
             ].filter(Boolean).join(" + ") +
               (a.parkingSurplus > 0 ? " (less surplus parking)" : ""),
             fmt0(constructionBUA),
